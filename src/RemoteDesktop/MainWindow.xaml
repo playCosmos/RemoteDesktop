@@ -159,8 +159,8 @@
                 <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" ToolTip="화면이 거의 그대로일 때 이전 프레임을 다시 사용해 끊김을 줄입니다."/>
                 <WrapPanel>
                   <Button x:Name="StartButton" Content="접속 대기 시작" Style="{StaticResource PrimaryButton}" Click="StartHost" Margin="0,0,8,8"/>
-                  <Button x:Name="StopButton" Content="서버 중지" Click="StopHost" IsEnabled="False" Margin="0,0,8,8"/>
-                  <Button x:Name="KickButton" Content="현재 접속 끊기" Click="Kick" IsEnabled="False" Margin="0,0,0,8"/>
+                  <Button x:Name="StopButton" Content="서버 중지" Click="StopHost" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8"/>
+                  <Button x:Name="KickButton" Content="현재 접속 끊기" Click="Kick" IsEnabled="False" Visibility="Collapsed" Margin="0,0,0,8"/>
                 </WrapPanel>
               </StackPanel>
             </Border>

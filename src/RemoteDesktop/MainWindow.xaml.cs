@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     {
         ServerStatusText.Text = text;
         KickButton.IsEnabled = hostSession.HasClient && StopButton.IsEnabled;
+        KickButton.Visibility = KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
     });
 
     private void SessionStatus(string text) => Dispatcher.InvokeAsync(() =>

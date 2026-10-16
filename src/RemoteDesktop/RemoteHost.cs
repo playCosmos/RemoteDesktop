@@ -30,6 +30,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private string serverFingerprint = "";
     private CancellationTokenSource session = new();
     private int disposeState;
+    private int listenPort;
     private readonly ClipboardExchange clipboard;
     private Task clipboardCleanup = Task.CompletedTask;
     public event Action<string>? Status;
@@ -78,6 +79,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
         if (settings.UseSmoothHost) HostPerformance.EnableHostPriority();
         await app.StartAsync();
         timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(); } }, null, 1000, 1000);
+        listenPort = port;
         Status?.Invoke($"접속 대기 중 · 포트 {port}");
     }
     private static bool IsPublicAuthenticationPath(PathString path) => path == "/v1/login" || path == "/v1/pake/start" || path == "/v1/pake/finish";
@@ -158,7 +160,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
             var oldToken = token; token = null; session.Cancel();
             if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
             try { desktop.Release(); } catch (InvalidOperationException) { }
-            Status?.Invoke("접속 대기 중");
+            Status?.Invoke(listenPort > 0 ? $"접속 대기 중 · 포트 {listenPort}" : "접속 대기 중");
         }
     }
     public async ValueTask DisposeAsync()

@@ -23,7 +23,7 @@ public sealed partial class RemoteHost
                     session.Dispose(); session = new();
                     token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
                     lastSeen = DateTime.UtcNow;
-                    Status?.Invoke("클라이언트 연결됨");
+                    Status?.Invoke(listenPort > 0 ? $"클라이언트 연결됨 · 포트 {listenPort}" : "클라이언트 연결됨");
                     return Results.Ok(new { token, protocol = 1, maxFileBytes = MaxFileBytes });
                 }
             }

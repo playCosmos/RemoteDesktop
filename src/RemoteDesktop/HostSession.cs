@@ -94,6 +94,10 @@ public partial class MainWindow
             window.StartButton.IsEnabled = state == HostUiState.Stopped;
             window.StopButton.IsEnabled = state == HostUiState.Listening;
             window.KickButton.IsEnabled = state == HostUiState.Listening && host?.HasSession == true;
+            window.StartButton.Visibility = state is HostUiState.Stopped or HostUiState.Starting ? Visibility.Visible : Visibility.Collapsed;
+            window.StopButton.Visibility = state is HostUiState.Listening or HostUiState.Stopping ? Visibility.Visible : Visibility.Collapsed;
+            window.KickButton.Visibility = window.KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+            window.StopButton.Style = state is HostUiState.Listening or HostUiState.Stopping ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.HostPort.IsEnabled = window.ChangePasswordButton.IsEnabled = state == HostUiState.Stopped;
             window.SmoothHostToggle.IsEnabled = state == HostUiState.Stopped;
             var live = state is HostUiState.Starting or HostUiState.Listening;

@@ -111,8 +111,14 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 for (var index = 0; index < paths.Length; index++)
                 {
                     var file = snapshot.Files[index]; paths[index] = ClipboardPaths.FileAt(directory, index, file.Name);
-                    status($"클립보드 수신 {index + 1}/{paths.Length}: {file.Name}");
-                    await remote.DownloadClipboard(snapshot.Id, index, paths[index], ct);
+                    var reported = -1;
+                    await remote.DownloadClipboard(snapshot.Id, index, paths[index], ct, (sent, size) =>
+                    {
+                        var percent = size <= 0 ? 100 : (int)Math.Clamp(sent * 100 / size, 0, 100);
+                        if (!UiText.ShouldReportProgress(reported, percent)) return;
+                        reported = percent;
+                        status(UiText.ClipboardFileProgress("클립보드 수신", index, paths.Length, file.Name, sent, size));
+                    });
                     if (new FileInfo(paths[index]).Length != file.Size) throw new IOException("클립보드 파일 크기 불일치");
                 }
                 if ((await remote.Clipboard(ct)).Id != snapshot.Id) return;

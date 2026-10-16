@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Windows;
@@ -18,6 +19,8 @@ public partial class MainWindow
         private bool changingPassword;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
         private System.Windows.Threading.DispatcherTimer? sessionClock;
+        private System.Windows.Threading.DispatcherTimer? addressRefresh;
+        private bool addressWatch;
         private HostUiState hostState = HostUiState.Stopped;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
@@ -33,6 +36,11 @@ public partial class MainWindow
             window.Fingerprint.Text = Convert.ToHexString(SHA256.HashData(certificate.RawData));
             window.FingerprintSummary.Text = UiText.ShortSecret(window.Fingerprint.Text);
             RefreshAddresses();
+            if (!addressWatch)
+            {
+                NetworkChange.NetworkAddressChanged += NetworkChanged;
+                addressWatch = true;
+            }
         }
 
         public void ToggleFingerprint(object sender, RoutedEventArgs e)
@@ -44,10 +52,44 @@ public partial class MainWindow
 
         public void RefreshAddresses()
         {
-            var port = int.TryParse(window.HostPort.Text, out var parsed) && parsed is >= 1 and <= 65535 ? parsed : settings.Port;
-            var endpoints = HostAddresses.Endpoints(port);
-            window.AddressList.ItemsSource = endpoints;
-            window.AddressEmpty.Visibility = endpoints.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            RefreshAddresses(announce: false);
+        }
+
+        private void RefreshAddresses(bool announce)
+        {
+            try
+            {
+                var port = int.TryParse(window.HostPort.Text, out var parsed) && parsed is >= 1 and <= 65535 ? parsed : settings.Port;
+                var endpoints = HostAddresses.Endpoints(port);
+                var previous = (window.AddressList.ItemsSource as System.Collections.Generic.IEnumerable<string>)?.ToArray() ?? [];
+                var changed = !HostAddresses.Same(previous, endpoints);
+                window.AddressList.ItemsSource = endpoints;
+                window.AddressEmpty.Visibility = endpoints.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+                if (announce && changed) window.HostNotice(UiText.AddressesChanged());
+            }
+            catch (Exception ex) { window.HostNotice(UiText.Explain(ex, "네트워크 주소를 읽지 못했습니다."), problem: true); }
+        }
+
+        private void NetworkChanged(object? sender, EventArgs e)
+        {
+            try { if (addressWatch) window.Dispatcher.InvokeAsync(ScheduleAddressRefresh); }
+            catch (Exception) { }
+        }
+
+        private void ScheduleAddressRefresh()
+        {
+            if (!addressWatch) return;
+            addressRefresh ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            addressRefresh.Stop();
+            addressRefresh.Tick -= ApplyAddressRefresh;
+            addressRefresh.Tick += ApplyAddressRefresh;
+            addressRefresh.Start();
+        }
+
+        private void ApplyAddressRefresh(object? sender, EventArgs e)
+        {
+            addressRefresh?.Stop();
+            RefreshAddresses(announce: true);
         }
 
         public void CopyAddress(object sender, RoutedEventArgs e)
@@ -73,6 +115,12 @@ public partial class MainWindow
 
         public async Task DisposeAsync()
         {
+            if (addressWatch)
+            {
+                NetworkChange.NetworkAddressChanged -= NetworkChanged;
+                addressWatch = false;
+            }
+            addressRefresh?.Stop();
             if (host != null) await host.DisposeAsync();
             certificate.Dispose();
         }

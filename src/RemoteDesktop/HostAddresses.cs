@@ -16,6 +16,14 @@ public static class HostAddresses
         return shareable.Select(ip => ip + ":" + port).ToList();
     }
 
+    public static bool Same(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.Count != right.Count) return false;
+        for (var i = 0; i < left.Count; i++)
+            if (!string.Equals(left[i], right[i], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
     private static int Compare(string left, string right)
     {
         var rank = Rank(left).CompareTo(Rank(right));

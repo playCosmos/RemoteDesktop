@@ -189,6 +189,19 @@ public static class UiText
         ? "이미 다른 기기가 연결되어 있습니다. 현재 접속을 끊어야 다른 PC가 들어올 수 있습니다."
         : "상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다.";
 
+    public static string AddressesChanged() => "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.";
+
+    public static string ClipboardFileProgress(string action, int index, int count, string name, long sent, long size)
+    {
+        var item = count <= 1 ? name : (index + 1) + "/" + count + " · " + name;
+        if (size <= 0) return action + " · " + item;
+        var percent = (int)Math.Clamp(Math.Round(sent * 100d / size), 0, 100);
+        return action + " · " + item + " · " + percent + "%";
+    }
+
+    public static bool ShouldReportProgress(int previousPercent, int nextPercent)
+        => previousPercent < 0 || nextPercent - previousPercent >= 5 || (nextPercent == 100 && previousPercent < 100);
+
     public static bool RemotePointer(double stageY, bool captured) => captured || stageY > 20;
 
     public static string HostPresence(bool clientConnected, bool serverLive) => clientConnected ? "LiveBrush" : serverLive ? "AccentBrush" : "MutedBrush";

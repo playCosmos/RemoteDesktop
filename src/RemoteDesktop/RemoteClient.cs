@@ -85,10 +85,26 @@ public sealed class RemoteClient : IDisposable
         {
             for (var index = 0; index < paths.Length; index++)
             {
-                progress?.Invoke($"클립보드 전송 {index + 1}/{paths.Length}: {files[index].Name}");
+                var name = files[index].Name;
+                var size = files[index].Size;
                 await using var stream = new FileStream(paths[index], FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
-                var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct)); stream.Position = 0;
-                using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = new StreamContent(stream) };
+                using var incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = new byte[65536];
+                long hashed = 0;
+                var reported = new ProgressMark();
+                int read;
+                while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+                {
+                    incremental.AppendData(buffer, 0, read);
+                    hashed += read;
+                    ReportClipboard(progress, "클립보드 확인", index, paths.Length, name, hashed, size, reported);
+                }
+                var hash = Convert.ToHexString(incremental.GetHashAndReset());
+                stream.Position = 0;
+                reported.Percent = -1;
+                var content = new StreamContent(new CountingStream(stream, sent => ReportClipboard(progress, "클립보드 전송", index, paths.Length, name, sent, size, reported)));
+                content.Headers.ContentLength = stream.Length;
+                using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = content };
                 request.Headers.Add("X-Content-SHA256", hash);
                 using var response = await http.SendAsync(request, ct); response.EnsureSuccessStatusCode();
             }
@@ -100,14 +116,16 @@ public sealed class RemoteClient : IDisposable
             if (!committed) { try { using var timeout = new CancellationTokenSource(3000); using var result = await http.DeleteAsync($"clipboard/uploads/{id}", timeout.Token); } catch { } }
         }
     }
-    public Task DownloadClipboard(string id, int index, string target, CancellationToken ct) => DownloadPath($"clipboard/{Uri.EscapeDataString(id)}/{index}", target, ct);
-    private async Task DownloadPath(string path, string target, CancellationToken ct)
+    public Task DownloadClipboard(string id, int index, string target, CancellationToken ct, Action<long, long>? progress = null) => DownloadPath($"clipboard/{Uri.EscapeDataString(id)}/{index}", target, ct, progress);
+    private async Task DownloadPath(string path, string target, CancellationToken ct, Action<long, long>? progress)
     {
         var temporary = target + "." + Guid.NewGuid() + ".partial";
         try
         {
             using var response = await http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, ct);
             response.EnsureSuccessStatusCode();
+            var expectedSize = response.Content.Headers.ContentLength ?? 0;
+            var reported = -1;
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             await using (var output = File.Create(temporary))
             await using (var source = await response.Content.ReadAsStreamAsync(ct))
@@ -119,6 +137,11 @@ public sealed class RemoteClient : IDisposable
                     if (total > RemoteHost.MaxFileBytes) throw new IOException("최대 파일 크기 초과");
                     hash.AppendData(buffer, 0, read);
                     await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                    if (progress != null && UiText.ShouldReportProgress(reported, Percent(total, expectedSize)))
+                    {
+                        reported = Percent(total, expectedSize);
+                        progress(total, expectedSize);
+                    }
                 }
             }
             var expected = response.Headers.GetValues("X-Content-SHA256").Single();
@@ -128,5 +151,45 @@ public sealed class RemoteClient : IDisposable
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Dispose() => http.Dispose();
+
+    private static void ReportClipboard(Action<string>? progress, string action, int index, int count, string name, long sent, long size, ProgressMark reported)
+    {
+        if (progress == null) return;
+        var percent = Percent(sent, size);
+        if (!UiText.ShouldReportProgress(reported.Percent, percent)) return;
+        reported.Percent = percent;
+        progress(UiText.ClipboardFileProgress(action, index, count, name, sent, size));
+    }
+
+    private static int Percent(long sent, long size) => size <= 0 ? 100 : (int)Math.Clamp(sent * 100 / size, 0, 100);
+
+    private sealed class ProgressMark { public int Percent = -1; }
+
+    private sealed class CountingStream(Stream inner, Action<long> progress) : Stream
+    {
+        private long sent;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = inner.Read(buffer, offset, count);
+            if (n > 0) { sent += n; progress(sent); }
+            return n;
+        }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var n = await inner.ReadAsync(buffer, cancellationToken);
+            if (n > 0) { sent += n; progress(sent); }
+            return n;
+        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing) { }
+    }
 }
 public readonly record struct RemoteFrame(byte[] Bytes, double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality, double CursorX, double CursorY, bool LocalCursor);

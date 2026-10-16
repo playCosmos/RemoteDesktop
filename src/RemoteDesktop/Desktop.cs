@@ -11,6 +11,12 @@ public record RemoteDisplay(string Id, string Name, int Left, int Top, int Width
 public readonly record struct CaptureTiming(double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality);
 public readonly record struct CapturedFrame(byte[] Bytes, CaptureTiming Timing, double CursorX, double CursorY, bool LocalCursor);
 
+public static class CursorPlacement
+{
+    public static Point DrawPoint(int cursorX, int cursorY, Rectangle view, int hotspotX, int hotspotY)
+        => new(cursorX - view.Left - hotspotX, cursorY - view.Top - hotspotY);
+}
+
 public sealed class Desktop
 {
     private readonly DisplayCapture capture = new();

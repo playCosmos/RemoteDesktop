@@ -203,7 +203,7 @@ public partial class MainWindow
                     RemoteFrame frame;
                     try
                     {
-                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, false);
+                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled);
                         data = frame.Bytes;
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
@@ -726,6 +726,7 @@ public partial class MainWindow
             var armed = client != null && inputEnabled && window.ScreenImage.IsKeyboardFocused;
             window.Stage.BorderBrush = armed ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
             window.Stage.BorderThickness = new Thickness(armed ? 2 : 0);
+            window.ScreenImage.Cursor = client != null && !inputEnabled ? Cursors.None : Cursors.Arrow;
         }
 
         private string DescribeSession()

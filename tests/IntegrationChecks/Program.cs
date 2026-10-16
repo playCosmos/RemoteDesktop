@@ -79,6 +79,8 @@ async Task Session()
     var secondary = new System.Drawing.Rectangle(-1920, -1080, 1920, 1080);
     Check(Desktop.MapPoint(secondary, virtualBounds, 0, 0) == (0, 0) && Desktop.MapPoint(secondary, virtualBounds, 1, 1).X < 32768, "secondary monitor maps into correct half of desktop");
     Check(Desktop.MapPoint(virtualBounds, virtualBounds, -10, 20) == (0, 65535), "out-of-view dragging clamps to desktop bounds");
+    var cursor = CursorPlacement.DrawPoint(100, 80, new System.Drawing.Rectangle(10, 20, 200, 100), 3, 4);
+    Check(cursor.X == 87 && cursor.Y == 56, "captured cursor keeps its hotspot");
     try { Desktop.MapPoint(virtualBounds, virtualBounds, double.NaN, 0); Check(false, "invalid coordinates"); } catch (ArgumentException) { Check(true, "nonfinite coordinates rejected"); }
     using (var response = await site.Http.GetAsync("frame")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "screen requires authentication");
     using (var response = await site.Http.GetAsync("displays")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "monitor list requires authentication");

@@ -240,9 +240,35 @@ internal sealed class DisplayCapture
     }
     private static void DrawCursor(Graphics graphics, Rectangle view)
     {
-        var cursor = System.Windows.Forms.Cursor.Position;
-        System.Windows.Forms.Cursors.Default.Draw(graphics, new Rectangle(cursor.X - view.X, cursor.Y - view.Y, 24, 24));
+        var info = new CursorInfo { Size = Marshal.SizeOf<CursorInfo>() };
+        if (!GetCursorInfo(ref info) || info.Cursor == 0 || (info.Flags & 1) == 0) return;
+        var hotspotX = 0;
+        var hotspotY = 0;
+        nint mask = 0;
+        nint color = 0;
+        if (GetIconInfo(info.Cursor, out var icon))
+        {
+            hotspotX = icon.HotspotX;
+            hotspotY = icon.HotspotY;
+            mask = icon.Mask;
+            color = icon.Color;
+        }
+        var origin = CursorPlacement.DrawPoint(info.X, info.Y, view, hotspotX, hotspotY);
+        var dc = graphics.GetHdc();
+        try { DrawIconEx(dc, origin.X, origin.Y, info.Cursor, 0, 0, 0, 0, 3); }
+        finally
+        {
+            graphics.ReleaseHdc(dc);
+            if (mask != 0) DeleteObject(mask);
+            if (color != 0) DeleteObject(color);
+        }
     }
+    [StructLayout(LayoutKind.Sequential)] private struct CursorInfo { public int Size, Flags; public nint Cursor; public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct IconInfo { [MarshalAs(UnmanagedType.Bool)] public bool Icon; public int HotspotX, HotspotY; public nint Mask, Color; }
+    [DllImport("user32.dll")] private static extern bool GetCursorInfo(ref CursorInfo info);
+    [DllImport("user32.dll")] private static extern bool GetIconInfo(nint cursor, out IconInfo info);
+    [DllImport("user32.dll")] private static extern bool DrawIconEx(nint dc, int x, int y, nint icon, int width, int height, int step, nint brush, int flags);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
     private static double ElapsedMs(long start, long end) => Stopwatch.GetElapsedTime(start, end).TotalMilliseconds;
     public static Rectangle Viewport(Rectangle bounds, double x, double y, double width, double height)
     {

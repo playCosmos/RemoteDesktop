@@ -23,6 +23,9 @@ public partial class MainWindow
         private bool pasting;
         private bool suppressPasteKeyUp;
         private Channel<InputEvent>? inputs;
+        private Channel<byte>? inputSignal;
+        private readonly object inputGate = new();
+        private InputEvent? pendingMove;
         private bool connecting;
         private long lastMove;
         private int generation;
@@ -108,7 +111,9 @@ public partial class MainWindow
                 SaveConnection();
                 try { await LoadDisplays(); } catch { await DisconnectCore(); throw; }
                 connection = new();
-                inputs = Channel.CreateBounded<InputEvent>(256);
+                inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
+                inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
+                lock (inputGate) pendingMove = null;
                 clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
                 clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
                 inputEnabled = true;
@@ -153,7 +158,6 @@ public partial class MainWindow
 
         private async Task RunConnection(RemoteClient remote, CancellationToken ct)
         {
-            var reader = inputs!.Reader;
             async Task Frames()
             {
                 while (!ct.IsCancellationRequested)
@@ -185,7 +189,19 @@ public partial class MainWindow
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
             }
-            async Task SendInputs() { await foreach (var input in reader.ReadAllAsync(ct)) await remote.Input(input, ct); }
+            async Task SendInputs()
+            {
+                var signal = inputSignal!;
+                var channel = inputs!;
+                while (await signal.Reader.WaitToReadAsync(ct))
+                {
+                    while (signal.Reader.TryRead(out _)) { }
+                    while (channel.Reader.TryRead(out var input)) await remote.Input(input, ct);
+                    InputEvent? move;
+                    lock (inputGate) { move = pendingMove; pendingMove = null; }
+                    if (move != null) await remote.Input(move, ct);
+                }
+            }
             async Task Heartbeat()
             {
                 while (!ct.IsCancellationRequested)
@@ -225,6 +241,8 @@ public partial class MainWindow
             fullscreen?.Close();
             connection?.Cancel();
             inputs?.Writer.TryComplete();
+            inputSignal?.Writer.TryComplete();
+            lock (inputGate) pendingMove = null;
             ClearFrame();
             ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -257,11 +275,28 @@ public partial class MainWindow
         private void Queue(InputEvent input)
         {
             if (!inputEnabled && input.Kind != "release") return;
-            if (client != null && inputs != null && !inputs.Writer.TryWrite(input))
+            var channel = inputs;
+            var signal = inputSignal;
+            if (client == null || channel == null || signal == null) return;
+            var overflow = false;
+            lock (inputGate)
             {
-                window.ClientNotice("입력 대기열 초과로 연결을 종료합니다.", problem: true);
-                connection?.Cancel();
+                if (input.Kind == "move") pendingMove = input;
+                else if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) overflow = true;
+                else
+                {
+                    pendingMove = null;
+                    overflow = !channel.Writer.TryWrite(input);
+                }
             }
+            if (overflow) { InputOverflow(); return; }
+            signal.Writer.TryWrite(0);
+        }
+
+        private void InputOverflow()
+        {
+            window.ClientNotice("입력 대기열 초과로 연결을 종료합니다.", problem: true);
+            connection?.Cancel();
         }
 
         private void UpdateFrameHealth()

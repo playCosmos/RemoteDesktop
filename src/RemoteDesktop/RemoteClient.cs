@@ -53,6 +53,14 @@ public sealed class RemoteClient : IDisposable
     }
 
     public static bool SendJpeg(bool viewerHasFrame, bool reused) => !viewerHasFrame || !reused;
+
+    public static TimeSpan FrameInterval(int fps, bool unchanged)
+    {
+        var active = TimeSpan.FromSeconds(1.0 / Math.Clamp(fps, 1, 30));
+        if (!unchanged) return active;
+        var idle = TimeSpan.FromMilliseconds(100);
+        return active > idle ? active : idle;
+    }
     private static double Header(HttpResponseMessage response, string name)
         => response.Headers.TryGetValues(name, out var values) && double.TryParse(values.FirstOrDefault(), System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : 0;
     private static bool HeaderFlag(HttpResponseMessage response, string name)

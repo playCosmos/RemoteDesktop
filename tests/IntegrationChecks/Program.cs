@@ -49,6 +49,9 @@ Check(UiText.ConnectionFailure(new HttpRequestException("denied", null, HttpStat
 Check(UiText.ConnectionFailure(new TaskCanceledException(), true) == "서버 응답이 끊어졌습니다. 다시 접속하세요.", "a stalled session says the connection dropped");
 Check(UiText.ConnectionFailure(new TaskCanceledException(), false) == "서버 응답이 없습니다. 주소와 포트를 확인하세요.", "a login timeout still points at the address");
 Check(!RemoteClient.SendJpeg(true, true) && RemoteClient.SendJpeg(false, true) && RemoteClient.SendJpeg(true, false), "an unchanged frame is not sent again after the viewer has it");
+Check(RemoteClient.FrameInterval(30, false) == TimeSpan.FromSeconds(1.0 / 30), "motion keeps the selected frame interval");
+Check(RemoteClient.FrameInterval(30, true) == TimeSpan.FromMilliseconds(100), "an unchanged screen is checked ten times a second");
+Check(RemoteClient.FrameInterval(5, true) == TimeSpan.FromSeconds(1.0 / 5), "idle polling does not go faster than a slower selected rate");
 Check(UiText.ShortSecret("99D8D8CC4DC57302") == "99D8D8CC4DC57302" && UiText.ShortSecret("99D8D8CC4DC5730254F7947AD64ADD88") == "99D8D8CC4DC57302…", "a long fingerprint is shortened for the host page");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");

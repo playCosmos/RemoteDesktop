@@ -41,7 +41,7 @@ public partial class MainWindow
         private bool inputEnabled = true;
         private int frameQuality;
         private int frameRate;
-        private int framesSinceHealth;
+        private int changedSinceHealth;
         private DateTime healthWindowStarted = DateTime.UtcNow;
         private long roundTripMilliseconds = -1;
         private double lastCaptureMilliseconds;
@@ -240,7 +240,7 @@ public partial class MainWindow
                 window.ConnectionControls.Visibility = Visibility.Collapsed;
                 SetSessionControlsEnabled(true);
                 ShowStage("화면을 받는 중…");
-                framesSinceHealth = 0;
+                changedSinceHealth = 0;
                 healthWindowStarted = DateTime.UtcNow;
                 roundTripMilliseconds = -1;
                 window.SessionStatus("연결됨");
@@ -321,9 +321,9 @@ public partial class MainWindow
                     if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;
-                    UpdateFrameHealth();
+                    UpdateFrameHealth(data.Length > 0);
                     var elapsed = Stopwatch.GetElapsedTime(started);
-                    var delay = TimeSpan.FromSeconds(1.0 / frameRate) - elapsed;
+                    var delay = RemoteClient.FrameInterval(frameRate, lastFrameReused) - elapsed;
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
                 }
             }
@@ -564,15 +564,17 @@ public partial class MainWindow
             connection?.Cancel();
         }
 
-        private void UpdateFrameHealth()
+        private void UpdateFrameHealth(bool changed)
         {
-            framesSinceHealth++;
+            if (changed) changedSinceHealth++;
             if (DateTime.UtcNow - healthWindowStarted < TimeSpan.FromSeconds(1)) return;
             var seconds = Math.Max(0.01, (DateTime.UtcNow - healthWindowStarted).TotalSeconds);
-            var fps = framesSinceHealth / seconds;
-            framesSinceHealth = 0;
+            var changedFrames = changedSinceHealth;
+            var latency = roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms";
+            changedSinceHealth = 0;
             healthWindowStarted = DateTime.UtcNow;
-            window.Dispatcher.InvokeAsync(() => SetHealth(fps.ToString("F0") + " fps · " + (roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms")));
+            var text = changedFrames == 0 ? "변화 없음 · " + latency : (changedFrames / seconds).ToString("F0") + " fps · " + latency;
+            window.Dispatcher.InvokeAsync(() => SetHealth(text));
         }
 
         private void UpdateHealthText()

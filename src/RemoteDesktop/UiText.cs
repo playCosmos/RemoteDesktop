@@ -103,6 +103,11 @@ public static class UiText
 
     public static bool FrameStale(TimeSpan sinceFrame) => sinceFrame >= TimeSpan.FromSeconds(3);
 
+    public static string PicturePaused() => "화면 일시중지";
+
+    public static bool ViewerWatching(bool fullscreen, bool fullscreenMinimized, bool windowMinimized, bool clientTabSelected)
+        => fullscreen ? !fullscreenMinimized : !windowMinimized && clientTabSelected;
+
     public static string HealthTone(string? detail)
     {
         if (string.IsNullOrWhiteSpace(detail)) return "MutedBrush";

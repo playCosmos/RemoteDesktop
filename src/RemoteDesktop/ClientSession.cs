@@ -69,6 +69,7 @@ public partial class MainWindow
         private readonly HashSet<int> suppressedSystemKeys = [];
         private bool remoteAltDown;
         private System.Windows.Threading.DispatcherTimer? toolbarTimer;
+        private volatile bool viewerWatching = true;
 
         public ClientSession(MainWindow window) => this.window = window;
 
@@ -86,12 +87,15 @@ public partial class MainWindow
             ShowSessionPreset();
             RefreshRecent();
             if (lastConnection.OpenHostTab) window.ServerTab.IsSelected = true;
+            window.StateChanged += (_, _) => NoteViewerWatch();
+            NoteViewerWatch();
         }
 
         public void TabChanged(System.Windows.Controls.SelectionChangedEventArgs e)
         {
             if (!window.IsLoaded || e.Source is not System.Windows.Controls.TabControl) return;
             ApplySessionChrome();
+            NoteViewerWatch();
             var tab = window.ServerTab.IsSelected ? "host" : "client";
             if (string.Equals(lastConnection.SelectedTab, tab, StringComparison.OrdinalIgnoreCase)) return;
             lastConnection.SelectedTab = tab;
@@ -315,6 +319,11 @@ public partial class MainWindow
             {
                 while (!ct.IsCancellationRequested)
                 {
+                    if (!viewerWatching)
+                    {
+                        await Task.Delay(200, ct);
+                        continue;
+                    }
                     var started = Stopwatch.GetTimestamp();
                     var display = selectedDisplay;
                     byte[] data;
@@ -530,6 +539,12 @@ public partial class MainWindow
 
         private void PublishHealthTick(object? sender, EventArgs e)
         {
+            if (!viewerWatching)
+            {
+                if (client != null && healthDetail != UiText.PicturePaused()) SetHealth(UiText.PicturePaused());
+                else PublishHealth();
+                return;
+            }
             if (client != null && SeenFrame() && UiText.FrameStale(DateTime.UtcNow - LastFrameUtc()) && healthDetail != UiText.StaleFrame())
                 SetHealth(UiText.StaleFrame());
             else PublishHealth();
@@ -542,6 +557,20 @@ public partial class MainWindow
             window.HealthText.Text = text;
             window.SessionReveal.Content = text;
             window.SessionReveal.ToolTip = UiText.RevealTip(ViewingLabel, window.hostSession.ConnectedPeer);
+        }
+
+        private void NoteViewerWatch()
+        {
+            var watching = UiText.ViewerWatching(fullscreen != null, fullscreen?.WindowState == WindowState.Minimized, window.WindowState == WindowState.Minimized, window.ClientTab.IsSelected);
+            if (watching == viewerWatching) return;
+            viewerWatching = watching;
+            if (client == null) return;
+            if (!watching) SetHealth(UiText.PicturePaused());
+            else
+            {
+                if (SeenFrame()) Interlocked.Exchange(ref lastFrameTicks, DateTime.UtcNow.Ticks);
+                UpdateHealthText();
+            }
         }
 
         private void ShowSessionToolbar()
@@ -655,7 +684,7 @@ public partial class MainWindow
                 sampleSeconds = seconds;
                 sampleHeld = pictureHeld;
                 haveFrameSample = true;
-                if (client != null) SetHealth(text);
+                if (client != null && viewerWatching) SetHealth(text);
             });
         }
 
@@ -665,6 +694,7 @@ public partial class MainWindow
             window.Dispatcher.InvokeAsync(() =>
             {
                 if (client == null) return;
+                if (!viewerWatching) { SetHealth(UiText.PicturePaused()); return; }
                 if (SeenFrame() && UiText.FrameStale(DateTime.UtcNow - LastFrameUtc()))
                 {
                     SetHealth(UiText.StaleFrame());
@@ -1134,6 +1164,7 @@ public partial class MainWindow
             shell.PreviewKeyDown += FullscreenKey;
             shell.Activated += (_, _) => UpdateInputChrome();
             shell.Deactivated += (_, _) => { Queue(new("release")); UpdateInputChrome(); };
+            shell.StateChanged += (_, _) => NoteViewerWatch();
             shell.Closed += (_, _) =>
             {
                 Queue(new("release"));
@@ -1142,12 +1173,14 @@ public partial class MainWindow
                 window.FullscreenPlaceholder.Visibility = Visibility.Collapsed;
                 window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
                 fullscreen = null;
+                NoteViewerWatch();
                 ApplySessionChrome();
                 window.ScreenImage.Focus();
                 UpdateInputChrome();
             };
             shell.Show();
             shell.WindowState = WindowState.Maximized;
+            NoteViewerWatch();
             window.ScreenImage.Focus();
         }
 

@@ -19,6 +19,7 @@ public partial class MainWindow
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
+        public string? ConnectedPeer => host?.SessionPeer;
 
         public HostSession(MainWindow window) => this.window = window;
 

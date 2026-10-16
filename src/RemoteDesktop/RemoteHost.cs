@@ -24,6 +24,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private WebApplication? app;
     private Timer? timer;
     private string? token;
+    private string? sessionPeer;
     private DateTime lastSeen;
     private DateTime nextLogin;
     private DateTime nextOpaqueLogin;
@@ -35,6 +36,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private Task clipboardCleanup = Task.CompletedTask;
     public event Action<string>? Status;
     public bool HasSession { get { lock (gate) return token != null; } }
+    public string? SessionPeer { get { lock (gate) return sessionPeer; } }
     public RemoteHost(HostSettings settings, IFileClipboard? fileClipboard = null, string? clipboardCache = null)
     {
         this.settings = settings;
@@ -157,7 +159,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
         lock (gate)
         {
             if (disposeState == 2) return;
-            var oldToken = token; token = null; session.Cancel();
+            var oldToken = token; token = null; sessionPeer = null; session.Cancel();
             if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
             try { desktop.Release(); } catch (InvalidOperationException) { }
             Status?.Invoke(UiText.Listening(listenPort));

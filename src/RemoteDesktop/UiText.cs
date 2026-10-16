@@ -36,19 +36,46 @@ public static class UiText
 
     public static string ClientConnected(IPAddress? address)
     {
-        var peer = DescribePeer(address);
+        var peer = PeerLabel(address);
         return peer.Length == 0 ? "클라이언트 연결됨" : "클라이언트 연결됨 · " + peer;
     }
 
     public static string Listening(int port) => port is > 0 and <= 65535 ? "접속 대기 중 · 포트 " + port : "접속 대기 중";
 
-    private static string DescribePeer(IPAddress? address)
+    public static string PeerLabel(IPAddress? address)
     {
         if (address is null) return "";
         if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
         if (address.AddressFamily == AddressFamily.InterNetworkV6) address = new IPAddress(address.GetAddressBytes());
         return address.ToString();
     }
+
+    public static string WindowTitle(string product, string? outbound, string? inbound)
+    {
+        var viewing = Blank(outbound);
+        var hosting = Blank(inbound);
+        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨";
+        if (viewing != null) return viewing + " — " + product;
+        if (hosting != null) return hosting + " 연결됨 — " + product;
+        return product;
+    }
+
+    public static string FullscreenTitle(string? outbound, string? inbound)
+    {
+        var viewing = Blank(outbound);
+        var hosting = Blank(inbound);
+        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨 · F11로 복귀";
+        if (viewing != null) return viewing + " — F11로 복귀";
+        return "Personal Remote Desktop · F11로 복귀";
+    }
+
+    public static string HostTabLabel(string? inbound)
+    {
+        var hosting = Blank(inbound);
+        return hosting == null ? "이 PC" : "이 PC · " + hosting;
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public static bool IsProblem(string? text)
     {

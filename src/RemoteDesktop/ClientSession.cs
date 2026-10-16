@@ -30,6 +30,7 @@ public partial class MainWindow
         private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
         private bool connectedOnce;
+        public string? RemoteEndpoint => client == null ? null : lastConnection.Address;
         private bool normalizingAddress;
         private long lastMove;
         private int generation;
@@ -246,6 +247,7 @@ public partial class MainWindow
                 window.SessionStatus("연결됨");
                 if (window.IsActive) window.ScreenImage.Focus();
                 UpdateInputChrome();
+                window.RefreshIdentity();
                 _ = RunConnection(remote, connection.Token);
             }
             catch (Exception ex) { window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true); }
@@ -382,6 +384,7 @@ public partial class MainWindow
             var remote = client;
             client = null;
             fullscreen?.Close();
+            window.RefreshIdentity();
             connection?.Cancel();
             inputs?.Writer.TryComplete();
             inputSignal?.Writer.TryComplete();
@@ -999,6 +1002,7 @@ public partial class MainWindow
             shell.Width = window.ActualWidth;
             shell.Height = window.ActualHeight;
             fullscreen = shell;
+            window.RefreshIdentity();
             shell.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(shell).Handle)?.AddHook(NativeKeyboard);
             shell.PreviewKeyDown += FullscreenKey;
             shell.Activated += (_, _) => UpdateInputChrome();
@@ -1017,6 +1021,11 @@ public partial class MainWindow
             shell.Show();
             shell.WindowState = WindowState.Maximized;
             window.ScreenImage.Focus();
+        }
+
+        public void SetFullscreenTitle(string title)
+        {
+            if (fullscreen != null) fullscreen.Title = title;
         }
 
         public void ReleaseInput(object sender, KeyboardFocusChangedEventArgs e)

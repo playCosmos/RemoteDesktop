@@ -7,6 +7,7 @@ public partial class MainWindow : Window
 {
     private readonly HostSession hostSession;
     private readonly ClientSession clientSession;
+    private readonly string productTitle;
 
     public MainWindow()
     {
@@ -17,7 +18,8 @@ public partial class MainWindow : Window
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
         ServerPin.TextChanged += (_, _) => clientSession.UpdatePinSummary();
         var version = typeof(MainWindow).Assembly.GetName().Version;
-        if (version is not null) Title = "Personal Remote Desktop " + version.ToString(3);
+        productTitle = version is null ? "Personal Remote Desktop" : "Personal Remote Desktop " + version.ToString(3);
+        Title = productTitle;
         ServerTab.Visibility = Visibility.Visible;
         hostSession.Bind();
         clientSession.Bind();
@@ -60,7 +62,18 @@ public partial class MainWindow : Window
         ServerStatusText.Text = text;
         KickButton.IsEnabled = hostSession.HasClient && StopButton.IsEnabled;
         KickButton.Visibility = KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        RefreshIdentity();
     });
+
+    private void RefreshIdentity()
+    {
+        var inbound = hostSession.ConnectedPeer;
+        var outbound = clientSession.RemoteEndpoint;
+        ServerTab.Header = UiText.HostTabLabel(inbound);
+        Title = UiText.WindowTitle(productTitle, outbound, inbound);
+        clientSession.SetFullscreenTitle(UiText.FullscreenTitle(outbound, inbound));
+        SessionReveal.ToolTip = string.IsNullOrEmpty(inbound) ? "세션 조작 열기" : "이 PC에 " + inbound + " 연결됨 · 세션 조작 열기";
+    }
 
     private void HostNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() => hostSession.ShowNotice(text, problem));
 

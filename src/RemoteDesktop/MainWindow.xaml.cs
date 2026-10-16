@@ -169,5 +169,6 @@ public partial class MainWindow : Window
     private void RefreshDisplays(object sender, RoutedEventArgs e) => clientSession.RefreshDisplays(sender, e);
     private void DisplayChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => clientSession.DisplayChanged(sender, e);
     private void ToggleFullscreen(object sender, RoutedEventArgs e) => clientSession.ToggleFullscreen(sender, e);
+    private void ExitFullscreen(object sender, RoutedEventArgs e) => clientSession.ExitFullscreen();
     private void ReleaseInput(object sender, KeyboardFocusChangedEventArgs e) => clientSession.ReleaseInput(sender, e);
 }

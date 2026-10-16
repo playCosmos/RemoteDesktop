@@ -113,12 +113,23 @@ public static class UiText
 
     public static bool ShowHostSetup(bool serverRunning) => !serverRunning;
 
-    public static string HostCardTitle(bool clientConnected, string? peer)
+    public static string HostCardTitle(bool clientConnected, bool serverLive, string? peer)
     {
-        if (!clientConnected) return "접속 받기";
-        var name = Blank(peer);
-        return name == null ? "이 PC를 보는 중" : name + " 연결 중";
+        if (clientConnected)
+        {
+            var name = Blank(peer);
+            return name == null ? "이 PC를 보는 중" : name + " 연결 중";
+        }
+        return serverLive ? "접속 대기 중" : "접속 받기";
     }
+
+    public static string FullscreenAway(string? address)
+    {
+        var target = Blank(address);
+        return target == null ? "F11로 이 창에 되돌립니다." : target + " 화면입니다. F11로 이 창에 되돌립니다.";
+    }
+
+    public static bool EdgeToEdge(bool connected, bool clientTabSelected, bool fullscreen) => connected && clientTabSelected && !fullscreen;
 
     public static string ShareTitle(bool occupied) => occupied ? "지금은 한 대만 연결됩니다" : "이 PC에 접속하려면";
 

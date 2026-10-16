@@ -99,7 +99,7 @@ public partial class MainWindow
 
         private void ApplySessionChrome()
         {
-            var edgeToEdge = client != null && window.ClientTab.IsSelected;
+            var edgeToEdge = UiText.EdgeToEdge(client != null, window.ClientTab.IsSelected, fullscreen != null);
             window.Pages.ApplyTemplate();
             if (window.Pages.Template?.FindName("HeaderBar", window.Pages) is Border header)
                 header.Visibility = edgeToEdge ? Visibility.Collapsed : Visibility.Visible;
@@ -1037,7 +1037,9 @@ public partial class MainWindow
         {
             if (fullscreen != null) { fullscreen.Close(); return; }
             Queue(new("release"));
-            window.ClientTab.Content = null;
+            DetachSessionPanel();
+            window.FullscreenAwayText.Text = UiText.FullscreenAway(lastConnection.Address);
+            window.FullscreenPlaceholder.Visibility = Visibility.Visible;
             window.ConnectionControls.Visibility = Visibility.Collapsed;
             window.ClientPanel.Margin = new Thickness(0);
             window.Stage.CornerRadius = new CornerRadius(0);
@@ -1049,6 +1051,7 @@ public partial class MainWindow
             shell.Height = window.ActualHeight;
             fullscreen = shell;
             window.RefreshIdentity();
+            ApplySessionChrome();
             shell.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(shell).Handle)?.AddHook(NativeKeyboard);
             shell.PreviewKeyDown += FullscreenKey;
             shell.Activated += (_, _) => UpdateInputChrome();
@@ -1057,7 +1060,8 @@ public partial class MainWindow
             {
                 Queue(new("release"));
                 shell.Content = null;
-                window.ClientTab.Content = window.ClientPanel;
+                AttachSessionPanel();
+                window.FullscreenPlaceholder.Visibility = Visibility.Collapsed;
                 window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
                 fullscreen = null;
                 ApplySessionChrome();
@@ -1072,6 +1076,18 @@ public partial class MainWindow
         public void SetFullscreenTitle(string title)
         {
             if (fullscreen != null) fullscreen.Title = title;
+        }
+
+        public void ExitFullscreen() { if (fullscreen != null) fullscreen.Close(); }
+
+        private void DetachSessionPanel()
+        {
+            if (window.ClientPanel.Parent is Panel panel) panel.Children.Remove(window.ClientPanel);
+        }
+
+        private void AttachSessionPanel()
+        {
+            if (window.ClientPanel.Parent == null) window.ClientHost.Children.Insert(0, window.ClientPanel);
         }
 
         public void ReleaseInput(object sender, KeyboardFocusChangedEventArgs e)

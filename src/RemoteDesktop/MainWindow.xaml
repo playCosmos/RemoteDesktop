@@ -1,6 +1,7 @@
 <Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Width="1180" Height="800" MinWidth="920" MinHeight="640" Background="{StaticResource AppBrush}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
   <TabControl x:Name="Pages" SelectionChanged="TabChanged">
     <TabItem x:Name="ClientTab" Header="원격 접속">
+      <Grid x:Name="ClientHost">
       <DockPanel x:Name="ClientPanel" Margin="12">
         <Grid>
         <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
@@ -134,6 +135,16 @@
             </Border>
         </Grid>
       </DockPanel>
+      <Border x:Name="FullscreenPlaceholder" Visibility="Collapsed" Background="{StaticResource AppBrush}">
+        <Border Style="{StaticResource Card}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480" Padding="28,24">
+          <StackPanel>
+            <TextBlock Text="전체화면으로 보고 있습니다" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="FullscreenAwayText" Text="F11로 이 창에 되돌립니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" TextAlignment="Center" Margin="0,8,0,0"/>
+            <Button Content="이 창으로 되돌리기" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Margin="0,18,0,0" MinWidth="180" Click="ExitFullscreen"/>
+          </StackPanel>
+        </Border>
+      </Border>
+      </Grid>
     </TabItem>
     <TabItem x:Name="ServerTab" Header="이 PC">
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

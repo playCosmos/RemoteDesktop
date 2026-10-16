@@ -69,6 +69,8 @@ public partial class MainWindow
             window.KickButton.IsEnabled = state == HostUiState.Listening && host?.HasSession == true;
             window.HostPort.IsEnabled = window.ChangePasswordButton.IsEnabled = state == HostUiState.Stopped;
             window.SmoothHostToggle.IsEnabled = state == HostUiState.Stopped;
+            var live = state is HostUiState.Starting or HostUiState.Listening;
+            window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(live ? "AccentBrush" : "MutedBrush");
         }
 
         private void ShowListening(int port)

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using System.Windows;
@@ -120,7 +121,7 @@ public partial class MainWindow
                 window.SessionStatus("연결됨");
                 _ = RunConnection(remote, connection.Token);
             }
-            catch (Exception ex) { window.ClientNotice("접속 실패: " + ex.Message, problem: true); }
+            catch (Exception ex) { window.ClientNotice("접속 실패: " + FailureText(ex), problem: true); }
             finally { connecting = false; window.ConnectButton.IsEnabled = client == null; }
         }
 
@@ -210,7 +211,7 @@ public partial class MainWindow
             }
             var clipboardTask = SyncClipboard();
             try { await await Task.WhenAny(tasks); }
-            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + ex.Message, problem: true); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + FailureText(ex), problem: true); }
             catch (OperationCanceledException) { }
             finally
             {
@@ -230,6 +231,7 @@ public partial class MainWindow
             inputs?.Writer.TryComplete();
             window.ScreenImage.Source = null;
             ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
+            window.SessionInfoCard.Visibility = Visibility.Collapsed;
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
             window.ConnectionControls.Visibility = Visibility.Visible;
@@ -251,7 +253,9 @@ public partial class MainWindow
             window.DisplayList.IsEnabled = enabled;
             window.SessionMenuButton.IsEnabled = enabled;
             window.EndSessionButton.IsEnabled = enabled;
+            window.ClientPanel.Margin = new Thickness(enabled ? 8 : 16);
             if (enabled) window.HealthText.Text = "측정 중";
+            UpdateInputChrome();
         }
 
         private void Queue(InputEvent input)
@@ -459,6 +463,7 @@ public partial class MainWindow
             var enabled = window.InputControlToggle.IsChecked == true;
             if (!enabled) Queue(new("release"));
             inputEnabled = enabled;
+            UpdateInputChrome();
             if (client != null) window.SessionStatus(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
         }
 
@@ -507,12 +512,59 @@ public partial class MainWindow
 
         public void ShowSessionInfo(object sender, RoutedEventArgs e)
         {
+            window.SessionInfoText.Text = DescribeSession();
+            window.SessionInfoCard.Visibility = Visibility.Visible;
+        }
+
+        public void CloseSessionInfo(object sender, RoutedEventArgs e)
+        {
+            window.SessionInfoCard.Visibility = Visibility.Collapsed;
+            if (client != null) window.ScreenImage.Focus();
+        }
+
+        public void RemoteFocusChanged(object sender, KeyboardFocusChangedEventArgs e) => UpdateInputChrome();
+
+        private void UpdateInputChrome()
+        {
+            var armed = client != null && inputEnabled && window.ScreenImage.IsKeyboardFocused;
+            window.Stage.BorderBrush = armed ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            window.Stage.BorderThickness = new Thickness(armed ? 2 : 0);
+        }
+
+        private string DescribeSession()
+        {
             var display = window.DisplayList.SelectedItem as RemoteDisplay;
             var resolution = window.ScreenImage.Source is BitmapSource bitmap ? bitmap.PixelWidth + "×" + bitmap.PixelHeight : "수신 전";
             var measured = lastFrameBytes > 0;
-            MessageBox.Show(fullscreen ?? (Window)window,
-                "대상: " + lastConnection.Address + "\n모니터: " + (display?.Name ?? "선택 안 됨") + "\n수신 해상도: " + resolution + "\n요청 화질: " + frameQuality + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? lastFrameQuality.ToString() : "측정 전") + "\n최대 프레임 속도: " + frameRate + " FPS\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전") + "\n압축: " + (measured ? lastEncodeMilliseconds.ToString("0.0") + " ms" : "측정 전") + "\n프레임 크기: " + (measured ? (lastFrameBytes / 1024.0).ToString("0") + " KB" : "측정 전") + "\n화면 재사용: " + (measured ? (lastFrameReused ? "예" : "아니오") : "측정 전") + "\n왕복 지연: " + (roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms") + "\n입력 제어: " + (inputEnabled ? "켜짐" : "꺼짐") + "\n클립보드 자동 동기화: " + (window.ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐"),
-                "세션 정보", MessageBoxButton.OK, MessageBoxImage.Information);
+            return "대상: " + lastConnection.Address
+                + "\n모니터: " + (display?.Name ?? "선택 안 됨")
+                + "\n수신 해상도: " + resolution
+                + "\n요청 화질: " + frameQuality
+                + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? lastFrameQuality.ToString() : "측정 전")
+                + "\n최대 프레임 속도: " + frameRate + " FPS"
+                + "\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전")
+                + "\n압축: " + (measured ? lastEncodeMilliseconds.ToString("0.0") + " ms" : "측정 전")
+                + "\n프레임 크기: " + (measured ? (lastFrameBytes / 1024.0).ToString("0") + " KB" : "측정 전")
+                + "\n화면 재사용: " + (measured ? (lastFrameReused ? "예" : "아니오") : "측정 전")
+                + "\n왕복 지연: " + (roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms")
+                + "\n입력 제어: " + (inputEnabled ? "켜짐" : "꺼짐")
+                + "\n클립보드 자동 동기화: " + (window.ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐");
+        }
+
+        private static string FailureText(Exception ex)
+        {
+            if (ex is HttpRequestException http)
+            {
+                if (http.StatusCode == HttpStatusCode.Unauthorized) return "비밀번호가 올바르지 않습니다.";
+                if (http.StatusCode == HttpStatusCode.Conflict) return "이미 다른 기기가 연결되어 있습니다.";
+                if (http.StatusCode == HttpStatusCode.TooManyRequests) return "접속 시도가 제한되었습니다. 잠시 후 다시 시도하세요.";
+                var detail = http.InnerException?.Message ?? http.Message;
+                if (detail.Contains("SSL", StringComparison.OrdinalIgnoreCase) || detail.Contains("certificate", StringComparison.OrdinalIgnoreCase) || detail.Contains("인증서", StringComparison.Ordinal))
+                    return "서버 인증서 지문이 일치하지 않습니다. 지문을 비우면 비밀번호로 다시 확인합니다.";
+                if (http.StatusCode is null) return "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.";
+            }
+            if (ex is TaskCanceledException or TimeoutException) return "서버 응답이 없습니다. 주소와 포트를 확인하세요.";
+            return ex.Message;
         }
 
         private void SaveConnection()
@@ -618,6 +670,7 @@ public partial class MainWindow
         {
             lock (suppressedSystemKeys) { remoteAltDown = false; suppressedSystemKeys.Clear(); }
             Queue(new("release"));
+            UpdateInputChrome();
         }
     }
 }

@@ -80,10 +80,19 @@
             </StackPanel>
           </Grid>
         </Border>
-        <Border Background="{StaticResource StageBrush}" CornerRadius="12" ClipToBounds="True">
+        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
           <Grid>
             <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" LostKeyboardFocus="ReleaseInput"/>
+            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+            <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Content="닫기" Click="CloseSessionInfo" VerticalAlignment="Top" Margin="12,0,0,0"/>
+                <StackPanel>
+                  <TextBlock Text="세션 정보" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,0,0,6"/>
+                  <TextBlock x:Name="SessionInfoText" Style="{StaticResource BodyText}"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
           </Grid>
         </Border>
       </DockPanel>
@@ -99,7 +108,10 @@
           <StackPanel Grid.Column="0">
             <Border Style="{StaticResource Card}" Margin="0,0,0,16">
               <StackPanel>
-                <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                <StackPanel Orientation="Horizontal">
+                  <Ellipse x:Name="HostStateMark" Width="8" Height="8" Fill="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                  <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                </StackPanel>
                 <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
               </StackPanel>
             </Border>

@@ -350,7 +350,7 @@ public partial class MainWindow
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
             window.ConnectionControls.Visibility = Visibility.Visible;
-            window.HealthText.Text = "연결 종료";
+            SetHealth("연결 종료");
             inputEnabled = false;
             window.ConnectButton.IsEnabled = true;
             if (remote != null) window.ConnectButton.Content = "다시 접속";
@@ -394,17 +394,35 @@ public partial class MainWindow
         {
             window.SessionToolbar.Visibility = Visibility.Collapsed;
             window.SessionReveal.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
-            window.SessionHealthChip.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
             window.InputControlToggle.IsEnabled = enabled;
             window.DisplayList.IsEnabled = enabled;
             window.SessionMenuButton.IsEnabled = enabled;
             window.EndSessionButton.IsEnabled = enabled;
             window.ClientPanel.Margin = new Thickness(enabled ? 8 : 12);
-            if (enabled) window.HealthText.Text = "측정 중";
+            if (enabled) SetHealth("측정 중");
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
             else toolbarTimer?.Stop();
+        }
+
+        public void NoteSessionStatus(bool problem)
+        {
+            if (client == null) { window.SessionAlert.Visibility = Visibility.Collapsed; return; }
+            if (problem) ShowSessionToolbar();
+            else SyncProblemAlert(window.SessionToolbar.Visibility == Visibility.Visible);
+        }
+
+        private void SyncProblemAlert(bool toolbarOpen)
+        {
+            var problem = client != null && UiText.IsProblem(window.StatusText.Text);
+            window.SessionAlert.Visibility = problem && !toolbarOpen ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SetHealth(string text)
+        {
+            window.HealthText.Text = text;
+            window.SessionReveal.Content = text;
         }
 
         private void ShowSessionToolbar()
@@ -412,6 +430,7 @@ public partial class MainWindow
             if (client == null) return;
             window.SessionToolbar.Visibility = Visibility.Visible;
             window.SessionReveal.Visibility = Visibility.Collapsed;
+            SyncProblemAlert(true);
             RestartToolbarTimer();
         }
 
@@ -435,6 +454,7 @@ public partial class MainWindow
             }
             window.SessionToolbar.Visibility = Visibility.Collapsed;
             window.SessionReveal.Visibility = Visibility.Visible;
+            SyncProblemAlert(false);
         }
 
         public void RevealSessionToolbar(object sender, RoutedEventArgs e) => ShowSessionToolbar();
@@ -509,14 +529,14 @@ public partial class MainWindow
             var fps = framesSinceHealth / seconds;
             framesSinceHealth = 0;
             healthWindowStarted = DateTime.UtcNow;
-            window.Dispatcher.InvokeAsync(() => window.HealthText.Text = fps.ToString("F0") + " fps · " + (roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms"));
+            window.Dispatcher.InvokeAsync(() => SetHealth(fps.ToString("F0") + " fps · " + (roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms")));
         }
 
         private void UpdateHealthText()
         {
             window.Dispatcher.InvokeAsync(() =>
             {
-                if (lastFrameBytes == 0) window.HealthText.Text = "연결됨 · " + roundTripMilliseconds + " ms";
+                if (lastFrameBytes == 0) SetHealth("연결됨 · " + roundTripMilliseconds + " ms");
             });
         }
 
@@ -894,6 +914,7 @@ public partial class MainWindow
             var wanted = selectedDisplay ?? lastConnection.Display;
             window.DisplayList.ItemsSource = displays;
             window.DisplayList.SelectedItem = displays.FirstOrDefault(d => d.Id == wanted) ?? displays.FirstOrDefault(d => d.Primary) ?? displays.FirstOrDefault();
+            window.DisplayList.Visibility = UiText.OfferMonitorChoice(displays.Length) ? Visibility.Visible : Visibility.Collapsed;
         }
 
         public async void RefreshDisplays(object sender, RoutedEventArgs e)

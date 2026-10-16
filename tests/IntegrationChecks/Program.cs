@@ -40,6 +40,10 @@ Check(UiText.Explain(new SocketException((int)SocketError.AddressAlreadyInUse), 
 Check(UiText.Explain(new ArgumentException("포트 범위: 1024–65535"), "fallback") == "포트 범위: 1024–65535", "Korean validation text is kept");
 Check(UiText.Explain(new InvalidOperationException("Windows password-key enrollment is required."), "fallback") == "보안 등록에 실패했습니다. 현재 비밀번호를 다시 저장하세요.", "secure enrollment failures stay in Korean");
 Check(!UiText.Explain(new InvalidOperationException("Object reference not set to an instance of an object."), "연결을 다시 시도하세요.").Contains("Object reference"), "unknown English failures do not reach the UI");
+Check(UiText.Explain(new ArgumentException("Invalid clipboard origin"), "fallback") == "클립보드 전송을 확인하지 못했습니다. 다시 복사하세요.", "clipboard origin failures stay in Korean");
+Check(UiText.Explain(new ArgumentException("File hash mismatch"), "fallback") == "클립보드 파일이 맞지 않습니다. 다시 복사하세요.", "clipboard hash failures stay in Korean");
+Check(UiText.Explain(new InvalidOperationException("DXGI interface is unavailable."), "fallback") == "화면 캡처를 시작하지 못했습니다.", "capture startup failures stay in Korean");
+Check(!UiText.OfferMonitorChoice(2) && UiText.OfferMonitorChoice(3), "one monitor does not add a display picker");
 Check(UiText.ShortSecret("99D8D8CC4DC57302") == "99D8D8CC4DC57302" && UiText.ShortSecret("99D8D8CC4DC5730254F7947AD64ADD88") == "99D8D8CC4DC57302…", "a long fingerprint is shortened for the host page");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");

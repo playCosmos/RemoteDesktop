@@ -68,14 +68,8 @@ public partial class MainWindow : Window
         StatusText.Foreground = problem
             ? (System.Windows.Media.Brush)FindResource("DangerBrush")
             : (System.Windows.Media.Brush)FindResource("InkBrush");
-        var inSession = SessionHealthChip.Visibility == Visibility.Visible;
-        if (problem && inSession)
-        {
-            SessionAlertText.Text = text;
-            SessionAlert.Visibility = Visibility.Visible;
-            clientSession.RevealSessionToolbar(this, new RoutedEventArgs());
-        }
-        else SessionAlert.Visibility = Visibility.Collapsed;
+        SessionAlertText.Text = text;
+        clientSession.NoteSessionStatus(problem);
     });
 
     private void ClientNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() =>

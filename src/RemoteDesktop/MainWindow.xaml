@@ -78,7 +78,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel x:Name="SessionActions" Orientation="Horizontal">
               <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
-              <ComboBox x:Name="DisplayList" Width="210" IsEnabled="False" SelectionChanged="DisplayChanged" DropDownClosed="DisplayListClosed" DisplayMemberPath="Name" Margin="8,0,0,0"/>
+              <ComboBox x:Name="DisplayList" Width="156" Visibility="Collapsed" IsEnabled="False" SelectionChanged="DisplayChanged" DropDownClosed="DisplayListClosed" DisplayMemberPath="Name" Margin="8,0,0,0"/>
               <Button x:Name="SessionMenuButton" Content="조작" IsEnabled="False" Click="OpenSessionMenu" Margin="8,0,0,0">
                 <Button.ContextMenu>
                   <ContextMenu x:Name="SessionMenu" Closed="SessionMenuClosed">
@@ -109,14 +109,14 @@
               <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-            <Button x:Name="EndSessionButton" Grid.Column="2" Content="연결 종료" IsEnabled="False" Click="Disconnect" Foreground="{StaticResource DangerBrush}"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+              <TextBlock x:Name="HealthText" Text="연결 전" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+              <Button x:Name="EndSessionButton" Content="연결 종료" IsEnabled="False" Click="Disconnect" Foreground="{StaticResource DangerBrush}"/>
+            </StackPanel>
           </Grid>
         </Border>
-        <Button x:Name="SessionReveal" Content="세션" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 메뉴 열기"/>
-        <Border x:Name="SessionHealthChip" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="{StaticResource QuietHoverBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" IsHitTestVisible="False">
-          <TextBlock x:Name="HealthText" Text="연결 전" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
-        </Border>
-        <Border x:Name="SessionAlert" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16,24,52" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" IsHitTestVisible="False">
+        <Button x:Name="SessionReveal" Content="측정 중" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 조작 열기"/>
+        <Border x:Name="SessionAlert" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" IsHitTestVisible="False">
           <TextBlock x:Name="SessionAlertText" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </Border>
             <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">

@@ -330,7 +330,7 @@ public partial class MainWindow
             inputSignal?.Writer.TryComplete();
             lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
             ClearFrame();
-            ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
+            ShowStage(null);
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
@@ -383,7 +383,7 @@ public partial class MainWindow
             window.DisplayList.IsEnabled = enabled;
             window.SessionMenuButton.IsEnabled = enabled;
             window.EndSessionButton.IsEnabled = enabled;
-            window.ClientPanel.Margin = new Thickness(enabled ? 8 : 16);
+            window.ClientPanel.Margin = new Thickness(enabled ? 8 : 12);
             if (enabled) window.HealthText.Text = "측정 중";
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
@@ -890,7 +890,7 @@ public partial class MainWindow
             if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
             Queue(new("release"));
             ClearFrame();
-            ShowStage(client == null ? "접속하면 원격 화면이 여기에 표시됩니다" : "화면을 받는 중…");
+            ShowStage(client == null ? null : "화면을 받는 중…");
             renderedDisplay = null;
             selectedDisplay = display.Id;
             lastConnection.Display = display.Id;
@@ -928,7 +928,7 @@ public partial class MainWindow
                 Queue(new("release"));
                 shell.Content = null;
                 window.ClientTab.Content = window.ClientPanel;
-                window.ClientPanel.Margin = new Thickness(16);
+                window.ClientPanel.Margin = new Thickness(client is null ? 12 : 8);
                 window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
                 fullscreen = null;
                 window.ScreenImage.Focus();

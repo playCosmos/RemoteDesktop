@@ -61,7 +61,6 @@ public partial class MainWindow
             window.StartButton.Content = state switch
             {
                 HostUiState.Starting => "접속 대기 시작 중…",
-                HostUiState.Listening => "접속 대기 중",
                 HostUiState.Stopping => "접속 대기 중지 중…",
                 _ => "접속 대기 시작"
             };

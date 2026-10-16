@@ -57,6 +57,7 @@ public partial class MainWindow
             frameQuality = Math.Clamp(lastConnection.FrameQuality, 25, 90);
             frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
+            ShowSessionPreset();
         }
 
         public void InstallInputHooks()
@@ -112,6 +113,7 @@ public partial class MainWindow
                 window.InputControlToggle.IsChecked = true;
                 window.ConnectionControls.Visibility = Visibility.Collapsed;
                 SetSessionControlsEnabled(true);
+                ShowStage("화면을 받는 중…");
                 framesSinceHealth = 0;
                 healthWindowStarted = DateTime.UtcNow;
                 roundTripMilliseconds = -1;
@@ -178,6 +180,7 @@ public partial class MainWindow
                     image.EndInit();
                     image.Freeze();
                     window.ScreenImage.Source = image;
+                    ShowStage(null);
                     renderedDisplay = display;
                     UpdateFrameHealth();
                     var elapsed = Stopwatch.GetElapsedTime(started);
@@ -226,6 +229,7 @@ public partial class MainWindow
             connection?.Cancel();
             inputs?.Writer.TryComplete();
             window.ScreenImage.Source = null;
+            ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
             window.ConnectionControls.Visibility = Visibility.Visible;
@@ -275,9 +279,19 @@ public partial class MainWindow
         {
             window.Dispatcher.InvokeAsync(() =>
             {
-                if (framesSinceHealth == 0) window.HealthText.Text = "연결됨 · " + roundTripMilliseconds + " ms";
+                if (lastFrameBytes == 0) window.HealthText.Text = "연결됨 · " + roundTripMilliseconds + " ms";
             });
         }
+
+        private void ShowStage(string? hint)
+        {
+            window.StageHint.Text = hint ?? "";
+            window.StageHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private void ShowSessionPreset() => window.SessionPresetText.Text = QualityLabel(frameQuality) + " · " + frameRate + " FPS";
+
+        private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
 
         private bool Position(MouseEventArgs e)
         {
@@ -477,6 +491,7 @@ public partial class MainWindow
             frameQuality = Math.Clamp(quality, 25, 90);
             lastConnection.FrameQuality = frameQuality;
             SaveConnection();
+            ShowSessionPreset();
             if (client != null) window.SessionStatus("화면 품질: " + selected.Header);
         }
 
@@ -486,6 +501,7 @@ public partial class MainWindow
             frameRate = rate;
             lastConnection.FrameRate = rate;
             SaveConnection();
+            ShowSessionPreset();
             if (client != null) window.SessionStatus("최대 프레임 속도: " + rate + " FPS");
         }
 
@@ -550,6 +566,7 @@ public partial class MainWindow
             if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
             Queue(new("release"));
             window.ScreenImage.Source = null;
+            ShowStage(client == null ? "접속하면 원격 화면이 여기에 표시됩니다" : "화면을 받는 중…");
             renderedDisplay = null;
             selectedDisplay = display.Id;
             lastConnection.Display = display.Id;

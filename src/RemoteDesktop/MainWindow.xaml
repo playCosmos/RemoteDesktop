@@ -69,6 +69,7 @@
                   </ContextMenu>
                 </Button.ContextMenu>
               </Button>
+              <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -81,7 +82,7 @@
         </Border>
         <Border Background="{StaticResource StageBrush}" CornerRadius="12" ClipToBounds="True">
           <Grid>
-            <TextBlock Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" LostKeyboardFocus="ReleaseInput"/>
           </Grid>
         </Border>

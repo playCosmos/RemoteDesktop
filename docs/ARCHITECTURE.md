@@ -34,7 +34,7 @@
 
 한 단계가 끝나기 전에는 다음 단계의 파일을 나누지 않는다. 각 단계는 기존 통합 테스트를 그대로 통과해야 한다.
 
-1. 호스트 라우트 분리. RemoteHost는 포트, 인증서, 세션 토큰, 수명만 남긴다. 로그인·OPAQUE, 프레임·입력, 클립보드를 각각 작은 맵 메서드로 옮긴다. URL, 상태 코드, 잠금 순서는 바꾸지 않는다.
+1. 호스트 라우트 분리. RemoteHost는 포트, 인증서, 세션 토큰, 수명만 남긴다. 로그인·OPAQUE, 프레임·입력, 클립보드를 각각 작은 맵 메서드로 옮긴다. URL, 상태 코드, 잠금 순서는 바꾸지 않는다. 이 단계는 반영되어 있다. StartAsync는 미들웨어와 수명만 두고, 등록은 MapAuthentication, MapClipboard, MapDesktop에 있다.
 2. 캡처와 입력 분리. Desktop의 공개 표면인 Displays, CaptureDetailed, Apply, Release는 유지하고, JPEG·뷰포트·화질 적응은 캡처 파이프라인으로, SendInput은 입력 주입기로 나눈다. 좌표 계산 MapPoint는 캡처 비트맵과 입력 주입이 같은 함수를 쓰므로 그대로 공유한다.
 3. Windows 화면 분리. MainWindow는 탭과 상태 표시만 남긴다. 서버 시작·중지·비밀번호는 HostSession, 프레임 루프·후킹·클립보드는 ClientSession으로 옮긴다. XAML 컨트롤 이름과 사용자에게 보이는 문구는 유지한다.
 4. Android 세션 분리. MainActivity의 접속, 프레임 스케줄, 백그라운드 ping, 재로그인을 RemoteSession으로 옮긴다. 뷰 생성과 제스처는 Activity에 둔다. 다른 앱에서 돌아왔을 때의 재접속 조건은 코드를 옮기기 전에 테스트로 고정할 수 없으므로, 이동 전후 로그 문구와 타임아웃 값(약 5초 ping, 메모리 비밀번호)을 그대로 복사한다.

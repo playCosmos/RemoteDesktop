@@ -72,7 +72,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             if (settings.HasPassword) await StartHostAsync(automatic: true);
-            else { SetHostState(HostUiState.Stopped); Status("서버 비밀번호를 한 번 설정하면 다음 실행부터 자동으로 접속 대기를 시작합니다."); }
+            else { SetHostState(HostUiState.Stopped); HostStatus("서버 비밀번호를 한 번 설정하면 다음 실행부터 자동으로 접속 대기를 시작합니다."); }
         };
         Closing += (_, _) => closing = true;
         Closed += async (_, _) => { UninstallSystemShortcutHook(); fullscreen?.Close(); await DisconnectClient(); if (host != null) await host.DisposeAsync(); certificate.Dispose(); };
@@ -83,7 +83,7 @@ public partial class MainWindow : Window
         if (!IsLoaded || SmoothHostToggle.IsChecked is not bool enabled) return;
         settings.SmoothHost = enabled;
         try { settings.Save(); }
-        catch (Exception ex) { Status(ex.Message); }
+        catch (Exception ex) { HostStatus(ex.Message); }
     }
     internal void BringToFront()
     {
@@ -91,10 +91,18 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
     }
-    private void Status(string text) => Dispatcher.InvokeAsync(() =>
+    private void HostStatus(string text) => Dispatcher.InvokeAsync(() =>
     {
-        StatusText.Text = text;
         ServerStatusText.Text = text;
+        KickButton.IsEnabled = host?.HasSession == true && StopButton.IsEnabled;
+    });
+    private void SessionStatus(string text) => Dispatcher.InvokeAsync(() => StatusText.Text = text);
+    private void ClientNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() =>
+    {
+        ClientNoticeText.Text = text;
+        ClientNoticeText.Foreground = problem
+            ? (System.Windows.Media.Brush)FindResource("DangerBrush")
+            : (System.Windows.Media.Brush)FindResource("MutedBrush");
     });
     
     private enum HostUiState { Stopped, Starting, Listening, Stopping }
@@ -109,6 +117,7 @@ public partial class MainWindow : Window
         };
         StartButton.IsEnabled = state == HostUiState.Stopped;
         StopButton.IsEnabled = state == HostUiState.Listening;
+        KickButton.IsEnabled = state == HostUiState.Listening && host?.HasSession == true;
         HostPort.IsEnabled = ChangePasswordButton.IsEnabled = state == HostUiState.Stopped;
         SmoothHostToggle.IsEnabled = state == HostUiState.Stopped;
     }
@@ -116,7 +125,7 @@ public partial class MainWindow : Window
     {
         SetHostState(HostUiState.Listening);
         var addresses = string.Join(", ", Dns.GetHostAddresses(Dns.GetHostName()).Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork));
-        Status("접속 대기 중 · 포트 " + port + " · " + addresses);
+        HostStatus("접속 대기 중 · 포트 " + port + " · " + addresses);
     }
     private void UpdatePasswordState()
     {
@@ -149,7 +158,7 @@ public partial class MainWindow : Window
     }
     private void ChangeHostPassword(object sender, RoutedEventArgs e)
     {
-        if (host != null || hostStarting) { Status("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
+        if (host != null || hostStarting) { HostStatus("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
         changingPassword = settings.HasOpaqueIdentity;
         PasswordEditor.Visibility = Visibility.Visible;
         HostPasswordInstruction.Text = changingPassword ? "새 접속 비밀번호 (8자 이상)" : "현재 서버 비밀번호 (기존 비밀번호 유지)";
@@ -158,24 +167,32 @@ public partial class MainWindow : Window
     }
     private async void SaveHostPassword(object sender, RoutedEventArgs e)
     {
-        if (host != null || hostStarting) { Status("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
+        if (host != null || hostStarting) { HostStatus("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
         try
         {
             if (settings.HasPassword && !settings.HasOpaqueIdentity)
             {
                 settings.EnrollOpaqueIdentity(HostPassword.Password);
-                Status("기존 비밀번호를 확인했고 첫 지문 등록을 준비했습니다.");
+                HostStatus("기존 비밀번호를 확인했고 첫 지문 등록을 준비했습니다.");
             }
             else
             {
                 settings.SetPassword(HostPassword.Password);
-                Status("비밀번호 저장됨 · 지금 자동으로 접속 대기를 시작합니다.");
+                HostStatus("비밀번호 저장됨 · 지금 자동으로 접속 대기를 시작합니다.");
             }
             changingPassword = false;
             UpdatePasswordState();
             await StartHostAsync(automatic: false);
         }
-        catch (Exception ex) { Status(ex.Message); }
+        catch (Exception ex) { HostStatus(ex.Message); }
+    }
+    private void HostPasswordKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is Key.Enter or Key.Return)
+        {
+            e.Handled = true;
+            SaveHostPassword(sender, e);
+        }
     }
     private async void StartHost(object sender, RoutedEventArgs e)
     {
@@ -191,7 +208,7 @@ public partial class MainWindow : Window
         {
             if (automatic && !settings.HasPassword)
             {
-                Status("접속 비밀번호를 한 번 저장하면 다음 실행부터 자동으로 접속 대기를 시작합니다.");
+                HostStatus("접속 비밀번호를 한 번 저장하면 다음 실행부터 자동으로 접속 대기를 시작합니다.");
                 SetHostState(HostUiState.Stopped);
                 return;
             }
@@ -199,32 +216,34 @@ public partial class MainWindow : Window
             settings.Port = port;
             if (HostPassword.Password.Length > 0) settings.SetPassword(HostPassword.Password);
             if (!settings.HasPassword) throw new InvalidOperationException("비밀번호를 먼저 저장하세요.");
+            HostStatus("접속 대기를 시작하는 중…");
             settings.Save();
-            host = new RemoteHost(settings); host.Status += Status;
+            host = new RemoteHost(settings); host.Status += HostStatus;
             await host.StartAsync(port, certificate);
             if (closing) { await host.DisposeAsync(); host = null; return; }
             UpdatePasswordState();
             ShowListening(port);
-            Status(!settings.HasOpaqueIdentity
+            HostStatus(!settings.HasOpaqueIdentity
                 ? "접속 대기 중 · 기존 지문으로 연결 가능 · 비밀번호 기반 첫 등록은 현재 비밀번호를 다시 저장하세요."
                 : automatic ? $"자동 접속 대기 중 · 포트 {port}" : $"접속 대기 중 · 포트 {port}");
         }
         catch (Exception ex)
         {
             if (host != null) { await host.DisposeAsync(); host = null; }
-            Status((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + ex.Message);
+            HostStatus((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + ex.Message);
             SetHostState(HostUiState.Stopped);
         }
         finally { hostStarting = false; }
     }
     private async void StopHost(object sender, RoutedEventArgs e)
     {
-        if (hostStarting) { Status("서버를 시작하는 중입니다."); return; }
+        if (hostStarting) { HostStatus("서버를 시작하는 중입니다."); return; }
         SetHostState(HostUiState.Stopping);
+        HostStatus("접속 대기를 중지하는 중…");
         if (host != null) { await host.DisposeAsync(); host = null; }
         SetHostState(HostUiState.Stopped);
         UpdatePasswordState();
-        Status("서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다.");
+        HostStatus("서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다.");
     }
     private void Kick(object sender, RoutedEventArgs e)
     {
@@ -234,6 +253,8 @@ public partial class MainWindow : Window
     {
         if (connecting || client != null) return;
         connecting = true;
+        ConnectButton.IsEnabled = false;
+        ClientNotice("접속하는 중…");
         var attempt = generation;
         try
         {
@@ -241,7 +262,7 @@ public partial class MainWindow : Window
             var pin = ServerPin.Text.Trim();
             if (pin.Length == 0)
             {
-                Status("비밀번호로 서버 키를 확인하는 중입니다…");
+                ClientNotice("비밀번호로 서버 키를 확인하는 중입니다…");
                 pin = await PakeBootstrap.AcquireServerFingerprint(endpoint, ClientPassword.Password);
                 ServerPin.Text = pin;
             }
@@ -255,16 +276,16 @@ public partial class MainWindow : Window
             SaveConnection();
             try { await LoadDisplays(); } catch { await DisconnectClient(); throw; }
             connection = new(); inputs = Channel.CreateBounded<InputEvent>(256);
-            clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), Status);
+            clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), SessionStatus);
             clipboardSync.AutoEnabled = ClipboardAutoMenu.IsChecked == true;
             inputEnabled = true; InputControlToggle.IsChecked = true;
             ConnectionControls.Visibility = Visibility.Collapsed;
             SetSessionControlsEnabled(true); framesSinceHealth = 0; healthWindowStarted = DateTime.UtcNow; roundTripMilliseconds = -1;
-            Status("연결됨");
+            SessionStatus("연결됨");
             _ = RunConnection(remote, connection.Token);
         }
-        catch (Exception ex) { Status("접속 실패: " + ex.Message); }
-        finally { connecting = false; }
+        catch (Exception ex) { ClientNotice("접속 실패: " + ex.Message, problem: true); }
+        finally { connecting = false; ConnectButton.IsEnabled = client == null; }
     }
     private void ClientPasswordKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
@@ -332,10 +353,10 @@ public partial class MainWindow : Window
             }
         }
         var tasks = new[] { Frames(), SendInputs(), Heartbeat() };
-        async Task SyncClipboard() { try { await clipboardSync!.Run(ct); } catch (OperationCanceledException) { } catch (Exception ex) { Status("클립보드 동기화 오류: " + ex.Message); } }
+        async Task SyncClipboard() { try { await clipboardSync!.Run(ct); } catch (OperationCanceledException) { } catch (Exception ex) { SessionStatus("클립보드 동기화 오류: " + ex.Message); } }
         var clipboardTask = SyncClipboard();
         try { await await Task.WhenAny(tasks); }
-        catch (Exception ex) when (!ct.IsCancellationRequested) { Status("연결 종료: " + ex.Message); }
+        catch (Exception ex) when (!ct.IsCancellationRequested) { ClientNotice("연결 종료: " + ex.Message, problem: true); }
         catch (OperationCanceledException) { }
         finally
         {
@@ -353,17 +374,29 @@ public partial class MainWindow : Window
         SetSessionControlsEnabled(false); ConnectionControls.Visibility = Visibility.Visible; HealthText.Text = "연결 종료"; inputEnabled = false;
         if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
     }
-    private async void Disconnect(object sender, RoutedEventArgs e) { await DisconnectClient(); Status("연결 종료됨"); }
+    private async void Disconnect(object sender, RoutedEventArgs e) { await DisconnectClient(); ClientNotice("연결 종료됨"); }
     private void SetSessionControlsEnabled(bool enabled)
     {
+        SessionToolbar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         InputControlToggle.IsEnabled = enabled;
         DisplayList.IsEnabled = enabled;
         SessionMenuButton.IsEnabled = enabled;
+        EndSessionButton.IsEnabled = enabled;
+        if (enabled) HealthText.Text = "측정 중";
+    }
+    private void CopyFingerprint(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetText(Fingerprint.Text);
+            HostStatus("서버 지문을 복사했습니다.");
+        }
+        catch (Exception ex) { HostStatus("지문 복사 실패: " + ex.Message); }
     }
     private void Queue(InputEvent input)
     {
         if (!inputEnabled && input.Kind != "release") return;
-        if (client != null && inputs != null && !inputs.Writer.TryWrite(input)) { connection?.Cancel(); Status("입력 대기열 초과로 연결을 종료합니다."); }
+        if (client != null && inputs != null && !inputs.Writer.TryWrite(input)) { ClientNotice("입력 대기열 초과로 연결을 종료합니다.", problem: true); connection?.Cancel(); }
     }
     private void UpdateFrameHealth()
     {
@@ -491,7 +524,7 @@ public partial class MainWindow : Window
             Queue(new("key", Code: 86)); Queue(new("key", Code: 17));
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { Status("붙여넣기 중단: " + ex.Message); }
+        catch (Exception ex) { SessionStatus("붙여넣기 중단: " + ex.Message); }
         finally { pasting = false; }
     }
     private void KeyUpRemote(object sender, System.Windows.Input.KeyEventArgs e) { if (e.Key == Key.F11) { e.Handled = true; return; } var code = NativeKey(e); if (code > 0) Queue(new("key", Code: code)); e.Handled = true; }
@@ -501,38 +534,38 @@ public partial class MainWindow : Window
         var enabled = InputControlToggle.IsChecked == true;
         if (!enabled) Queue(new("release"));
         inputEnabled = enabled;
-        if (client != null) Status(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
+        if (client != null) SessionStatus(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
     }
     private void ClipboardAutoChanged(object sender, RoutedEventArgs e)
     {
         var enabled = ClipboardAutoMenu.IsChecked == true;
         if (clipboardSync != null) clipboardSync.AutoEnabled = enabled;
         lastConnection.ClipboardAutoSync = enabled; SaveConnection();
-        if (client != null) Status(enabled ? "클립보드 자동 동기화 켜짐" : "클립보드 자동 동기화 꺼짐");
+        if (client != null) SessionStatus(enabled ? "클립보드 자동 동기화 켜짐" : "클립보드 자동 동기화 꺼짐");
     }
     private async void ClipboardSend(object sender, RoutedEventArgs e)
     {
         if (clipboardSync is not { } sync || connection is null) return;
-        try { if (!await sync.PushAny(connection.Token)) Status("보낼 텍스트나 파일을 먼저 복사하세요."); }
-        catch (Exception ex) { Status("클립보드 보내기 실패: " + ex.Message); }
+        try { if (!await sync.PushAny(connection.Token)) SessionStatus("보낼 텍스트나 파일을 먼저 복사하세요."); }
+        catch (Exception ex) { SessionStatus("클립보드 보내기 실패: " + ex.Message); }
     }
     private async void ClipboardReceive(object sender, RoutedEventArgs e)
     {
         if (clipboardSync is not { } sync || connection is null) return;
-        try { await sync.Pull(connection.Token); Status("상대 클립보드를 확인했습니다."); }
-        catch (Exception ex) { Status("클립보드 받기 실패: " + ex.Message); }
+        try { await sync.Pull(connection.Token); SessionStatus("상대 클립보드를 확인했습니다."); }
+        catch (Exception ex) { SessionStatus("클립보드 받기 실패: " + ex.Message); }
     }
     private void QualityMenuChanged(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.MenuItem selected || !int.TryParse(selected.Tag?.ToString(), out var quality)) return;
         frameQuality = Math.Clamp(quality, 25, 90); lastConnection.FrameQuality = frameQuality; SaveConnection();
-        if (client != null) Status($"화면 품질: {selected.Header}");
+        if (client != null) SessionStatus($"화면 품질: {selected.Header}");
     }
     private void FrameRateMenuChanged(object sender, RoutedEventArgs e)
     {
         if (sender is not System.Windows.Controls.MenuItem selected || !int.TryParse(selected.Tag?.ToString(), out var rate) || rate is not (5 or 10 or 15 or 30)) return;
         frameRate = rate; lastConnection.FrameRate = rate; SaveConnection();
-        if (client != null) Status($"최대 프레임 속도: {rate} FPS");
+        if (client != null) SessionStatus($"최대 프레임 속도: {rate} FPS");
     }
     private void ShowSessionInfo(object sender, RoutedEventArgs e)
     {
@@ -543,7 +576,15 @@ public partial class MainWindow : Window
             $"대상: {lastConnection.Address}\n모니터: {display?.Name ?? "선택 안 됨"}\n수신 해상도: {resolution}\n요청 화질: {frameQuality}\n서버 화질: {(measured && lastFrameQuality > 0 ? lastFrameQuality.ToString() : "측정 전")}\n최대 프레임 속도: {frameRate} FPS\n캡처: {(measured ? $"{lastCaptureMilliseconds:0.0} ms" : "측정 전")}\n압축: {(measured ? $"{lastEncodeMilliseconds:0.0} ms" : "측정 전")}\n프레임 크기: {(measured ? $"{lastFrameBytes / 1024.0:0} KB" : "측정 전")}\n화면 재사용: {(measured ? (lastFrameReused ? "예" : "아니오") : "측정 전")}\n왕복 지연: {(roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms")}\n입력 제어: {(inputEnabled ? "켜짐" : "꺼짐")}\n클립보드 자동 동기화: {(ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐")}",
             "세션 정보", MessageBoxButton.OK, MessageBoxImage.Information);
     }
-    private void SaveConnection() { try { lastConnection.Save(); } catch (Exception ex) { Status("연결 정보 저장 실패: " + ex.Message); } }
+    private void SaveConnection()
+    {
+        try { lastConnection.Save(); }
+        catch (Exception ex)
+        {
+            var message = "연결 정보 저장 실패: " + ex.Message;
+            if (client == null) ClientNotice(message, problem: true); else SessionStatus(message);
+        }
+    }
     private void OpenSessionMenu(object sender, RoutedEventArgs e)
     {
         SessionMenu.PlacementTarget = SessionMenuButton;
@@ -558,7 +599,7 @@ public partial class MainWindow : Window
         DisplayList.ItemsSource = displays;
         DisplayList.SelectedItem = displays.FirstOrDefault(d => d.Id == wanted) ?? displays.FirstOrDefault(d => d.Primary) ?? displays.FirstOrDefault();
     }
-    private async void RefreshDisplays(object sender, RoutedEventArgs e) { try { await LoadDisplays(); } catch (Exception ex) { Status(ex.Message); } }
+    private async void RefreshDisplays(object sender, RoutedEventArgs e) { try { await LoadDisplays(); } catch (Exception ex) { SessionStatus(ex.Message); } }
     private void DisplayChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         if (DisplayList.SelectedItem is not RemoteDisplay display) return;
@@ -574,14 +615,14 @@ public partial class MainWindow : Window
         Queue(new("release"));
         ClientTab.Content = null; ConnectionControls.Visibility = Visibility.Collapsed; ClientPanel.Margin = new Thickness(0);
         // Keep this a normal fullscreen window. A Topmost window would hide local dialogs and other client windows.
-        var window = new Window { Title = "Remote Desktop · F11 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = this, Content = ClientPanel };
+        var window = new Window { Title = "Personal Remote Desktop · F11 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = this, Content = ClientPanel };
         // Open on the same local monitor as the main window before maximizing.
         window.WindowStartupLocation = WindowStartupLocation.Manual; window.Left = Left; window.Top = Top; window.Width = ActualWidth; window.Height = ActualHeight;
         fullscreen = window;
         window.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(window).Handle)?.AddHook(NativeKeyboard);
         window.PreviewKeyDown += FullscreenKey;
         window.Deactivated += (_, _) => Queue(new("release"));
-        window.Closed += (_, _) => { Queue(new("release")); window.Content = null; ClientTab.Content = ClientPanel; ClientPanel.Margin = new Thickness(12); ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed; fullscreen = null; ScreenImage.Focus(); };
+        window.Closed += (_, _) => { Queue(new("release")); window.Content = null; ClientTab.Content = ClientPanel; ClientPanel.Margin = new Thickness(16); ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed; fullscreen = null; ScreenImage.Focus(); };
         window.Show(); window.WindowState = WindowState.Maximized; ScreenImage.Focus();
     }
     private void ReleaseInput(object sender, KeyboardFocusChangedEventArgs e)

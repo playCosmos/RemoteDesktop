@@ -1,88 +1,140 @@
-<Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Width="1100" Height="780" Background="#F3F5F8">
-  <DockPanel Margin="16">
-    <TabControl>
-      <TabItem x:Name="ServerTab" Header="접속 받기 (서버)">
-        <StackPanel Margin="20" MaxWidth="700" HorizontalAlignment="Left">
-          <TextBlock x:Name="ServerStatusText" Text="준비됨" TextTrimming="CharacterEllipsis" MaxWidth="660" Margin="0,0,0,8" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-          <TextBlock x:Name="PasswordState" TextWrapping="Wrap" Margin="0,0,0,8" />
-          <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,8" />
-          <StackPanel x:Name="PasswordEditor">
-            <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상 · 한 번 저장하면 계속 사용)" />
-            <PasswordBox x:Name="HostPassword" Margin="0,6,0,8" />
-            <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12" Padding="12,5" />
-          </StackPanel>
-          <TextBlock Text="포트" /><TextBox x:Name="HostPort" Text="45831" Margin="0,6,0,12" />
-          <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,10" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" />
-          <WrapPanel><Button x:Name="StartButton" Content="접속 대기 시작" Click="StartHost" Padding="14,8" Margin="0,0,8,0" /><Button x:Name="StopButton" Content="서버 중지" Click="StopHost" Padding="14,8" IsEnabled="False" /><Button Content="현재 접속 끊기" Click="Kick" Padding="14,8" Margin="8,0,0,0" /></WrapPanel>
-          <TextBlock Text="서버 인증서 SHA-256 지문 — 클라이언트에 입력" Margin="0,24,0,6" />
-          <TextBox x:Name="Fingerprint" IsReadOnly="True" TextWrapping="Wrap" />
-          <TextBlock x:Name="Addresses" Margin="0,12,0,0" TextWrapping="Wrap" />
-          <TextBlock Margin="0,20,0,0" TextWrapping="Wrap" Text="비밀번호 인증 후 수락 없이 연결됩니다. 연결 중 탐색기에서 복사한 파일은 상대 클립보드로 전달되어 붙여넣을 수 있습니다. 동일 LAN/VPN에서 사용하세요." />
-        </StackPanel>
-      </TabItem>
-      <TabItem x:Name="ClientTab" Header="다른 PC에 접속 (클라이언트)">
-        <DockPanel x:Name="ClientPanel" Margin="12">
-          <StackPanel x:Name="ConnectionControls" DockPanel.Dock="Top">
-            <WrapPanel>
-              <TextBlock Text="주소" VerticalAlignment="Center" />
-              <TextBox x:Name="Address" Text="127.0.0.1" Width="170" Margin="8,0" />
-              <TextBlock Text="포트" VerticalAlignment="Center" />
-              <TextBox x:Name="ClientPort" Text="45831" Width="70" Margin="8,0" />
-              <TextBlock Text="비밀번호" VerticalAlignment="Center" />
-              <PasswordBox x:Name="ClientPassword" Width="150" Margin="8,0" PreviewKeyDown="ClientPasswordKeyDown" />
-              <Button Content="접속" Click="Connect" Padding="12,4" />
-              <Button Content="종료" Click="Disconnect" Padding="12,4" Margin="8,0" />
-            </WrapPanel>
-            <DockPanel Margin="0,8"><TextBlock Text="서버 지문 (선택)" VerticalAlignment="Center" Margin="0,0,8,0" /><TextBox x:Name="ServerPin" /></DockPanel>
-            <TextBlock Text="지문을 비우면 Windows 서버는 비밀번호로 첫 지문을 안전하게 등록합니다." Foreground="#586174" />
-          </StackPanel>
-          <Grid x:Name="SessionToolbar" DockPanel.Dock="Top" Margin="0,0,0,6">
+<Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Width="1180" Height="800" MinWidth="920" MinHeight="640" Background="{StaticResource AppBrush}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+  <TabControl>
+    <TabItem x:Name="ClientTab" Header="원격 접속">
+      <DockPanel x:Name="ClientPanel" Margin="16">
+        <Border x:Name="ConnectionControls" DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12">
+          <Grid>
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="2*"/>
+              <ColumnDefinition Width="12"/>
+              <ColumnDefinition Width="110"/>
+              <ColumnDefinition Width="12"/>
+              <ColumnDefinition Width="2*"/>
+              <ColumnDefinition Width="12"/>
+              <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <StackPanel x:Name="SessionActions" Grid.Column="0" Orientation="Horizontal">
-              <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged" Padding="10,4" />
-              <ComboBox x:Name="DisplayList" Width="190" IsEnabled="False" SelectionChanged="DisplayChanged" Margin="8,0,0,0" />
-              <Button x:Name="SessionMenuButton" Content="조작 ▾" IsEnabled="False" Click="OpenSessionMenu" Margin="6,0,0,0" Padding="9,4">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="주소" Style="{StaticResource FieldLabel}"/>
+            <TextBlock Grid.Row="0" Grid.Column="2" Text="포트" Style="{StaticResource FieldLabel}"/>
+            <TextBlock Grid.Row="0" Grid.Column="4" Text="비밀번호" Style="{StaticResource FieldLabel}"/>
+            <TextBox x:Name="Address" Grid.Row="1" Grid.Column="0" Text="127.0.0.1" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <PasswordBox x:Name="ClientPassword" Grid.Row="1" Grid.Column="4" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="6" Content="접속" Style="{StaticResource PrimaryButton}" MinWidth="88" Click="Connect" VerticalAlignment="Bottom"/>
+            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Text="서버 지문 (선택)" Style="{StaticResource FieldLabel}" Margin="0,14,0,6"/>
+            <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,10,0,0" MaxHeight="60" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+          </Grid>
+        </Border>
+        <Border x:Name="SessionToolbar" Visibility="Collapsed" DockPanel.Dock="Top" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="8,6" Margin="0,0,0,10">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel x:Name="SessionActions" Orientation="Horizontal">
+              <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
+              <ComboBox x:Name="DisplayList" Width="210" IsEnabled="False" SelectionChanged="DisplayChanged" DisplayMemberPath="Name" Margin="8,0,0,0"/>
+              <Button x:Name="SessionMenuButton" Content="조작" IsEnabled="False" Click="OpenSessionMenu" Margin="8,0,0,0">
                 <Button.ContextMenu>
                   <ContextMenu x:Name="SessionMenu">
                     <MenuItem Header="화면 품질">
-                      <MenuItem Header="저대역폭" Tag="30" Click="QualityMenuChanged" />
-                      <MenuItem Header="균형" Tag="55" Click="QualityMenuChanged" />
-                      <MenuItem Header="고화질" Tag="75" Click="QualityMenuChanged" />
+                      <MenuItem Header="저대역폭" Tag="30" Click="QualityMenuChanged"/>
+                      <MenuItem Header="균형" Tag="55" Click="QualityMenuChanged"/>
+                      <MenuItem Header="고화질" Tag="75" Click="QualityMenuChanged"/>
                     </MenuItem>
                     <MenuItem Header="최대 FPS">
-                      <MenuItem Header="5 FPS" Tag="5" Click="FrameRateMenuChanged" />
-                      <MenuItem Header="10 FPS" Tag="10" Click="FrameRateMenuChanged" />
-                      <MenuItem Header="15 FPS" Tag="15" Click="FrameRateMenuChanged" />
-                      <MenuItem Header="30 FPS" Tag="30" Click="FrameRateMenuChanged" />
+                      <MenuItem Header="5 FPS" Tag="5" Click="FrameRateMenuChanged"/>
+                      <MenuItem Header="10 FPS" Tag="10" Click="FrameRateMenuChanged"/>
+                      <MenuItem Header="15 FPS" Tag="15" Click="FrameRateMenuChanged"/>
+                      <MenuItem Header="30 FPS" Tag="30" Click="FrameRateMenuChanged"/>
                     </MenuItem>
-                    <Separator />
-                    <MenuItem x:Name="ClipboardAutoMenu" Header="클립보드 자동 동기화" IsCheckable="True" Checked="ClipboardAutoChanged" Unchecked="ClipboardAutoChanged" />
-                    <MenuItem Header="클립보드 지금 보내기" Click="ClipboardSend" />
-                    <MenuItem Header="클립보드 지금 받기" Click="ClipboardReceive" />
-                    <Separator />
-                    <MenuItem Header="한/영 전환" Click="ToggleKorean" />
-                    <MenuItem Header="모니터 새로고침" Click="RefreshDisplays" />
-                    <MenuItem Header="전체화면 (F11)" Click="ToggleFullscreen" />
-                    <MenuItem Header="세션 정보" Click="ShowSessionInfo" />
-                    <MenuItem Header="연결 종료" Click="Disconnect" />
+                    <Separator/>
+                    <MenuItem x:Name="ClipboardAutoMenu" Header="클립보드 자동 동기화" IsCheckable="True" Checked="ClipboardAutoChanged" Unchecked="ClipboardAutoChanged"/>
+                    <MenuItem Header="클립보드 지금 보내기" Click="ClipboardSend"/>
+                    <MenuItem Header="클립보드 지금 받기" Click="ClipboardReceive"/>
+                    <Separator/>
+                    <MenuItem Header="한/영 전환" Click="ToggleKorean"/>
+                    <MenuItem Header="모니터 새로고침" Click="RefreshDisplays"/>
+                    <MenuItem Header="전체화면 (F11)" Click="ToggleFullscreen"/>
+                    <MenuItem Header="세션 정보" Click="ShowSessionInfo"/>
+                    <MenuItem Header="연결 종료" Click="Disconnect"/>
                   </ContextMenu>
                 </Button.ContextMenu>
               </Button>
             </StackPanel>
-            <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="10,0,6,0" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-            <TextBlock x:Name="HealthText" Grid.Column="2" Text="연결 전" Margin="10,0,0,0" VerticalAlignment="Center" />
+            <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+              <Border Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" VerticalAlignment="Center">
+                <TextBlock x:Name="HealthText" Text="연결 전" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+              </Border>
+              <Button x:Name="EndSessionButton" Content="연결 종료" IsEnabled="False" Click="Disconnect" Margin="8,0,0,0" Foreground="{StaticResource DangerBrush}"/>
+            </StackPanel>
           </Grid>
-          <Border Background="#141A24" ClipToBounds="True">
-            <Grid>
-              <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" LostKeyboardFocus="ReleaseInput" />
-            </Grid>
+        </Border>
+        <Border Background="{StaticResource StageBrush}" CornerRadius="12" ClipToBounds="True">
+          <Grid>
+            <TextBlock Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" LostKeyboardFocus="ReleaseInput"/>
+          </Grid>
+        </Border>
+      </DockPanel>
+    </TabItem>
+    <TabItem x:Name="ServerTab" Header="이 PC">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="28,24" MaxWidth="980" HorizontalAlignment="Left">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MaxWidth="520"/>
+            <ColumnDefinition Width="20"/>
+            <ColumnDefinition Width="*" MaxWidth="420"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+              <StackPanel>
+                <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}">
+              <StackPanel>
+                <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
+                <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                <StackPanel x:Name="PasswordEditor">
+                  <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상, 한 번 저장하면 계속 사용)" Style="{StaticResource FieldLabel}"/>
+                  <PasswordBox x:Name="HostPassword" Margin="0,0,0,10" PreviewKeyDown="HostPasswordKeyDown"/>
+                  <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
+                </StackPanel>
+                <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>
+                <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+                <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged"/>
+                <WrapPanel>
+                  <Button x:Name="StartButton" Content="접속 대기 시작" Style="{StaticResource PrimaryButton}" Click="StartHost" Margin="0,0,8,8"/>
+                  <Button x:Name="StopButton" Content="서버 중지" Click="StopHost" IsEnabled="False" Margin="0,0,8,8"/>
+                  <Button x:Name="KickButton" Content="현재 접속 끊기" Click="Kick" IsEnabled="False" Margin="0,0,0,8"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <Border Grid.Column="2" Style="{StaticResource Card}" VerticalAlignment="Top">
+            <StackPanel>
+              <TextBlock Text="이 PC에 접속하려면" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+              <TextBlock Text="상대 PC의 원격 접속 화면에 아래 주소와 지문을 입력합니다. 비밀번호만 맞으면 수락 없이 연결됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,16"/>
+              <TextBlock x:Name="Addresses" Style="{StaticResource BodyText}" Margin="0,0,0,16"/>
+              <TextBlock Text="서버 지문" Style="{StaticResource FieldLabel}"/>
+              <TextBox x:Name="Fingerprint" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,10"/>
+              <Button Content="지문 복사" Click="CopyFingerprint" HorizontalAlignment="Left" Margin="0,0,0,16"/>
+              <TextBlock Text="같은 LAN 또는 VPN에서 사용합니다. 탐색기에서 복사한 파일과 텍스트는 연결된 동안 상대 클립보드로 전달됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}"/>
+            </StackPanel>
           </Border>
-        </DockPanel>
-      </TabItem>
-    </TabControl>
-  </DockPanel>
+        </Grid>
+      </ScrollViewer>
+    </TabItem>
+  </TabControl>
 </Window>

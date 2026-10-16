@@ -26,6 +26,7 @@ public partial class MainWindow
         private Channel<byte>? inputSignal;
         private readonly object inputGate = new();
         private InputEvent? pendingMove;
+        private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
         private long lastMove;
         private int generation;
@@ -114,7 +115,7 @@ public partial class MainWindow
                 connection = new();
                 inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
                 inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
-                lock (inputGate) pendingMove = null;
+                lock (inputGate) { pendingMove = null; pendingKeyDowns.Clear(); }
                 clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
                 clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
                 inputEnabled = true;
@@ -197,7 +198,11 @@ public partial class MainWindow
                 while (await signal.Reader.WaitToReadAsync(ct))
                 {
                     while (signal.Reader.TryRead(out _)) { }
-                    while (channel.Reader.TryRead(out var input)) await remote.Input(input, ct);
+                    while (channel.Reader.TryRead(out var input))
+                    {
+                        await remote.Input(input, ct);
+                        if (input.Kind == "key" && input.Down) lock (inputGate) pendingKeyDowns.Remove(input.Code);
+                    }
                     InputEvent? move;
                     lock (inputGate) { move = pendingMove; pendingMove = null; }
                     if (move != null) await remote.Input(move, ct);
@@ -243,7 +248,7 @@ public partial class MainWindow
             connection?.Cancel();
             inputs?.Writer.TryComplete();
             inputSignal?.Writer.TryComplete();
-            lock (inputGate) pendingMove = null;
+            lock (inputGate) { pendingMove = null; pendingKeyDowns.Clear(); }
             ClearFrame();
             ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -325,12 +330,15 @@ public partial class MainWindow
             lock (inputGate)
             {
                 if (input.Kind == "move") pendingMove = input;
+                else if (input.Kind == "key" && input.Down && !pendingKeyDowns.Add(input.Code)) return;
                 else if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) overflow = true;
                 else
                 {
                     pendingMove = null;
+                    if (input.Kind == "key" && !input.Down) pendingKeyDowns.Remove(input.Code);
                     overflow = !channel.Writer.TryWrite(input);
                 }
+                if (overflow && input.Kind == "key" && input.Down) pendingKeyDowns.Remove(input.Code);
             }
             if (overflow) { InputOverflow(); return; }
             signal.Writer.TryWrite(0);

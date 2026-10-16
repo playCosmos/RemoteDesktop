@@ -43,7 +43,6 @@ public partial class MainWindow
         private int lastFrameQuality;
         private int lastFrameBytes;
         private WriteableBitmap? frameSurface;
-        private byte[]? framePixels;
         private nint systemShortcutHook;
         private KeyboardHookProc? systemShortcutHookProc;
         private readonly HashSet<int> suppressedSystemKeys = [];
@@ -176,7 +175,8 @@ public partial class MainWindow
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
                     if (display != selectedDisplay) continue;
-                    PresentFrame(data);
+                    await PresentFrameAsync(data, generation);
+                    if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;
                     UpdateFrameHealth();
@@ -293,22 +293,54 @@ public partial class MainWindow
 
         private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
 
-        private void PresentFrame(byte[] data)
+        private readonly record struct DecodedFrame(int Width, int Height, double DpiX, double DpiY, int Stride, byte[] Pixels);
+
+        private static DecodedFrame DecodeFrame(byte[] jpeg)
         {
-            using var stream = new MemoryStream(data, writable: false);
-            var source = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
-            var width = source.PixelWidth;
-            var height = source.PixelHeight;
-            var stride = width * ((source.Format.BitsPerPixel + 7) / 8);
-            var count = stride * height;
-            if (framePixels == null || framePixels.Length < count) framePixels = new byte[count];
-            source.CopyPixels(framePixels, stride, 0);
-            if (frameSurface == null || frameSurface.PixelWidth != width || frameSurface.PixelHeight != height || frameSurface.Format != source.Format)
+            using var stream = new MemoryStream(jpeg, writable: false);
+            using var bitmap = new System.Drawing.Bitmap(stream);
+            var width = bitmap.Width;
+            var height = bitmap.Height;
+            if (width <= 0 || height <= 0) throw new InvalidOperationException("빈 화면 프레임");
+            System.Drawing.Imaging.BitmapData? bits = null;
+            byte[]? pixels = null;
+            try
             {
-                frameSurface = new WriteableBitmap(width, height, source.DpiX, source.DpiY, source.Format, null);
-                window.ScreenImage.Source = frameSurface;
+                bits = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                var stride = bits.Stride;
+                if (stride <= 0) throw new InvalidOperationException("화면 프레임 방향이 올바르지 않습니다.");
+                var count = stride * height;
+                pixels = System.Buffers.ArrayPool<byte>.Shared.Rent(count);
+                Marshal.Copy(bits.Scan0, pixels, 0, count);
+                var dpiX = bitmap.HorizontalResolution;
+                var dpiY = bitmap.VerticalResolution;
+                if (dpiX < 1 || !double.IsFinite(dpiX)) dpiX = 96;
+                if (dpiY < 1 || !double.IsFinite(dpiY)) dpiY = 96;
+                var owned = pixels;
+                pixels = null;
+                return new DecodedFrame(width, height, dpiX, dpiY, stride, owned);
             }
-            frameSurface.WritePixels(new Int32Rect(0, 0, width, height), framePixels, stride, 0);
+            finally
+            {
+                if (pixels != null) System.Buffers.ArrayPool<byte>.Shared.Return(pixels);
+                if (bits != null) bitmap.UnlockBits(bits);
+            }
+        }
+
+        private async Task PresentFrameAsync(byte[] data, int attempt)
+        {
+            var decoded = await Task.Run(() => DecodeFrame(data));
+            try
+            {
+                if (attempt != generation || client == null) return;
+                if (frameSurface == null || frameSurface.PixelWidth != decoded.Width || frameSurface.PixelHeight != decoded.Height)
+                {
+                    frameSurface = new WriteableBitmap(decoded.Width, decoded.Height, decoded.DpiX, decoded.DpiY, System.Windows.Media.PixelFormats.Bgra32, null);
+                    window.ScreenImage.Source = frameSurface;
+                }
+                frameSurface.WritePixels(new Int32Rect(0, 0, decoded.Width, decoded.Height), decoded.Pixels, decoded.Stride, 0);
+            }
+            finally { System.Buffers.ArrayPool<byte>.Shared.Return(decoded.Pixels); }
         }
 
         private void ClearFrame()
@@ -334,11 +366,9 @@ public partial class MainWindow
 
         public void Move(object sender, MouseEventArgs e)
         {
-            if (window.ScreenImage.IsKeyboardFocused && Environment.TickCount64 - lastMove >= 35)
-            {
-                lastMove = Environment.TickCount64;
-                Position(e);
-            }
+            if (Environment.TickCount64 - lastMove < 16) return;
+            lastMove = Environment.TickCount64;
+            Position(e);
         }
 
         public void MouseDownRemote(object sender, MouseButtonEventArgs e)

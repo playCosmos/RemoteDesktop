@@ -27,6 +27,25 @@ Check(HostAddresses.Same(["10.0.0.2:45831", "192.168.0.8:45831"], ["10.0.0.2:458
 Check(UiText.AddressesChanged() == "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.", "a changed network tells the host to copy the new address");
 Check(UiText.ClipboardFileProgress("클립보드 전송", 0, 1, "메모.txt", 50, 200) == "클립보드 전송 · 메모.txt · 25%" && UiText.ClipboardFileProgress("클립보드 수신", 1, 3, "사진.png", 100, 100) == "클립보드 수신 · 2/3 · 사진.png · 100%" && UiText.ClipboardFileProgress("클립보드 확인", 0, 1, "빈.bin", 0, 0) == "클립보드 확인 · 빈.bin", "clipboard progress names the file and percent");
 Check(!UiText.ShouldReportProgress(0, 4) && UiText.ShouldReportProgress(-1, 0) && UiText.ShouldReportProgress(0, 5) && UiText.ShouldReportProgress(96, 100) && !UiText.ShouldReportProgress(100, 100), "clipboard progress updates on the first byte, each five percent, and completion");
+var retiredRoot = Path.Combine(Path.GetTempPath(), "prd-cache-" + Guid.NewGuid().ToString("N"));
+var retiredOutside = Path.Combine(Path.GetTempPath(), "prd-outside-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(retiredRoot);
+Directory.CreateDirectory(Path.Combine(retiredRoot, "stale"));
+File.WriteAllText(Path.Combine(retiredRoot, "stale", "old.txt"), "old");
+var retiredCurrent = Path.Combine(retiredRoot, "current", "0", "now.txt");
+Directory.CreateDirectory(Path.GetDirectoryName(retiredCurrent)!);
+File.WriteAllText(retiredCurrent, "now");
+Directory.CreateDirectory(Path.Combine(retiredRoot, "current-extra"));
+File.WriteAllText(Path.Combine(retiredRoot, "current-extra", "x.txt"), "x");
+Directory.CreateDirectory(retiredOutside);
+File.WriteAllText(Path.Combine(retiredOutside, "keep.txt"), "keep");
+try
+{
+    Check(ClipboardPaths.DeleteRetired(Path.Combine(retiredRoot, "missing"), []) == 0, "a missing clipboard cache has nothing to remove");
+    Check(ClipboardPaths.DeleteRetired(retiredRoot, [retiredCurrent, Path.Combine(retiredOutside, "keep.txt")]) == 2 && !Directory.Exists(Path.Combine(retiredRoot, "stale")) && !Directory.Exists(Path.Combine(retiredRoot, "current-extra")) && File.Exists(retiredCurrent) && File.Exists(Path.Combine(retiredOutside, "keep.txt")), "retired clipboard batches are removed and the current paste stays");
+    Check(ClipboardPaths.DeleteRetired(retiredRoot, [retiredCurrent]) == 0 && File.Exists(retiredCurrent), "the current clipboard batch is not removed twice");
+}
+finally { Directory.Delete(retiredRoot, true); Directory.Delete(retiredOutside, true); }
 var placed = new ClientSettings { WindowLeft = -120, WindowTop = 40, WindowWidth = 1100, WindowHeight = 720, WindowMaximized = true };
 Check(placed.TryGetWindowPlacement(-1920, 0, 3840, 1080, out var placement) && placement.Left == -120 && placement.Maximized, "window placement restores on a shifted desktop");
 Check(!new ClientSettings { WindowLeft = 5000, WindowTop = 0, WindowWidth = 1000, WindowHeight = 700 }.TryGetWindowPlacement(0, 0, 1920, 1080, out _), "off-screen window placement is ignored");

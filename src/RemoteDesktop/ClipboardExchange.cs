@@ -1,5 +1,6 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 
 namespace RemoteDesktop;
 
@@ -57,7 +58,9 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             if ((await ReadCore(scope, ct)).Id != request.ExpectedRevision) throw new ClipboardConflictException();
             if (!await clipboard.Write([], request.Text, request.Origin, selected!.Sequence, ct)) throw new ClipboardConflictException();
             selected = null;
-            return await ReadCore(scope, ct);
+            var textResult = await ReadCore(scope, ct);
+            await SweepCore(ct);
+            return textResult;
         }
         finally { mutex.Release(); }
     }
@@ -99,7 +102,9 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             var paths = batch.Request.Files.Select((f, i) => ClipboardPaths.FileAt(batch.Directory, i, f.Name)).ToArray();
             if (!await clipboard.Write(paths, "", batch.Request.Origin, selected!.Sequence, ct)) throw new ClipboardConflictException();
             pending.Remove(id); selected = null;
-            return await ReadCore(scope, ct);
+            var committed = await ReadCore(scope, ct);
+            await SweepCore(ct);
+            return committed;
         }
         finally { mutex.Release(); }
     }
@@ -126,8 +131,30 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     public async Task EndSession(string scope)
     {
         await mutex.WaitAsync();
-        try { foreach (var pair in pending.Where(p => p.Value.Owner == scope).ToArray()) { ClipboardPaths.DeleteBatch(cacheRoot, pair.Value.Directory); pending.Remove(pair.Key); } if (owner == scope) { selected = null; owner = ""; } }
+        try
+        {
+            foreach (var pair in pending.Where(p => p.Value.Owner == scope).ToArray()) { ClipboardPaths.DeleteBatch(cacheRoot, pair.Value.Directory); pending.Remove(pair.Key); }
+            if (owner == scope) { selected = null; owner = ""; }
+            try { await SweepCore(CancellationToken.None); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ExternalException) { }
+        }
         finally { mutex.Release(); }
+    }
+
+    public async Task Sweep(CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try { await SweepCore(ct); }
+        finally { mutex.Release(); }
+    }
+
+    private async Task SweepCore(CancellationToken ct)
+    {
+        var current = await clipboard.Read(ct);
+        var keep = new List<string>(current.Paths);
+        foreach (var batch in pending.Values) keep.Add(batch.Directory);
+        try { ClipboardPaths.DeleteRetired(cacheRoot, keep); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 }
 public sealed class ClipboardConflictException : Exception

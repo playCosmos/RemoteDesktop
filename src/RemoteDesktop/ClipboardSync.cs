@@ -13,7 +13,18 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
     private volatile bool autoEnabled = true;
     public bool AutoEnabled { get => autoEnabled; set => autoEnabled = value; }
     public async Task Initialize(CancellationToken ct)
-    { await mutex.WaitAsync(ct); try { observedLocal = (await local.Read(ct)).Sequence; remoteRevision = (await remote.Clipboard(ct)).Id; } finally { mutex.Release(); } }
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            var current = await local.Read(ct);
+            observedLocal = current.Sequence;
+            remoteRevision = (await remote.Clipboard(ct)).Id;
+            try { ClipboardPaths.DeleteRetired(cache, current.Paths); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        finally { mutex.Release(); }
+    }
     public async Task Run(CancellationToken ct)
     {
         var wasEnabled = false;
@@ -126,6 +137,11 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 remoteRevision = snapshot.Id;
                 if (retained) { observedLocal = (await local.Read(ct)).Sequence; status("클립보드 파일 수신 완료 · 이 PC의 탐색기에서 Ctrl+V로 붙여넣으세요."); }
                 else status("새로 복사한 로컬 파일을 유지했습니다.");
+                if (retained)
+                {
+                    try { ClipboardPaths.DeleteRetired(cache, paths); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                }
             }
             finally { if (!retained) ClipboardPaths.DeleteBatch(cache, directory); }
         }

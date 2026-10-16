@@ -83,6 +83,8 @@ public sealed partial class RemoteHost : IAsyncDisposable
         MapDesktop(app);
         if (settings.UseSmoothHost) HostPerformance.EnableHostPriority();
         await app.StartAsync();
+        try { await clipboard.Sweep(CancellationToken.None); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
         timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(); } }, null, 1000, 1000);
         listenPort = port;
         Status?.Invoke(UiText.Listening(port));

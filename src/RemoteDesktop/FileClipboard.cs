@@ -145,4 +145,33 @@ public static class ClipboardPaths
         if (!absolute.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Invalid cache path");
         if (Directory.Exists(absolute) && (File.GetAttributes(absolute) & FileAttributes.ReparsePoint) == 0) Directory.Delete(absolute, true);
     }
+
+    public static int DeleteRetired(string root, IEnumerable<string> keepPaths)
+    {
+        if (!Directory.Exists(root)) return 0;
+        var parent = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var kept = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in keepPaths)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            var absolute = Path.GetFullPath(path);
+            if (!absolute.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) continue;
+            var relative = absolute[parent.Length..];
+            var slash = relative.IndexOf(Path.DirectorySeparatorChar);
+            kept.Add(slash < 0 ? absolute : absolute[..(parent.Length + slash)]);
+        }
+        var removed = 0;
+        foreach (var batch in Directory.EnumerateDirectories(root))
+        {
+            if (kept.Contains(Path.GetFullPath(batch))) continue;
+            try
+            {
+                if ((File.GetAttributes(batch) & FileAttributes.ReparsePoint) != 0) continue;
+                DeleteBatch(root, batch);
+                removed++;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return removed;
+    }
 }

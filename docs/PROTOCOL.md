@@ -38,7 +38,7 @@ Clipboard batches permit 1–100 ordinary files, at most 1GiB each and 4GiB tota
 
 Plain Unicode text uses the same session-scoped clipboard manifest and revision check. It is limited to 1,000,000 UTF-16 characters. Publishing text replaces the file-drop payload; publishing a file batch replaces text. Origin markers suppress echoes, and local sequence checks preserve a newer local text copy if it changes during a remote update. Empty clips, HTML/RTF, images, and other clipboard formats are intentionally omitted in this version.
 
-Unfinished batches are cancelled on session revocation. Completed cache files remain available for subsequent OS paste. Automatic cache expiry is not yet implemented. Authentication is required on every clipboard route. Android uses read-only content URIs with per-recipient grants; Windows uses CF_HDROP on a dedicated STA dispatcher. [Windows clipboard documentation](https://learn.microsoft.com/en-us/windows/win32/dataxchg/using-the-clipboard), [Android copy/paste documentation](https://developer.android.com/develop/ui/views/touch-and-input/copy-paste).
+Unfinished batches are cancelled on session revocation. Completed cache files stay while the OS clipboard still points at them. Older batches are removed when a newer clipboard replaces them, and again when a host or client session starts. Authentication is required on every clipboard route. Android uses read-only content URIs with per-recipient grants; Windows uses CF_HDROP on a dedicated STA dispatcher. [Windows clipboard documentation](https://learn.microsoft.com/en-us/windows/win32/dataxchg/using-the-clipboard), [Android copy/paste documentation](https://developer.android.com/develop/ui/views/touch-and-input/copy-paste).
 
 ## Input messages
 

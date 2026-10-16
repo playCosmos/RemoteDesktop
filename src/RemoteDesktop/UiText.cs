@@ -168,6 +168,15 @@ public static class UiText
 
     public static string InputBacklog() => "입력이 밀려 눌린 키와 버튼을 놓습니다.";
 
+    public static bool CaptureSystemShortcut(int key, bool down, bool altFlag, bool ctrlDown, bool altHeld, bool winHeld, bool suppressed)
+    {
+        if (!down) return suppressed;
+        if (key is 0x12 or 0x5B or 0x5C) return true;
+        if (altHeld || winHeld || altFlag) return true;
+        if (key == 0x2C) return true;
+        return ctrlDown && key == 0x1B;
+    }
+
     public static bool ShowHostSetup(bool serverRunning) => !serverRunning;
 
     public static string HostCardTitle(bool clientConnected, bool serverLive, string? peer)

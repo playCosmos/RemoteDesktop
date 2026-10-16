@@ -251,6 +251,7 @@ public partial class MainWindow
         }
         public void QueueRelease()
         {
+            ReleaseSystemShortcuts();
             Queue(new("release"));
             UpdateInputChrome();
         }
@@ -1003,7 +1004,11 @@ public partial class MainWindow
 
         private nint SystemShortcutHook(int code, nint message, nint data)
         {
-            if (code < 0 || !RemoteInputFocused()) return CallNextHookEx(systemShortcutHook, code, message, data);
+            if (code < 0 || !RemoteInputFocused())
+            {
+                if (!RemoteInputFocused()) ReleaseSystemShortcuts();
+                return CallNextHookEx(systemShortcutHook, code, message, data);
+            }
             var keyboard = Marshal.PtrToStructure<KeyboardHookData>(data);
             var key = (int)keyboard.VirtualKey;
             var down = message is 0x0100 or 0x0104;
@@ -1011,24 +1016,29 @@ public partial class MainWindow
             if (!down && !up) return CallNextHookEx(systemShortcutHook, code, message, data);
             lock (suppressedSystemKeys)
             {
-                if (up && suppressedSystemKeys.Remove(key))
+                if (!down)
                 {
+                    if (!suppressedSystemKeys.Remove(key)) return CallNextHookEx(systemShortcutHook, code, message, data);
                     if (key == 0x12) remoteAltDown = false;
                     Queue(new("key", Code: key));
                     return 1;
                 }
-                if (!down) return CallNextHookEx(systemShortcutHook, code, message, data);
-                var alt = remoteAltDown || (keyboard.Flags & 0x20) != 0;
-                var ctrl = (GetAsyncKeyState(0x11) & 0x8000) != 0;
-                var shift = (GetAsyncKeyState(0x10) & 0x8000) != 0;
-                var isAlt = key == 0x12;
-                var isWin = key is 0x5B or 0x5C;
-                var reservedCombo = (alt && (key is 0x09 or 0x1B)) || (ctrl && key == 0x1B) || key == 0x2C;
-                if (!isAlt && !isWin && !reservedCombo) return CallNextHookEx(systemShortcutHook, code, message, data);
-                if (isAlt) remoteAltDown = true;
+                var winHeld = suppressedSystemKeys.Contains(0x5B) || suppressedSystemKeys.Contains(0x5C);
+                var capture = UiText.CaptureSystemShortcut(key, true, (keyboard.Flags & 0x20) != 0, (GetAsyncKeyState(0x11) & 0x8000) != 0, remoteAltDown, winHeld, false);
+                if (!capture) return CallNextHookEx(systemShortcutHook, code, message, data);
+                if (key == 0x12) remoteAltDown = true;
                 suppressedSystemKeys.Add(key);
                 Queue(new("key", Code: key, Down: true));
                 return 1;
+            }
+        }
+
+        private void ReleaseSystemShortcuts()
+        {
+            lock (suppressedSystemKeys)
+            {
+                suppressedSystemKeys.Clear();
+                remoteAltDown = false;
             }
         }
 

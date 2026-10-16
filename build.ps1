@@ -1,11 +1,18 @@
 param(
     [switch]$Android,
     [switch]$FrameworkDependent,
-    [string]$OutputRoot = 'artifacts/0.9.25'
+    [string]$OutputRoot = ''
 )
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 try {
+    if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+        [xml]$project = Get-Content (Join-Path $PSScriptRoot 'src/RemoteDesktop/RemoteDesktop.csproj')
+        $version = $project.Project.PropertyGroup.Version
+        if ($version -is [System.Array]) { $version = @($version | Where-Object { $_ })[0] }
+        if ([string]::IsNullOrWhiteSpace([string]$version)) { throw 'Project version is missing' }
+        $OutputRoot = Join-Path 'artifacts' ([string]$version)
+    }
     $selfContained = if ($FrameworkDependent) { 'false' } else { 'true' }
     function Publish-Windows([string]$Name) {
         $windowsOutput = Join-Path $OutputRoot $Name

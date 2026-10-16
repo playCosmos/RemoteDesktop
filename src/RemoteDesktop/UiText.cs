@@ -230,6 +230,17 @@ public static class UiText
             || text.Contains("초과", StringComparison.Ordinal);
     }
 
+    public static string SessionBaseline(bool inputEnabled) => inputEnabled ? "연결됨" : "화면만 보는 중";
+
+    public static bool SessionNoticeHolds(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || IsProblem(text)) return true;
+        return text.Contains('%') && !text.Contains("완료", StringComparison.Ordinal);
+    }
+
+    public static string SessionReveal(string health, bool inputEnabled)
+        => inputEnabled || string.IsNullOrWhiteSpace(health) ? health : health.Trim() + " · 보기만";
+
     public static bool OfferMonitorChoice(int listedDisplays) => listedDisplays > 2;
 
     public static string ConnectionFailure(Exception exception, bool duringSession)

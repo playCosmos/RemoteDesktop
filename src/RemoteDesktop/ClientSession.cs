@@ -69,6 +69,8 @@ public partial class MainWindow
         private readonly HashSet<int> suppressedSystemKeys = [];
         private bool remoteAltDown;
         private System.Windows.Threading.DispatcherTimer? toolbarTimer;
+        private System.Windows.Threading.DispatcherTimer? sessionNoticeTimer;
+        private string? settlingNotice;
         private volatile bool viewerWatching = true;
         private string? sessionPassword;
         private Exception? connectFailure;
@@ -600,6 +602,8 @@ public partial class MainWindow
             }
             ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
+            if (!enabled) sessionNoticeTimer?.Stop();
+            if (!enabled) settlingNotice = null;
             if (!enabled) { announcedDelivery = null; lastFrameQuality = 0; }
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
@@ -608,9 +612,41 @@ public partial class MainWindow
 
         public void NoteSessionStatus(bool problem)
         {
-            if (client == null) { window.SessionAlert.Visibility = Visibility.Collapsed; return; }
+            if (client == null)
+            {
+                sessionNoticeTimer?.Stop();
+                settlingNotice = null;
+                window.SessionAlert.Visibility = Visibility.Collapsed;
+                return;
+            }
+            ScheduleSessionBaseline();
             if (problem) ShowSessionToolbar();
             else SyncProblemAlert(window.SessionToolbar.Visibility == Visibility.Visible);
+        }
+
+        private void ScheduleSessionBaseline()
+        {
+            var text = window.StatusText.Text;
+            if (text == UiText.SessionBaseline(inputEnabled) || UiText.SessionNoticeHolds(text))
+            {
+                sessionNoticeTimer?.Stop();
+                settlingNotice = null;
+                return;
+            }
+            settlingNotice = text;
+            sessionNoticeTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4.5) };
+            sessionNoticeTimer.Stop();
+            sessionNoticeTimer.Tick -= RestoreSessionBaseline;
+            sessionNoticeTimer.Tick += RestoreSessionBaseline;
+            sessionNoticeTimer.Start();
+        }
+
+        private void RestoreSessionBaseline(object? sender, EventArgs e)
+        {
+            sessionNoticeTimer?.Stop();
+            if (client == null || window.StatusText.Text != settlingNotice) return;
+            settlingNotice = null;
+            window.SessionStatus(UiText.SessionBaseline(inputEnabled));
         }
 
         private void SyncProblemAlert(bool toolbarOpen)
@@ -662,7 +698,7 @@ public partial class MainWindow
             var clock = viewingSince == null ? null : UiText.ElapsedClock(DateTime.UtcNow - viewingSince.Value);
             var text = UiText.SessionHealth(clock, healthDetail);
             window.HealthText.Text = text;
-            window.SessionReveal.Content = text;
+            window.SessionReveal.Content = UiText.SessionReveal(text, inputEnabled);
             window.SessionReveal.ToolTip = UiText.RevealTip(ViewingLabel, window.hostSession.ConnectedPeer);
         }
 
@@ -1073,6 +1109,7 @@ public partial class MainWindow
             inputEnabled = enabled;
             UpdateInputChrome();
             if (client != null) window.SessionStatus(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
+            PublishHealth();
         }
 
         public void ClipboardAutoChanged(object sender, RoutedEventArgs e)
@@ -1148,7 +1185,7 @@ public partial class MainWindow
             var controlling = RemoteInputFocused();
             window.Stage.BorderBrush = controlling ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
             window.Stage.BorderThickness = new Thickness(controlling ? 2 : 0);
-            window.ScreenImage.Cursor = client != null && !inputEnabled ? Cursors.None : Cursors.Arrow;
+            window.ScreenImage.Cursor = Cursors.Arrow;
             string? hint = null;
             if (client != null && !controlling)
                 hint = inputEnabled

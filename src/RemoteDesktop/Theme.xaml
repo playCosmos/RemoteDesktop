@@ -7,6 +7,7 @@
   <SolidColorBrush x:Key="AccentBrush" Color="#0E6B57"/>
   <SolidColorBrush x:Key="AccentHoverBrush" Color="#0B5848"/>
   <SolidColorBrush x:Key="AccentPressedBrush" Color="#084538"/>
+  <SolidColorBrush x:Key="LiveBrush" Color="#C4552A"/>
   <SolidColorBrush x:Key="QuietHoverBrush" Color="#F7F4EF"/>
   <SolidColorBrush x:Key="StageBrush" Color="#101418"/>
   <SolidColorBrush x:Key="StageTextBrush" Color="#A7B0BC"/>

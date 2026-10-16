@@ -63,6 +63,9 @@ Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", nul
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", null, "192.168.0.2") == "192.168.0.2 연결됨 — Personal Remote Desktop 0.9.59", "an inbound client names the window");
 Check(UiText.HostTabLabel(null) == "이 PC" && UiText.HostTabLabel("192.168.0.2") == "이 PC · 192.168.0.2", "the host tab names the connected client");
 Check(UiText.FullscreenTitle(null, null) == "Personal Remote Desktop · F11로 복귀" && UiText.FullscreenTitle("10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 — 192.168.0.2 연결됨 · F11로 복귀", "fullscreen names the remote pc and an inbound client");
+Check(UiText.ConnectedFor(TimeSpan.FromSeconds(5)) == "연결된 지 00:05" && UiText.ConnectedFor(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7)) == "연결된 지 03:07", "connection duration stays in minutes and seconds");
+Check(UiText.ConnectedFor(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "연결된 지 2:04:09" && UiText.ConnectedFor(TimeSpan.FromSeconds(-3)) == "연결된 지 00:00", "long connections include hours and negative time is clamped");
+Check(UiText.NeedsAttention(true, false) && !UiText.NeedsAttention(true, true) && !UiText.NeedsAttention(false, false), "only a newly arrived client flashes an inactive window");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";
@@ -146,6 +149,8 @@ async Task Session()
     }
     Check(hostNotices.Any(text => text is "클라이언트 연결됨 · 127.0.0.1" or "클라이언트 연결됨 · ::1"), "host shows who connected");
     Check(site.Host.SessionPeer is "127.0.0.1" or "::1", "host remembers who connected");
+    var connectedAt = site.Host.SessionStartedUtc;
+    Check(connectedAt != null && connectedAt.Value <= DateTime.UtcNow.AddSeconds(2) && DateTime.UtcNow - connectedAt.Value < TimeSpan.FromSeconds(15), "host remembers when the client connected");
     using (var response = await site.Http.GetAsync("ping"))
     {
         var ping = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -173,6 +178,7 @@ async Task Session()
     site.Host.Disconnect();
     Check(hostNotices[^1] == "접속 대기 중 · 포트 " + site.Port, "a departed client returns the host to listening");
     Check(site.Host.SessionPeer == null, "host forgets the client after it leaves");
+    Check(site.Host.SessionStartedUtc == null, "host forgets the connection time after the client leaves");
     using (var response = await site.Http.GetAsync("ping")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "host disconnect revokes token");
     using var wrongPinClient = new RemoteClient("localhost:" + site.Port, new string('0', 64));
     try { await wrongPinClient.Login(site.Password); Check(false, "wrong certificate pin"); } catch (HttpRequestException) { Check(true, "wrong certificate pin rejected"); }

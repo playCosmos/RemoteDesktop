@@ -31,6 +31,7 @@ public partial class MainWindow
         private bool connecting;
         private bool connectedOnce;
         public string? RemoteEndpoint => client == null ? null : lastConnection.Address;
+        public bool IsFullscreenActive => fullscreen?.IsActive == true;
         private bool normalizingAddress;
         private long lastMove;
         private int generation;

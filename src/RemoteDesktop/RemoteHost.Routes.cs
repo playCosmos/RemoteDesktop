@@ -25,6 +25,7 @@ public sealed partial class RemoteHost
                     lastSeen = DateTime.UtcNow;
                     var peer = UiText.PeerLabel(c.Connection.RemoteIpAddress);
                     sessionPeer = peer.Length == 0 ? null : peer;
+                    sessionStarted = DateTime.UtcNow;
                     Status?.Invoke(UiText.ClientConnected(c.Connection.RemoteIpAddress));
                     return Results.Ok(new { token, protocol = 1, maxFileBytes = MaxFileBytes });
                 }

@@ -151,6 +151,7 @@
                   <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
                 </StackPanel>
                 <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,16" TextWrapping="Wrap" MaxHeight="60" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                <TextBlock x:Name="HostSessionText" Visibility="Collapsed" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource LiveBrush}" Margin="0,-8,0,12"/>
                 <TextBlock x:Name="HostNoticeText" Visibility="Collapsed" Style="{StaticResource BodyText}" Margin="0,-8,0,12" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
                 <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>

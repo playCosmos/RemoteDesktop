@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 
 namespace RemoteDesktop;
 
@@ -8,6 +10,7 @@ public partial class MainWindow : Window
     private readonly HostSession hostSession;
     private readonly ClientSession clientSession;
     private readonly string productTitle;
+    private string? attentionPeer;
 
     public MainWindow()
     {
@@ -39,6 +42,7 @@ public partial class MainWindow : Window
             clientSession.SaveWindowPlacement();
             hostSession.Closing = true;
         };
+        Activated += (_, _) => StopAttention();
         Closed += async (_, _) =>
         {
             clientSession.UninstallSystemShortcutHook();
@@ -62,6 +66,7 @@ public partial class MainWindow : Window
         ServerStatusText.Text = text;
         KickButton.IsEnabled = hostSession.HasClient && StopButton.IsEnabled;
         KickButton.Visibility = KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        hostSession.SyncConnectedClock();
         RefreshIdentity();
     });
 
@@ -69,11 +74,36 @@ public partial class MainWindow : Window
     {
         var inbound = hostSession.ConnectedPeer;
         var outbound = clientSession.RemoteEndpoint;
+        var newlyConnected = !string.IsNullOrEmpty(inbound) && inbound != attentionPeer;
+        var departed = string.IsNullOrEmpty(inbound) && !string.IsNullOrEmpty(attentionPeer);
+        attentionPeer = string.IsNullOrEmpty(inbound) ? null : inbound;
         ServerTab.Header = UiText.HostTabLabel(inbound);
         Title = UiText.WindowTitle(productTitle, outbound, inbound);
         clientSession.SetFullscreenTitle(UiText.FullscreenTitle(outbound, inbound));
         SessionReveal.ToolTip = string.IsNullOrEmpty(inbound) ? "세션 조작 열기" : "이 PC에 " + inbound + " 연결됨 · 세션 조작 열기";
+        HostStateMark.Fill = (System.Windows.Media.Brush)FindResource(!string.IsNullOrEmpty(inbound) ? "LiveBrush" : StopButton.IsEnabled ? "AccentBrush" : "MutedBrush");
+        if (departed) StopAttention();
+        else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
     }
+
+    private void StartAttention()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == 0) return;
+        var info = new FlashInfo { cbSize = (uint)Marshal.SizeOf<FlashInfo>(), hwnd = hwnd, flags = 0xF, count = uint.MaxValue };
+        FlashWindowEx(ref info);
+    }
+
+    private void StopAttention()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == 0) return;
+        var info = new FlashInfo { cbSize = (uint)Marshal.SizeOf<FlashInfo>(), hwnd = hwnd };
+        FlashWindowEx(ref info);
+    }
+
+    [DllImport("user32.dll")] private static extern bool FlashWindowEx(ref FlashInfo info);
+    [StructLayout(LayoutKind.Sequential)] private struct FlashInfo { public uint cbSize; public nint hwnd; public uint flags; public uint count; public uint timeout; }
 
     private void HostNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() => hostSession.ShowNotice(text, problem));
 

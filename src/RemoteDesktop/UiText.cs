@@ -75,6 +75,17 @@ public static class UiText
         return hosting == null ? "이 PC" : "이 PC · " + hosting;
     }
 
+    public static string ConnectedFor(TimeSpan elapsed)
+    {
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        var clock = elapsed.TotalHours >= 1
+            ? (int)elapsed.TotalHours + ":" + elapsed.Minutes.ToString("00") + ":" + elapsed.Seconds.ToString("00")
+            : elapsed.Minutes.ToString("00") + ":" + elapsed.Seconds.ToString("00");
+        return "연결된 지 " + clock;
+    }
+
+    public static bool NeedsAttention(bool newlyConnected, bool windowActive) => newlyConnected && !windowActive;
+
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public static bool IsProblem(string? text)

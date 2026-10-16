@@ -17,6 +17,7 @@ public partial class MainWindow
         private bool hostStarting;
         private bool changingPassword;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
+        private System.Windows.Threading.DispatcherTimer? sessionClock;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
         public string? ConnectedPeer => host?.SessionPeer;
@@ -132,6 +133,38 @@ public partial class MainWindow
             noticeTimer?.Stop();
             window.HostNoticeText.Text = "";
             window.HostNoticeText.Visibility = Visibility.Collapsed;
+        }
+
+        public void SyncConnectedClock()
+        {
+            var started = host?.SessionStartedUtc;
+            if (started == null)
+            {
+                sessionClock?.Stop();
+                window.HostSessionText.Text = "";
+                window.HostSessionText.Visibility = Visibility.Collapsed;
+                return;
+            }
+            window.HostSessionText.Text = UiText.ConnectedFor(DateTime.UtcNow - started.Value);
+            window.HostSessionText.Visibility = Visibility.Visible;
+            sessionClock ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            sessionClock.Stop();
+            sessionClock.Tick -= TickConnectedClock;
+            sessionClock.Tick += TickConnectedClock;
+            sessionClock.Start();
+        }
+
+        private void TickConnectedClock(object? sender, EventArgs e)
+        {
+            var started = host?.SessionStartedUtc;
+            if (started == null)
+            {
+                sessionClock?.Stop();
+                window.HostSessionText.Text = "";
+                window.HostSessionText.Visibility = Visibility.Collapsed;
+                return;
+            }
+            window.HostSessionText.Text = UiText.ConnectedFor(DateTime.UtcNow - started.Value);
         }
 
         private void UpdatePasswordState()

@@ -1,4 +1,6 @@
 using System.Net.Sockets;
+using System.Net;
+using System.Net.Http;
 
 namespace RemoteDesktop;
 
@@ -42,6 +44,28 @@ public static class UiText
     }
 
     public static bool OfferMonitorChoice(int listedDisplays) => listedDisplays > 2;
+
+    public static string ConnectionFailure(Exception exception, bool duringSession)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is HttpRequestException http)
+            {
+                if (http.StatusCode == HttpStatusCode.Unauthorized)
+                    return duringSession ? "서버에서 연결을 끊었습니다. 다시 접속하세요." : "비밀번호가 올바르지 않습니다.";
+                if (http.StatusCode == HttpStatusCode.Conflict) return "이미 다른 기기가 연결되어 있습니다.";
+                if (http.StatusCode == HttpStatusCode.TooManyRequests) return "접속 시도가 제한되었습니다. 잠시 후 다시 시도하세요.";
+                var detail = http.InnerException?.Message ?? http.Message;
+                if (detail.Contains("SSL", StringComparison.OrdinalIgnoreCase) || detail.Contains("certificate", StringComparison.OrdinalIgnoreCase) || detail.Contains("인증서", StringComparison.Ordinal))
+                    return "서버 인증서 지문이 일치하지 않습니다. 지문을 비우면 비밀번호로 다시 확인합니다.";
+                if (http.StatusCode is null)
+                    return duringSession ? "서버와 연결이 끊어졌습니다. 주소, 포트, 네트워크를 확인하세요." : "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.";
+            }
+            if (current is TaskCanceledException or TimeoutException)
+                return duringSession ? "서버 응답이 끊어졌습니다. 다시 접속하세요." : "서버 응답이 없습니다. 주소와 포트를 확인하세요.";
+        }
+        return Explain(exception, duringSession ? "서버와 연결이 끊어졌습니다. 다시 접속하세요." : "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.");
+    }
 
     private static bool HasHangul(string text)
     {

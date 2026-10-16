@@ -248,7 +248,7 @@ public partial class MainWindow
                 UpdateInputChrome();
                 _ = RunConnection(remote, connection.Token);
             }
-            catch (Exception ex) { window.ClientNotice("접속 실패: " + FailureText(ex), problem: true); }
+            catch (Exception ex) { window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true); }
             finally
             {
                 connecting = false;
@@ -365,7 +365,7 @@ public partial class MainWindow
             }
             var clipboardTask = SyncClipboard();
             try { await await Task.WhenAny(tasks); }
-            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + FailureText(ex), problem: true); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(ex, true), problem: true); }
             catch (OperationCanceledException) { }
             finally
             {
@@ -911,22 +911,6 @@ public partial class MainWindow
                 + "\n왕복 지연: " + (roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms")
                 + "\n입력 제어: " + (inputEnabled ? "켜짐" : "꺼짐")
                 + "\n클립보드 자동 동기화: " + (window.ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐");
-        }
-
-        private static string FailureText(Exception ex)
-        {
-            if (ex is HttpRequestException http)
-            {
-                if (http.StatusCode == HttpStatusCode.Unauthorized) return "비밀번호가 올바르지 않습니다.";
-                if (http.StatusCode == HttpStatusCode.Conflict) return "이미 다른 기기가 연결되어 있습니다.";
-                if (http.StatusCode == HttpStatusCode.TooManyRequests) return "접속 시도가 제한되었습니다. 잠시 후 다시 시도하세요.";
-                var detail = http.InnerException?.Message ?? http.Message;
-                if (detail.Contains("SSL", StringComparison.OrdinalIgnoreCase) || detail.Contains("certificate", StringComparison.OrdinalIgnoreCase) || detail.Contains("인증서", StringComparison.Ordinal))
-                    return "서버 인증서 지문이 일치하지 않습니다. 지문을 비우면 비밀번호로 다시 확인합니다.";
-                if (http.StatusCode is null) return "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.";
-            }
-            if (ex is TaskCanceledException or TimeoutException) return "서버 응답이 없습니다. 주소와 포트를 확인하세요.";
-            return UiText.Explain(ex, "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.");
         }
 
         private void SaveConnection()

@@ -280,6 +280,8 @@ public static class UiText
     public static string Reconnecting(int attempt, int maximum, int seconds)
         => "연결이 끊겼습니다. " + seconds + "초 후 다시 연결합니다. (" + attempt + "/" + maximum + ")";
 
+    public static string ReconnectHold() => "다시 연결하는 중…";
+
     private static bool CertificateMismatch(HttpRequestException http)
     {
         var detail = http.InnerException?.Message ?? http.Message;

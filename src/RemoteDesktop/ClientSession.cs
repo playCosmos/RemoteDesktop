@@ -31,7 +31,7 @@ public partial class MainWindow
         private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
         private bool connectedOnce;
-        public string? RemoteEndpoint => client == null ? null : lastConnection.Address;
+        public string? RemoteEndpoint => client != null || holdingPicture ? lastConnection.Address : null;
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
         public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
@@ -75,6 +75,7 @@ public partial class MainWindow
         private int reconnectAttempt;
         private int resumeEpoch;
         private bool suppressReconnect;
+        private bool holdingPicture;
 
         public ClientSession(MainWindow window) => this.window = window;
 
@@ -228,16 +229,15 @@ public partial class MainWindow
                 if (!UiText.CanResume(kind) || reconnectAttempt >= UiText.MaxAutomaticReconnects)
                 {
                     sessionPassword = null;
-                    window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(failure, true), problem: true);
-                    window.ConnectButton.IsEnabled = true;
-                    SetConnectFormEnabled(true);
-                    window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
-                    if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
+                    RevealConnectForm("연결 종료: " + UiText.ConnectionFailure(failure, true), problem: true);
                     return;
                 }
                 reconnectAttempt++;
                 var wait = UiText.ReconnectDelay(reconnectAttempt);
-                window.ClientNotice(UiText.Reconnecting(reconnectAttempt, UiText.MaxAutomaticReconnects, (int)wait.TotalSeconds));
+                var notice = UiText.Reconnecting(reconnectAttempt, UiText.MaxAutomaticReconnects, (int)wait.TotalSeconds);
+                window.ClientNotice(notice);
+                ShowStage(notice);
+                SetHealth(UiText.ReconnectHold());
                 window.ConnectButton.IsEnabled = false;
                 window.ConnectButton.Content = "다시 연결 중…";
                 SetConnectFormEnabled(false);
@@ -301,7 +301,7 @@ public partial class MainWindow
                 lastConnection.RememberRecent(endpoint, pin, lastConnection.Display, frameQuality, frameRate);
                 SaveConnection();
                 RefreshRecent();
-                try { await LoadDisplays(); } catch { await DisconnectCore(); throw; }
+                try { await LoadDisplays(); } catch { await DisconnectCore(retrying: !announceFailure); throw; }
                 connection = new();
                 inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
                 inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
@@ -491,21 +491,33 @@ public partial class MainWindow
             generation++;
             var remote = client;
             client = null;
-            fullscreen?.Close();
+            holdingPicture = retrying;
+            if (!retrying) fullscreen?.Close();
             window.RefreshIdentity();
             connection?.Cancel();
             inputs?.Writer.TryComplete();
             inputSignal?.Writer.TryComplete();
             lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
             inputBacklog.Reset();
-            ClearFrame();
-            ShowStage(null);
+            if (!retrying) ClearFrame();
+            ShowStage(retrying ? UiText.ReconnectHold() : null);
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
-            selectedDisplay = null;
+            if (!retrying) selectedDisplay = null;
             SetSessionControlsEnabled(false);
-            window.ConnectionControls.Visibility = Visibility.Visible;
+            if (retrying)
+            {
+                window.ConnectionControls.Visibility = Visibility.Collapsed;
+                window.SessionToolbar.Visibility = Visibility.Visible;
+                window.SessionReveal.Visibility = Visibility.Collapsed;
+                window.EndSessionButton.IsEnabled = true;
+                SetHealth(UiText.ReconnectHold());
+            }
+            else
+            {
+                window.ConnectionControls.Visibility = Visibility.Visible;
+                SetHealth("연결 종료");
+            }
             SetConnectFormEnabled(!retrying);
-            SetHealth("연결 종료");
             inputEnabled = false;
             window.ConnectButton.IsEnabled = !retrying;
             if (remote != null) window.ConnectButton.Content = retrying ? "다시 연결 중…" : "다시 접속";
@@ -513,6 +525,24 @@ public partial class MainWindow
             UpdatePinSummary();
             if (!retrying && window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
             if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
+        }
+
+        private void RevealConnectForm(string notice, bool problem)
+        {
+            holdingPicture = false;
+            fullscreen?.Close();
+            ClearFrame();
+            ShowStage(null);
+            selectedDisplay = null;
+            SetSessionControlsEnabled(false);
+            window.ConnectionControls.Visibility = Visibility.Visible;
+            SetConnectFormEnabled(true);
+            window.ConnectButton.IsEnabled = true;
+            window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+            SetHealth("연결 종료");
+            window.RefreshIdentity();
+            window.ClientNotice(notice, problem);
+            if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
         }
 
         public void UpdatePinSummary()
@@ -1200,6 +1230,7 @@ public partial class MainWindow
         public void DisplayChanged(object sender, SelectionChangedEventArgs e)
         {
             if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
+            if (display.Id == selectedDisplay) return;
             Queue(new("release"));
             ClearFrame();
             ShowStage(client == null ? null : "화면을 받는 중…");

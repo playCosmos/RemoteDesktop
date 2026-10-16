@@ -70,6 +70,11 @@ public partial class MainWindow
         private bool remoteAltDown;
         private System.Windows.Threading.DispatcherTimer? toolbarTimer;
         private volatile bool viewerWatching = true;
+        private string? sessionPassword;
+        private Exception? connectFailure;
+        private int reconnectAttempt;
+        private int resumeEpoch;
+        private bool suppressReconnect;
 
         public ClientSession(MainWindow window) => this.window = window;
 
@@ -200,7 +205,48 @@ public partial class MainWindow
         }
 
         public void CloseFullscreen() => fullscreen?.Close();
-        public Task DisconnectClient() => DisconnectCore();
+        public Task DisconnectClient()
+        {
+            suppressReconnect = true;
+            sessionPassword = null;
+            resumeEpoch++;
+            return DisconnectCore();
+        }
+
+        private async Task ForgetReconnectsAfterStable(CancellationToken ct)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(10), ct); }
+            catch (OperationCanceledException) { return; }
+            reconnectAttempt = 0;
+        }
+
+        private async Task ResumeAfterDrop(Exception failure, int epoch)
+        {
+            while (!suppressReconnect && resumeEpoch == epoch && sessionPassword != null && client == null && !connecting)
+            {
+                var kind = UiText.ClassifyDrop(failure);
+                if (!UiText.ShouldReconnect(kind) || reconnectAttempt >= UiText.MaxAutomaticReconnects)
+                {
+                    sessionPassword = null;
+                    window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(failure, true), problem: true);
+                    window.ConnectButton.IsEnabled = true;
+                    SetConnectFormEnabled(true);
+                    window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+                    if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
+                    return;
+                }
+                reconnectAttempt++;
+                var wait = UiText.ReconnectDelay(reconnectAttempt);
+                window.ClientNotice(UiText.Reconnecting(reconnectAttempt, UiText.MaxAutomaticReconnects, (int)wait.TotalSeconds));
+                window.ConnectButton.IsEnabled = false;
+                window.ConnectButton.Content = "다시 연결 중…";
+                SetConnectFormEnabled(false);
+                await Task.Delay(wait);
+                if (suppressReconnect || resumeEpoch != epoch || sessionPassword == null || client != null || connecting) return;
+                if (await ConnectCore(sessionPassword, announceFailure: false)) return;
+                failure = connectFailure ?? failure;
+            }
+        }
         public void QueueRelease()
         {
             Queue(new("release"));
@@ -216,7 +262,15 @@ public partial class MainWindow
 
         public async void Connect(object sender, RoutedEventArgs e)
         {
-            if (connecting || client != null) return;
+            suppressReconnect = false;
+            reconnectAttempt = 0;
+            resumeEpoch++;
+            await ConnectCore(window.ClientPassword.Password, announceFailure: true);
+        }
+
+        private async Task<bool> ConnectCore(string password, bool announceFailure)
+        {
+            if (connecting || client != null) return false;
             connecting = true;
             window.ConnectButton.IsEnabled = false;
             window.ConnectButton.Content = "접속 중…";
@@ -230,14 +284,15 @@ public partial class MainWindow
                 if (pin.Length == 0)
                 {
                     window.ClientNotice("비밀번호로 서버 키를 확인하는 중입니다…");
-                    pin = await PakeBootstrap.AcquireServerFingerprint(endpoint, window.ClientPassword.Password);
+                    pin = await PakeBootstrap.AcquireServerFingerprint(endpoint, password);
                     window.ServerPin.Text = pin;
                 }
                 var remote = new RemoteClient(endpoint, pin);
-                try { await remote.Login(window.ClientPassword.Password); } catch { remote.Dispose(); throw; }
-                if (attempt != generation) { try { await remote.Logout(); } finally { remote.Dispose(); } return; }
+                try { await remote.Login(password); } catch { remote.Dispose(); throw; }
+                if (attempt != generation) { try { await remote.Logout(); } finally { remote.Dispose(); } return false; }
                 client = remote;
                 connectedOnce = true;
+                sessionPassword = password;
                 window.ClientPassword.Clear();
                 var previousHost = lastConnection.Address;
                 lastConnection.Address = endpoint;
@@ -267,14 +322,23 @@ public partial class MainWindow
                 UpdateInputChrome();
                 window.RefreshIdentity();
                 _ = RunConnection(remote, connection.Token);
+                return true;
             }
-            catch (Exception ex) { window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true); }
+            catch (Exception ex)
+            {
+                connectFailure = ex;
+                if (announceFailure) window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true);
+                return false;
+            }
             finally
             {
                 connecting = false;
-                window.ConnectButton.IsEnabled = client == null;
-                if (client == null) SetConnectFormEnabled(true);
-                if (client == null) window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+                if (client != null || announceFailure)
+                {
+                    window.ConnectButton.IsEnabled = client == null;
+                    if (client == null) SetConnectFormEnabled(true);
+                    if (client == null) window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+                }
             }
         }
 
@@ -315,6 +379,7 @@ public partial class MainWindow
 
         private async Task RunConnection(RemoteClient remote, CancellationToken ct)
         {
+            _ = ForgetReconnectsAfterStable(ct);
             async Task Frames()
             {
                 while (!ct.IsCancellationRequested)
@@ -401,18 +466,27 @@ public partial class MainWindow
                 catch (Exception ex) { window.SessionStatus("클립보드 동기화 오류: " + UiText.Explain(ex, "다시 시도하세요.")); }
             }
             var clipboardTask = SyncClipboard();
+            Exception? failure = null;
             try { await await Task.WhenAny(tasks); }
-            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(ex, true), problem: true); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { failure = ex; }
             catch (OperationCanceledException) { }
             finally
             {
-                if (ReferenceEquals(client, remote)) await DisconnectCore();
+                var current = ReferenceEquals(client, remote);
+                var retrying = current && failure != null && !suppressReconnect && sessionPassword != null && UiText.ShouldReconnect(UiText.ClassifyDrop(failure)) && reconnectAttempt < UiText.MaxAutomaticReconnects;
+                if (current) await DisconnectCore(retrying);
                 try { await Task.WhenAll(tasks); } catch { }
                 await clipboardTask;
+                if (retrying) await ResumeAfterDrop(failure!, resumeEpoch);
+                else if (current && failure != null && !suppressReconnect)
+                {
+                    sessionPassword = null;
+                    window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(failure, true), problem: true);
+                }
             }
         }
 
-        private async Task DisconnectCore()
+        private async Task DisconnectCore(bool retrying = false)
         {
             generation++;
             var remote = client;
@@ -430,14 +504,14 @@ public partial class MainWindow
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
             window.ConnectionControls.Visibility = Visibility.Visible;
-            SetConnectFormEnabled(true);
+            SetConnectFormEnabled(!retrying);
             SetHealth("연결 종료");
             inputEnabled = false;
-            window.ConnectButton.IsEnabled = true;
-            if (remote != null) window.ConnectButton.Content = "다시 접속";
+            window.ConnectButton.IsEnabled = !retrying;
+            if (remote != null) window.ConnectButton.Content = retrying ? "다시 연결 중…" : "다시 접속";
             window.ServerPin.Visibility = Visibility.Collapsed;
             UpdatePinSummary();
-            if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
+            if (!retrying && window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
             if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
         }
 
@@ -467,6 +541,9 @@ public partial class MainWindow
 
         public async void Disconnect(object sender, RoutedEventArgs e)
         {
+            suppressReconnect = true;
+            sessionPassword = null;
+            resumeEpoch++;
             await DisconnectCore();
             window.ClientNotice("연결 종료됨");
         }

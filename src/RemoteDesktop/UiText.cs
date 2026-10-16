@@ -246,6 +246,42 @@ public static class UiText
         return Explain(exception, duringSession ? "서버와 연결이 끊어졌습니다. 다시 접속하세요." : "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.");
     }
 
+    public enum DropKind { Network, Timeout, Rejected, Certificate, Occupied, Limited, Other }
+
+    public const int MaxAutomaticReconnects = 3;
+
+    public static DropKind ClassifyDrop(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is HttpRequestException http)
+            {
+                if (CertificateMismatch(http)) return DropKind.Certificate;
+                if (http.StatusCode == HttpStatusCode.Unauthorized) return DropKind.Rejected;
+                if (http.StatusCode == HttpStatusCode.Conflict) return DropKind.Occupied;
+                if (http.StatusCode == HttpStatusCode.TooManyRequests) return DropKind.Limited;
+                if (http.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout) return DropKind.Timeout;
+                if (http.StatusCode is null) return DropKind.Network;
+                return DropKind.Other;
+            }
+            if (current is TimeoutException or TaskCanceledException) return DropKind.Timeout;
+        }
+        return DropKind.Other;
+    }
+
+    public static bool ShouldReconnect(DropKind kind) => kind is DropKind.Network or DropKind.Timeout;
+
+    public static TimeSpan ReconnectDelay(int attempt) => TimeSpan.FromSeconds(attempt <= 1 ? 1 : attempt == 2 ? 2 : 4);
+
+    public static string Reconnecting(int attempt, int maximum, int seconds)
+        => "연결이 끊겼습니다. " + seconds + "초 후 다시 연결합니다. (" + attempt + "/" + maximum + ")";
+
+    private static bool CertificateMismatch(HttpRequestException http)
+    {
+        var detail = http.InnerException?.Message ?? http.Message;
+        return detail.Contains("SSL", StringComparison.OrdinalIgnoreCase) || detail.Contains("certificate", StringComparison.OrdinalIgnoreCase) || detail.Contains("인증서", StringComparison.Ordinal);
+    }
+
     private static bool HasHangul(string text)
     {
         foreach (var character in text)

@@ -13,6 +13,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
+        HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
+        Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
         var version = typeof(MainWindow).Assembly.GetName().Version;
         if (version is not null) Title = "Personal Remote Desktop " + version.ToString(3);
         ClientTab.IsSelected = true;
@@ -20,9 +22,17 @@ public partial class MainWindow : Window
         hostSession.Bind();
         clientSession.Bind();
         PreviewKeyDown += clientSession.FullscreenKey;
-        SourceInitialized += (_, _) => clientSession.InstallInputHooks();
+        SourceInitialized += (_, _) =>
+        {
+            clientSession.ApplyWindowPlacement();
+            clientSession.InstallInputHooks();
+        };
         Loaded += async (_, _) => await hostSession.StartIfConfigured();
-        Closing += (_, _) => hostSession.Closing = true;
+        Closing += (_, _) =>
+        {
+            clientSession.SaveWindowPlacement();
+            hostSession.Closing = true;
+        };
         Closed += async (_, _) =>
         {
             clientSession.UninstallSystemShortcutHook();
@@ -64,6 +74,7 @@ public partial class MainWindow : Window
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
     private void CopyFingerprint(object sender, RoutedEventArgs e) => hostSession.CopyFingerprint(sender, e);
+    private void CopyAddress(object sender, RoutedEventArgs e) => hostSession.CopyAddress(sender, e);
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);

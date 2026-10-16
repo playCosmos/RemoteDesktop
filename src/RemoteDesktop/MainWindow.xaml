@@ -139,8 +139,19 @@
           <Border Grid.Column="2" Style="{StaticResource Card}" VerticalAlignment="Top">
             <StackPanel>
               <TextBlock Text="이 PC에 접속하려면" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
-              <TextBlock Text="상대 PC의 원격 접속 화면에 아래 주소와 지문을 입력합니다. 비밀번호만 맞으면 수락 없이 연결됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,16"/>
-              <TextBlock x:Name="Addresses" Style="{StaticResource BodyText}" Margin="0,0,0,16"/>
+              <TextBlock Text="상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,16"/>
+              <TextBlock Text="주소" Style="{StaticResource FieldLabel}"/>
+              <TextBlock x:Name="AddressEmpty" Text="표시할 네트워크 주소가 없습니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" Visibility="Collapsed" Margin="0,0,0,16"/>
+              <ItemsControl x:Name="AddressList" Margin="0,0,0,8">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <DockPanel Margin="0,0,0,8" LastChildFill="True">
+                      <Button DockPanel.Dock="Right" Content="복사" MinWidth="64" Margin="8,0,0,0" Click="CopyAddress" Tag="{Binding}" ToolTip="주소와 포트를 복사합니다"/>
+                      <TextBox Text="{Binding Mode=OneWay}" IsReadOnly="True" IsReadOnlyCaretVisible="True" FontFamily="Cascadia Mono, Consolas"/>
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
               <TextBlock Text="서버 지문" Style="{StaticResource FieldLabel}"/>
               <TextBox x:Name="Fingerprint" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,10"/>
               <Button Content="지문 복사" Click="CopyFingerprint" HorizontalAlignment="Left" Margin="0,0,0,16"/>

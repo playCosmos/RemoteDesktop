@@ -16,6 +16,16 @@ Check(WindowsFileClipboard.DecodeText("한글", unicode: true) == "한글", "cli
 Check(WindowsFileClipboard.DecodeText(new MemoryStream(System.Text.Encoding.Unicode.GetBytes("가").Concat(new byte[] { 0, 0 }).ToArray()), unicode: true) == "가", "clipboard decodes a Unicode text stream");
 Check(WindowsFileClipboard.DecodeText(new MemoryStream(System.Text.Encoding.ASCII.GetBytes("ok").Concat(new byte[] { 0 }).ToArray()), unicode: false) == "ok", "clipboard decodes an ANSI text stream");
 Check(WindowsFileClipboard.DecodeText(null, unicode: true) == "", "clipboard ignores an empty text value");
+Check(EndpointText.TrySplit("192.168.56.1:45831", out var pastedHost, out var pastedPort) && pastedHost == "192.168.56.1" && pastedPort == 45831, "pasted address keeps its port");
+Check(EndpointText.TrySplit("192.168.56.1:443", out pastedHost, out pastedPort) && pastedPort == 443, "explicit https port still splits out of the address");
+Check(!EndpointText.TrySplit("192.168.56.1", out _, out _), "address without a port stays in the address field");
+Check(!EndpointText.TrySplit("192.168.56.1:", out _, out _), "incomplete pasted port is left alone");
+var shareable = HostAddresses.Endpoints(45831, [IPAddress.Parse("169.254.1.2"), IPAddress.Parse("8.8.8.8"), IPAddress.Parse("192.168.56.1"), IPAddress.Parse("10.0.0.2"), IPAddress.Parse("172.16.0.1"), IPAddress.Loopback, IPAddress.Parse("192.168.56.1")]);
+Check(shareable.SequenceEqual(["10.0.0.2:45831", "172.16.0.1:45831", "192.168.56.1:45831", "8.8.8.8:45831", "169.254.1.2:45831"]), "host addresses prefer LAN, drop duplicates and loopback");
+Check(HostAddresses.Endpoints(45831, [IPAddress.Loopback]).SequenceEqual(["127.0.0.1:45831"]), "loopback remains when it is the only address");
+var placed = new ClientSettings { WindowLeft = -120, WindowTop = 40, WindowWidth = 1100, WindowHeight = 720, WindowMaximized = true };
+Check(placed.TryGetWindowPlacement(-1920, 0, 3840, 1080, out var placement) && placement.Left == -120 && placement.Maximized, "window placement restores on a shifted desktop");
+Check(!new ClientSettings { WindowLeft = 5000, WindowTop = 0, WindowWidth = 1000, WindowHeight = 700 }.TryGetWindowPlacement(0, 0, 1920, 1080, out _), "off-screen window placement is ignored");
 
 await Password();
 await Session();
@@ -53,6 +63,10 @@ async Task Password()
     var saved = ClientSettings.Load(savedPath);
     Check(saved.Address == "192.168.1.20:45831" && saved.Fingerprint == site.Pin && saved.Display == "all" && saved.FrameQuality == 75 && saved.FrameRate == 30 && !saved.ClipboardAutoSync, "last connection and session preferences survive reload");
     Check(!File.ReadAllText(savedPath).Contains("password", StringComparison.OrdinalIgnoreCase), "connection preferences contain no password");
+    var remembered = new ClientSettings { Address = saved.Address, WindowLeft = 80, WindowTop = 90, WindowWidth = 1024, WindowHeight = 700, WindowMaximized = true };
+    remembered.Save(savedPath);
+    var reloadedPlacement = ClientSettings.Load(savedPath);
+    Check(reloadedPlacement.TryGetWindowPlacement(0, 0, 1920, 1080, out var reloadedWindow) && reloadedWindow.Left == 80 && reloadedWindow.Top == 90 && reloadedWindow.Maximized, "window placement survives reload");
     File.WriteAllText(savedPath, "invalid json");
     Check(ClientSettings.Load(savedPath).Address == "127.0.0.1:45831", "corrupt preferences recover to defaults");
 }

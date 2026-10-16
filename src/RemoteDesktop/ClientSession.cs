@@ -29,6 +29,7 @@ public partial class MainWindow
         private InputEvent? pendingWheel;
         private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
+        private bool normalizingAddress;
         private long lastMove;
         private int generation;
         private readonly ClientSettings lastConnection = ClientSettings.Load();
@@ -66,6 +67,38 @@ public partial class MainWindow
             frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
             ShowSessionPreset();
+        }
+
+        public void NormalizePastedAddress()
+        {
+            if (normalizingAddress || !EndpointText.TrySplit(window.Address.Text, out var host, out var port)) return;
+            normalizingAddress = true;
+            try
+            {
+                window.Address.Text = host;
+                window.Address.CaretIndex = host.Length;
+                window.ClientPort.Text = port.ToString();
+            }
+            finally { normalizingAddress = false; }
+        }
+
+        public void ApplyWindowPlacement()
+        {
+            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
+            if (!lastConnection.TryGetWindowPlacement(screen.Left, screen.Top, screen.Width, screen.Height, out var placement)) return;
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = placement.Left;
+            window.Top = placement.Top;
+            window.Width = placement.Width;
+            window.Height = placement.Height;
+            if (placement.Maximized) window.WindowState = WindowState.Maximized;
+        }
+
+        public void SaveWindowPlacement()
+        {
+            var bounds = window.WindowState == WindowState.Normal ? new Rect(window.Left, window.Top, window.Width, window.Height) : window.RestoreBounds;
+            lastConnection.RememberWindow(bounds.Left, bounds.Top, bounds.Width, bounds.Height, window.WindowState == WindowState.Maximized);
+            SaveConnection();
         }
 
         public void InstallInputHooks()
@@ -154,8 +187,7 @@ public partial class MainWindow
 
         private static (string Host, string Port) SplitEndpoint(string endpoint)
         {
-            if (Uri.TryCreate("https://" + endpoint, UriKind.Absolute, out var uri) && uri.Host.Length > 0)
-                return (uri.Host.Trim('[', ']'), uri.IsDefaultPort ? "45831" : uri.Port.ToString());
+            if (EndpointText.TrySplit(endpoint, out var host, out var port)) return (host, port.ToString());
             return (endpoint, "45831");
         }
 

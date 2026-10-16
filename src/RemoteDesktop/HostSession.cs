@@ -27,7 +27,26 @@ public partial class MainWindow
             window.HostPort.Text = settings.Port.ToString();
             UpdatePasswordState();
             window.Fingerprint.Text = Convert.ToHexString(SHA256.HashData(certificate.RawData));
-            window.Addresses.Text = "이 PC 주소: " + string.Join(", ", Dns.GetHostAddresses(Dns.GetHostName()).Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork));
+            RefreshAddresses();
+        }
+
+        public void RefreshAddresses()
+        {
+            var port = int.TryParse(window.HostPort.Text, out var parsed) && parsed is >= 1 and <= 65535 ? parsed : settings.Port;
+            var endpoints = HostAddresses.Endpoints(port);
+            window.AddressList.ItemsSource = endpoints;
+            window.AddressEmpty.Visibility = endpoints.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        public void CopyAddress(object sender, RoutedEventArgs e)
+        {
+            if (sender is not System.Windows.Controls.Button { Tag: string endpoint } || endpoint.Length == 0) return;
+            try
+            {
+                System.Windows.Clipboard.SetText(endpoint);
+                window.HostStatus(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
+            }
+            catch (Exception ex) { window.HostStatus("주소 복사 실패: " + ex.Message); }
         }
 
         public async Task StartIfConfigured()
@@ -76,8 +95,8 @@ public partial class MainWindow
         private void ShowListening(int port)
         {
             SetHostState(HostUiState.Listening);
-            var addresses = string.Join(", ", Dns.GetHostAddresses(Dns.GetHostName()).Where(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork));
-            window.HostStatus("접속 대기 중 · 포트 " + port + " · " + addresses);
+            if (window.HostPort.Text.Trim() != port.ToString()) window.HostPort.Text = port.ToString();
+            else RefreshAddresses();
         }
 
         private void UpdatePasswordState()

@@ -22,6 +22,7 @@ public partial class MainWindow
         private System.Windows.Threading.DispatcherTimer? addressRefresh;
         private bool addressWatch;
         private HostUiState hostState = HostUiState.Stopped;
+        private bool hostQuiet;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
         public string? ConnectedPeer => host?.SessionPeer;
@@ -158,14 +159,16 @@ public partial class MainWindow
         private void ApplyPresence()
         {
             var occupied = hostState == HostUiState.Listening && host?.HasSession == true;
+            var seen = host?.SessionLastSeenUtc;
+            hostQuiet = occupied && seen != null && UiText.HostShowsQuiet(DateTime.UtcNow - seen.Value);
             var live = hostState is HostUiState.Starting or HostUiState.Listening;
             window.HostSetup.Visibility = UiText.ShowHostSetup(hostState != HostUiState.Stopped) ? Visibility.Visible : Visibility.Collapsed;
-            window.HostCardTitle.Text = UiText.HostCardTitle(occupied, live, ConnectedPeer);
-            window.ShareTitle.Text = UiText.ShareTitle(occupied);
-            window.ShareHint.Text = UiText.ShareHint(occupied);
+            window.HostCardTitle.Text = UiText.HostCardTitle(occupied, live, ConnectedPeer, hostQuiet);
+            window.ShareTitle.Text = UiText.ShareTitle(occupied, hostQuiet);
+            window.ShareHint.Text = UiText.ShareHint(occupied, hostQuiet);
             window.KickButton.Style = occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.StopButton.Style = hostState is HostUiState.Listening or HostUiState.Stopping && !occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
-            window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(UiText.HostPresence(occupied, live));
+            window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(UiText.HostPresence(occupied, live, hostQuiet));
         }
 
         private void ShowListening(int port)
@@ -229,6 +232,9 @@ public partial class MainWindow
                 return;
             }
             window.HostSessionText.Text = UiText.ConnectedFor(DateTime.UtcNow - started.Value);
+            var seen = host?.SessionLastSeenUtc;
+            var quiet = seen != null && UiText.HostShowsQuiet(DateTime.UtcNow - seen.Value);
+            if (quiet != hostQuiet) ApplyPresence();
         }
 
         private void UpdatePasswordState()

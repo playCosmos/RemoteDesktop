@@ -171,10 +171,14 @@ public static class UiText
     public static bool ShowHostSetup(bool serverRunning) => !serverRunning;
 
     public static string HostCardTitle(bool clientConnected, bool serverLive, string? peer)
+        => HostCardTitle(clientConnected, serverLive, peer, quiet: false);
+
+    public static string HostCardTitle(bool clientConnected, bool serverLive, string? peer, bool quiet)
     {
         if (clientConnected)
         {
             var name = Blank(peer);
+            if (quiet) return name == null ? "응답이 없습니다" : name + " 응답 없음";
             return name == null ? "이 PC를 보는 중" : name + " 연결 중";
         }
         return serverLive ? "접속 대기 중" : "접속 받기";
@@ -188,9 +192,12 @@ public static class UiText
 
     public static bool EdgeToEdge(bool connected, bool clientTabSelected, bool fullscreen) => connected && clientTabSelected && !fullscreen;
 
-    public static string ShareTitle(bool occupied) => occupied ? "지금은 한 대만 연결됩니다" : "이 PC에 접속하려면";
+    public static string ShareTitle(bool occupied, bool quiet = false)
+        => quiet ? "응답이 멈춘 접속입니다" : occupied ? "지금은 한 대만 연결됩니다" : "이 PC에 접속하려면";
 
-    public static string ShareHint(bool occupied) => occupied
+    public static string ShareHint(bool occupied, bool quiet = false) => quiet
+        ? "상대가 응답하지 않습니다. 다른 PC가 이 접속을 이어받을 수 있고, 바로 비우려면 현재 접속 끊기를 누르세요."
+        : occupied
         ? "이미 다른 기기가 연결되어 있습니다. 현재 접속을 끊어야 다른 PC가 들어올 수 있습니다."
         : "상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다.";
 
@@ -209,7 +216,8 @@ public static class UiText
 
     public static bool RemotePointer(double stageY, bool captured) => captured || stageY > 20;
 
-    public static string HostPresence(bool clientConnected, bool serverLive) => clientConnected ? "LiveBrush" : serverLive ? "AccentBrush" : "MutedBrush";
+    public static string HostPresence(bool clientConnected, bool serverLive, bool quiet = false)
+        => clientConnected ? (quiet ? "DangerBrush" : "LiveBrush") : serverLive ? "AccentBrush" : "MutedBrush";
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -274,6 +282,8 @@ public static class UiText
     public static bool CanResume(DropKind kind) => ShouldReconnect(kind) || kind == DropKind.Occupied;
 
     public static bool ReplaceQuietSession(TimeSpan quiet) => quiet >= TimeSpan.FromSeconds(5);
+
+    public static bool HostShowsQuiet(TimeSpan sinceSeen) => ReplaceQuietSession(sinceSeen);
 
     public static TimeSpan ReconnectDelay(int attempt) => TimeSpan.FromSeconds(attempt <= 1 ? 2 : attempt == 2 ? 4 : 8);
 

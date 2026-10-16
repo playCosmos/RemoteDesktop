@@ -39,6 +39,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     public bool HasSession { get { lock (gate) return token != null; } }
     public string? SessionPeer { get { lock (gate) return sessionPeer; } }
     public DateTime? SessionStartedUtc { get { lock (gate) return sessionStarted; } }
+    public DateTime? SessionLastSeenUtc { get { lock (gate) return token == null ? null : lastSeen; } }
     public RemoteHost(HostSettings settings, IFileClipboard? fileClipboard = null, string? clipboardCache = null)
     {
         this.settings = settings;

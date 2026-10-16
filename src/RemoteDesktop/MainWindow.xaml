@@ -148,21 +148,23 @@
               <StackPanel>
                 <StackPanel Orientation="Horizontal">
                   <Ellipse x:Name="HostStateMark" Width="8" Height="8" Fill="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                  <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
+                  <TextBlock x:Name="HostCardTitle" Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
                 </StackPanel>
                 <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,16" TextWrapping="Wrap" MaxHeight="60" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <TextBlock x:Name="HostSessionText" Visibility="Collapsed" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource LiveBrush}" Margin="0,-8,0,12"/>
                 <TextBlock x:Name="HostNoticeText" Visibility="Collapsed" Style="{StaticResource BodyText}" Margin="0,-8,0,12" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-                <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
-                <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>
-                <StackPanel x:Name="PasswordEditor">
-                  <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상, 한 번 저장하면 계속 사용)" Style="{StaticResource FieldLabel}"/>
-                  <PasswordBox x:Name="HostPassword" Margin="0,0,0,10" PreviewKeyDown="HostPasswordKeyDown"/>
-                  <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
+                <StackPanel x:Name="HostSetup">
+                  <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
+                  <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+                  <StackPanel x:Name="PasswordEditor">
+                    <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상, 한 번 저장하면 계속 사용)" Style="{StaticResource FieldLabel}"/>
+                    <PasswordBox x:Name="HostPassword" Margin="0,0,0,10" PreviewKeyDown="HostPasswordKeyDown"/>
+                    <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
+                  </StackPanel>
+                  <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>
+                  <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+                  <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" ToolTip="화면이 거의 그대로일 때 이전 프레임을 다시 사용해 끊김을 줄입니다."/>
                 </StackPanel>
-                <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>
-                <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14"/>
-                <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" ToolTip="화면이 거의 그대로일 때 이전 프레임을 다시 사용해 끊김을 줄입니다."/>
                 <WrapPanel>
                   <Button x:Name="StartButton" Content="접속 대기 시작" Style="{StaticResource PrimaryButton}" Click="StartHost" Margin="0,0,8,8"/>
                   <Button x:Name="StopButton" Content="서버 중지" Click="StopHost" IsEnabled="False" Visibility="Collapsed" Margin="0,0,8,8"/>

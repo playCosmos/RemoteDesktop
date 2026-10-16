@@ -88,6 +88,12 @@ public static class UiText
 
     public static string InputBacklog() => "입력이 밀려 눌린 키와 버튼을 놓습니다.";
 
+    public static bool ShowHostSetup(bool serverRunning) => !serverRunning;
+
+    public static string HostCardTitle(bool clientConnected) => clientConnected ? "이 PC를 보는 중" : "접속 받기";
+
+    public static string HostPresence(bool clientConnected, bool serverLive) => clientConnected ? "LiveBrush" : serverLive ? "AccentBrush" : "MutedBrush";
+
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public static bool IsProblem(string? text)

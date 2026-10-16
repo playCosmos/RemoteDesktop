@@ -81,7 +81,6 @@ public partial class MainWindow : Window
         Title = UiText.WindowTitle(productTitle, outbound, inbound);
         clientSession.SetFullscreenTitle(UiText.FullscreenTitle(outbound, inbound));
         SessionReveal.ToolTip = string.IsNullOrEmpty(inbound) ? "세션 조작 열기" : "이 PC에 " + inbound + " 연결됨 · 세션 조작 열기";
-        HostStateMark.Fill = (System.Windows.Media.Brush)FindResource(!string.IsNullOrEmpty(inbound) ? "LiveBrush" : StopButton.IsEnabled ? "AccentBrush" : "MutedBrush");
         if (departed) StopAttention();
         else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
     }

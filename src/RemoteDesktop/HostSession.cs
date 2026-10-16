@@ -18,6 +18,7 @@ public partial class MainWindow
         private bool changingPassword;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
         private System.Windows.Threading.DispatcherTimer? sessionClock;
+        private HostUiState hostState = HostUiState.Stopped;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
         public string? ConnectedPeer => host?.SessionPeer;
@@ -88,6 +89,7 @@ public partial class MainWindow
 
         private void SetHostState(HostUiState state)
         {
+            hostState = state;
             window.StartButton.Content = state switch
             {
                 HostUiState.Starting => "접속 대기 시작 중…",
@@ -100,11 +102,20 @@ public partial class MainWindow
             window.StartButton.Visibility = state is HostUiState.Stopped or HostUiState.Starting ? Visibility.Visible : Visibility.Collapsed;
             window.StopButton.Visibility = state is HostUiState.Listening or HostUiState.Stopping ? Visibility.Visible : Visibility.Collapsed;
             window.KickButton.Visibility = window.KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
-            window.StopButton.Style = state is HostUiState.Listening or HostUiState.Stopping ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.HostPort.IsEnabled = window.ChangePasswordButton.IsEnabled = state == HostUiState.Stopped;
             window.SmoothHostToggle.IsEnabled = state == HostUiState.Stopped;
-            var live = state is HostUiState.Starting or HostUiState.Listening;
-            window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(live ? "AccentBrush" : "MutedBrush");
+            ApplyPresence();
+        }
+
+        private void ApplyPresence()
+        {
+            var occupied = hostState == HostUiState.Listening && host?.HasSession == true;
+            var live = hostState is HostUiState.Starting or HostUiState.Listening;
+            window.HostSetup.Visibility = UiText.ShowHostSetup(hostState != HostUiState.Stopped) ? Visibility.Visible : Visibility.Collapsed;
+            window.HostCardTitle.Text = UiText.HostCardTitle(occupied);
+            window.KickButton.Style = occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
+            window.StopButton.Style = hostState is HostUiState.Listening or HostUiState.Stopping && !occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
+            window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(UiText.HostPresence(occupied, live));
         }
 
         private void ShowListening(int port)
@@ -143,15 +154,18 @@ public partial class MainWindow
                 sessionClock?.Stop();
                 window.HostSessionText.Text = "";
                 window.HostSessionText.Visibility = Visibility.Collapsed;
-                return;
             }
-            window.HostSessionText.Text = UiText.ConnectedFor(DateTime.UtcNow - started.Value);
-            window.HostSessionText.Visibility = Visibility.Visible;
-            sessionClock ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            sessionClock.Stop();
-            sessionClock.Tick -= TickConnectedClock;
-            sessionClock.Tick += TickConnectedClock;
-            sessionClock.Start();
+            else
+            {
+                window.HostSessionText.Text = UiText.ConnectedFor(DateTime.UtcNow - started.Value);
+                window.HostSessionText.Visibility = Visibility.Visible;
+                sessionClock ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                sessionClock.Stop();
+                sessionClock.Tick -= TickConnectedClock;
+                sessionClock.Tick += TickConnectedClock;
+                sessionClock.Start();
+            }
+            ApplyPresence();
         }
 
         private void TickConnectedClock(object? sender, EventArgs e)

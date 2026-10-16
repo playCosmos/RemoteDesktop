@@ -6,6 +6,37 @@ public record InputEvent(string Kind, double X = 0, double Y = 0, int Code = 0, 
 {
     public const int MaxWheelDelta = 1200;
 }
+
+public sealed class InputBacklog
+{
+    private readonly object gate = new();
+    private bool releaseRequested;
+
+    public bool Note()
+    {
+        lock (gate)
+        {
+            var first = !releaseRequested;
+            releaseRequested = true;
+            return first;
+        }
+    }
+
+    public bool Take()
+    {
+        lock (gate)
+        {
+            if (!releaseRequested) return false;
+            releaseRequested = false;
+            return true;
+        }
+    }
+
+    public void Reset()
+    {
+        lock (gate) releaseRequested = false;
+    }
+}
 public record RemoteDisplay(string Id, string Name, int Left, int Top, int Width, int Height, bool Primary)
 { public override string ToString() => Name + " · " + Width + "×" + Height; }
 public readonly record struct CaptureTiming(double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality);

@@ -25,6 +25,7 @@ public partial class MainWindow
         private Channel<InputEvent>? inputs;
         private Channel<byte>? inputSignal;
         private readonly object inputGate = new();
+        private readonly InputBacklog inputBacklog = new();
         private InputEvent? pendingMove;
         private InputEvent? pendingWheel;
         private readonly HashSet<int> pendingKeyDowns = [];
@@ -234,6 +235,7 @@ public partial class MainWindow
                 connection = new();
                 inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
                 inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
+                inputBacklog.Reset();
                 lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
                 clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
                 clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
@@ -346,6 +348,11 @@ public partial class MainWindow
                     lock (inputGate) { move = pendingMove; wheel = pendingWheel; pendingMove = null; pendingWheel = null; }
                     if (move != null) await remote.Input(move, ct);
                     if (wheel != null) await remote.Input(wheel, ct);
+                    if (inputBacklog.Take())
+                    {
+                        lock (inputGate) pendingKeyDowns.Clear();
+                        await remote.Input(new("release"), ct);
+                    }
                 }
             }
             async Task Heartbeat()
@@ -390,6 +397,7 @@ public partial class MainWindow
             inputs?.Writer.TryComplete();
             inputSignal?.Writer.TryComplete();
             lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
+            inputBacklog.Reset();
             ClearFrame();
             ShowStage(null);
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -527,7 +535,8 @@ public partial class MainWindow
                 else overflow = !EnqueueDiscrete(channel, input);
                 if (overflow && input.Kind == "key" && input.Down) pendingKeyDowns.Remove(input.Code);
             }
-            if (overflow) { InputOverflow(); return; }
+            if (overflow && inputBacklog.Note()) window.SessionStatus(UiText.InputBacklog());
+            if (overflow) ShowSessionToolbar();
             signal.Writer.TryWrite(0);
         }
 
@@ -560,12 +569,6 @@ public partial class MainWindow
             pendingWheel = null;
             if (input.Kind == "key" && !input.Down) pendingKeyDowns.Remove(input.Code);
             return channel.Writer.TryWrite(input);
-        }
-
-        private void InputOverflow()
-        {
-            window.ClientNotice("입력 대기열 초과로 연결을 종료합니다.", problem: true);
-            connection?.Cancel();
         }
 
         private void UpdateFrameHealth(bool changed)

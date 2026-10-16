@@ -86,6 +86,8 @@ public static class UiText
 
     public static bool NeedsAttention(bool newlyConnected, bool windowActive) => newlyConnected && !windowActive;
 
+    public static string InputBacklog() => "입력이 밀려 눌린 키와 버튼을 놓습니다.";
+
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     public static bool IsProblem(string? text)

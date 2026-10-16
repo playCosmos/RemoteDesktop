@@ -66,6 +66,13 @@ Check(UiText.FullscreenTitle(null, null) == "Personal Remote Desktop · F11로 �
 Check(UiText.ConnectedFor(TimeSpan.FromSeconds(5)) == "연결된 지 00:05" && UiText.ConnectedFor(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7)) == "연결된 지 03:07", "connection duration stays in minutes and seconds");
 Check(UiText.ConnectedFor(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "연결된 지 2:04:09" && UiText.ConnectedFor(TimeSpan.FromSeconds(-3)) == "연결된 지 00:00", "long connections include hours and negative time is clamped");
 Check(UiText.NeedsAttention(true, false) && !UiText.NeedsAttention(true, true) && !UiText.NeedsAttention(false, false), "only a newly arrived client flashes an inactive window");
+var inputBacklog = new InputBacklog();
+Check(!inputBacklog.Take(), "an idle input queue does not release keys");
+Check(inputBacklog.Note() && !inputBacklog.Note() && inputBacklog.Take() && !inputBacklog.Take(), "a full input queue releases stuck keys once and keeps the session");
+inputBacklog.Note();
+inputBacklog.Reset();
+Check(!inputBacklog.Take() && inputBacklog.Note(), "a new session does not inherit an old input backlog");
+Check(UiText.InputBacklog() == "입력이 밀려 눌린 키와 버튼을 놓습니다.", "an input backlog tells the viewer the keys were released");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";

@@ -166,7 +166,11 @@ public partial class MainWindow
 
         public void CloseFullscreen() => fullscreen?.Close();
         public Task DisconnectClient() => DisconnectCore();
-        public void QueueRelease() => Queue(new("release"));
+        public void QueueRelease()
+        {
+            Queue(new("release"));
+            UpdateInputChrome();
+        }
 
         public void FocusConnectField()
         {
@@ -223,6 +227,8 @@ public partial class MainWindow
                 healthWindowStarted = DateTime.UtcNow;
                 roundTripMilliseconds = -1;
                 window.SessionStatus("연결됨");
+                if (window.IsActive) window.ScreenImage.Focus();
+                UpdateInputChrome();
                 _ = RunConnection(remote, connection.Token);
             }
             catch (Exception ex) { window.ClientNotice("접속 실패: " + FailureText(ex), problem: true); }
@@ -650,8 +656,8 @@ public partial class MainWindow
 
         public void MouseDownRemote(object sender, MouseButtonEventArgs e)
         {
-            if (!Position(e)) return;
             window.ScreenImage.Focus();
+            if (!Position(e)) return;
             window.ScreenImage.CaptureMouse();
             Queue(new("button", Code: Button(e.ChangedButton), Down: true));
             e.Handled = true;
@@ -851,12 +857,23 @@ public partial class MainWindow
 
         public void RemoteFocusChanged(object sender, KeyboardFocusChangedEventArgs e) => UpdateInputChrome();
 
+        public void WindowActivationChanged() => UpdateInputChrome();
+
         private void UpdateInputChrome()
         {
-            var armed = client != null && inputEnabled && window.ScreenImage.IsKeyboardFocused;
-            window.Stage.BorderBrush = armed ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
-            window.Stage.BorderThickness = new Thickness(armed ? 2 : 0);
+            var controlling = RemoteInputFocused();
+            window.Stage.BorderBrush = controlling ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
+            window.Stage.BorderThickness = new Thickness(controlling ? 2 : 0);
             window.ScreenImage.Cursor = client != null && !inputEnabled ? Cursors.None : Cursors.Arrow;
+            string? hint = null;
+            if (client != null && !controlling)
+                hint = inputEnabled
+                    ? "화면을 클릭하면 키보드가 원격 PC로 갑니다."
+                    : "입력 제어가 꺼져 있습니다. 화면만 보는 중입니다.";
+            window.InputHintText.Text = hint ?? "";
+            window.InputHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+            var alertLift = hint == null ? 16 : 58;
+            window.SessionAlert.Margin = new Thickness(24, 16, 24, alertLift);
         }
 
         private string DescribeSession()
@@ -979,7 +996,8 @@ public partial class MainWindow
             fullscreen = shell;
             shell.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(shell).Handle)?.AddHook(NativeKeyboard);
             shell.PreviewKeyDown += FullscreenKey;
-            shell.Deactivated += (_, _) => Queue(new("release"));
+            shell.Activated += (_, _) => UpdateInputChrome();
+            shell.Deactivated += (_, _) => { Queue(new("release")); UpdateInputChrome(); };
             shell.Closed += (_, _) =>
             {
                 Queue(new("release"));
@@ -989,6 +1007,7 @@ public partial class MainWindow
                 window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
                 fullscreen = null;
                 window.ScreenImage.Focus();
+                UpdateInputChrome();
             };
             shell.Show();
             shell.WindowState = WindowState.Maximized;

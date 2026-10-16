@@ -119,6 +119,9 @@
         <Border x:Name="SessionAlert" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" IsHitTestVisible="False">
           <TextBlock x:Name="SessionAlertText" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </Border>
+        <Border x:Name="InputHint" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="12,7" IsHitTestVisible="False">
+          <TextBlock x:Name="InputHintText" Foreground="{StaticResource InkBrush}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"/>
+        </Border>
             <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">
               <DockPanel>
                 <Button DockPanel.Dock="Right" Content="닫기" Click="CloseSessionInfo" VerticalAlignment="Top" Margin="12,0,0,0"/>

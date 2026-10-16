@@ -45,6 +45,7 @@ public partial class MainWindow : Window
             await hostSession.DisposeAsync();
         };
         Deactivated += (_, _) => clientSession.QueueRelease();
+        Activated += (_, _) => clientSession.WindowActivationChanged();
     }
 
     internal void BringToFront()

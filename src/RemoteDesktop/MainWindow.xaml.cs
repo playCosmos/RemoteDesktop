@@ -61,6 +61,8 @@ public partial class MainWindow : Window
         KickButton.Visibility = KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
     });
 
+    private void HostNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() => hostSession.ShowNotice(text, problem));
+
     private void SessionStatus(string text) => Dispatcher.InvokeAsync(() =>
     {
         StatusText.Text = text;

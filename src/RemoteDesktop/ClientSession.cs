@@ -86,7 +86,12 @@ public partial class MainWindow
         public void UseRecent(object sender, RoutedEventArgs e)
         {
             if (client != null || sender is not System.Windows.Controls.Button { Tag: RecentConnection recent }) return;
-            window.Address.Text = recent.Address;
+            if (EndpointText.TrySplit(recent.Address, out var host, out var port))
+            {
+                window.Address.Text = host;
+                window.ClientPort.Text = port.ToString();
+            }
+            else window.Address.Text = recent.Address;
             window.ServerPin.Text = recent.Fingerprint;
             window.ServerPin.Visibility = Visibility.Collapsed;
             UpdatePinSummary();
@@ -176,6 +181,7 @@ public partial class MainWindow
             connecting = true;
             window.ConnectButton.IsEnabled = false;
             window.ConnectButton.Content = "접속 중…";
+            SetConnectFormEnabled(false);
             window.ClientNotice("접속하는 중…");
             var attempt = generation;
             try
@@ -224,8 +230,20 @@ public partial class MainWindow
             {
                 connecting = false;
                 window.ConnectButton.IsEnabled = client == null;
+                if (client == null) SetConnectFormEnabled(true);
                 if (client == null) window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
             }
+        }
+
+        private void SetConnectFormEnabled(bool enabled)
+        {
+            window.Address.IsEnabled = enabled;
+            window.ClientPort.IsEnabled = enabled;
+            window.ClientPassword.IsEnabled = enabled;
+            window.ServerPin.IsEnabled = enabled;
+            window.EditPinButton.IsEnabled = enabled;
+            window.ClearPinButton.IsEnabled = enabled;
+            window.RecentPanel.IsEnabled = enabled;
         }
 
         public void ClientPasswordKeyDown(object sender, KeyEventArgs e)
@@ -350,6 +368,7 @@ public partial class MainWindow
             selectedDisplay = null;
             SetSessionControlsEnabled(false);
             window.ConnectionControls.Visibility = Visibility.Visible;
+            SetConnectFormEnabled(true);
             SetHealth("연결 종료");
             inputEnabled = false;
             window.ConnectButton.IsEnabled = true;

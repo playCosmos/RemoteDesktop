@@ -16,6 +16,7 @@ public partial class MainWindow
         private RemoteHost? host;
         private bool hostStarting;
         private bool changingPassword;
+        private System.Windows.Threading.DispatcherTimer? noticeTimer;
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
 
@@ -52,9 +53,9 @@ public partial class MainWindow
             try
             {
                 System.Windows.Clipboard.SetText(endpoint);
-                window.HostStatus(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
+                window.HostNotice(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
             }
-            catch (Exception ex) { window.HostStatus("주소 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다.")); }
+            catch (Exception ex) { window.HostNotice("주소 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다."), problem: true); }
         }
 
         public async Task StartIfConfigured()
@@ -109,6 +110,27 @@ public partial class MainWindow
             SetHostState(HostUiState.Listening);
             if (window.HostPort.Text.Trim() != port.ToString()) window.HostPort.Text = port.ToString();
             else RefreshAddresses();
+        }
+
+        public void ShowNotice(string text, bool problem)
+        {
+            window.HostNoticeText.Text = text;
+            window.HostNoticeText.Foreground = problem
+                ? (System.Windows.Media.Brush)window.FindResource("DangerBrush")
+                : (System.Windows.Media.Brush)window.FindResource("AccentBrush");
+            window.HostNoticeText.Visibility = Visibility.Visible;
+            noticeTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4.5) };
+            noticeTimer.Stop();
+            noticeTimer.Tick -= ClearNotice;
+            noticeTimer.Tick += ClearNotice;
+            noticeTimer.Start();
+        }
+
+        private void ClearNotice(object? sender, EventArgs e)
+        {
+            noticeTimer?.Stop();
+            window.HostNoticeText.Text = "";
+            window.HostNoticeText.Visibility = Visibility.Collapsed;
         }
 
         private void UpdatePasswordState()
@@ -241,9 +263,9 @@ public partial class MainWindow
             try
             {
                 System.Windows.Clipboard.SetText(window.Fingerprint.Text);
-                window.HostStatus("서버 지문을 복사했습니다.");
+                window.HostNotice("서버 지문을 복사했습니다.");
             }
-            catch (Exception ex) { window.HostStatus("지문 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다.")); }
+            catch (Exception ex) { window.HostNotice("지문 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다."), problem: true); }
         }
     }
 }

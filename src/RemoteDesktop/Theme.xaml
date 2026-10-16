@@ -431,7 +431,7 @@
       <Setter.Value>
         <ControlTemplate TargetType="TabControl">
           <DockPanel>
-            <Border DockPanel.Dock="Top" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="22,0">
+            <Border x:Name="HeaderBar" DockPanel.Dock="Top" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1" Padding="22,0">
               <DockPanel>
                 <TextBlock DockPanel.Dock="Left" Text="Personal Remote Desktop" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" Margin="0,0,28,0"/>
                 <TabPanel IsItemsHost="True" Background="Transparent" VerticalAlignment="Center"/>

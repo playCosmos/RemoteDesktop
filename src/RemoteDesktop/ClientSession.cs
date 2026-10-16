@@ -77,10 +77,27 @@ public partial class MainWindow
         public void TabChanged(System.Windows.Controls.SelectionChangedEventArgs e)
         {
             if (!window.IsLoaded || e.Source is not System.Windows.Controls.TabControl) return;
+            ApplySessionChrome();
             var tab = window.ServerTab.IsSelected ? "host" : "client";
             if (string.Equals(lastConnection.SelectedTab, tab, StringComparison.OrdinalIgnoreCase)) return;
             lastConnection.SelectedTab = tab;
             SaveConnection();
+        }
+
+        public void ShowHostPage(object sender, RoutedEventArgs e)
+        {
+            window.ServerTab.IsSelected = true;
+            ApplySessionChrome();
+        }
+
+        private void ApplySessionChrome()
+        {
+            var edgeToEdge = client != null && window.ClientTab.IsSelected;
+            window.Pages.ApplyTemplate();
+            if (window.Pages.Template?.FindName("HeaderBar", window.Pages) is Border header)
+                header.Visibility = edgeToEdge ? Visibility.Collapsed : Visibility.Visible;
+            if (fullscreen == null) window.ClientPanel.Margin = new Thickness(edgeToEdge ? 0 : 12);
+            window.Stage.CornerRadius = new CornerRadius(edgeToEdge || fullscreen != null ? 0 : 12);
         }
 
         public void UseRecent(object sender, RoutedEventArgs e)
@@ -423,7 +440,7 @@ public partial class MainWindow
             window.DisplayList.IsEnabled = enabled;
             window.SessionMenuButton.IsEnabled = enabled;
             window.EndSessionButton.IsEnabled = enabled;
-            window.ClientPanel.Margin = new Thickness(enabled ? 8 : 12);
+            ApplySessionChrome();
             if (enabled) SetHealth("측정 중");
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             UpdateInputChrome();
@@ -987,6 +1004,7 @@ public partial class MainWindow
             window.ClientTab.Content = null;
             window.ConnectionControls.Visibility = Visibility.Collapsed;
             window.ClientPanel.Margin = new Thickness(0);
+            window.Stage.CornerRadius = new CornerRadius(0);
             var shell = new Window { Title = "Personal Remote Desktop · F11 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = window, Content = window.ClientPanel };
             shell.WindowStartupLocation = WindowStartupLocation.Manual;
             shell.Left = window.Left;
@@ -1003,9 +1021,9 @@ public partial class MainWindow
                 Queue(new("release"));
                 shell.Content = null;
                 window.ClientTab.Content = window.ClientPanel;
-                window.ClientPanel.Margin = new Thickness(client is null ? 12 : 8);
                 window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
                 fullscreen = null;
+                ApplySessionChrome();
                 window.ScreenImage.Focus();
                 UpdateInputChrome();
             };

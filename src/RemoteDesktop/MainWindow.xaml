@@ -1,8 +1,15 @@
 <Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Width="1180" Height="800" MinWidth="920" MinHeight="640" Background="{StaticResource AppBrush}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
   <TabControl SelectionChanged="TabChanged">
     <TabItem x:Name="ClientTab" Header="원격 접속">
-      <DockPanel x:Name="ClientPanel" Margin="16">
-        <Border x:Name="ConnectionControls" DockPanel.Dock="Top" Style="{StaticResource Card}" Margin="0,0,0,12">
+      <DockPanel x:Name="ClientPanel" Margin="12">
+        <Grid>
+        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
+          <Grid>
+            <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24"/>
+            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+          </Grid>
+        </Border>
+        <Border x:Name="ConnectionControls" VerticalAlignment="Top" Margin="12" Style="{StaticResource Card}" Padding="14,12">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="2*"/>
@@ -28,35 +35,35 @@
             <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" PreviewKeyDown="ClientPasswordKeyDown"/>
             <PasswordBox x:Name="ClientPassword" Grid.Row="1" Grid.Column="4" PreviewKeyDown="ClientPasswordKeyDown"/>
             <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="6" Content="접속" Style="{StaticResource PrimaryButton}" MinWidth="88" Click="Connect" VerticalAlignment="Bottom"/>
-            <DockPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,12,0,0" LastChildFill="True">
+            <DockPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,8,0,0" LastChildFill="True">
               <Button x:Name="ClearPinButton" DockPanel.Dock="Right" Content="지우기" Margin="8,0,0,0" Click="ClearPin" Visibility="Collapsed" ToolTip="저장된 지문을 지웁니다"/>
               <Button x:Name="EditPinButton" DockPanel.Dock="Right" Content="지문 입력" Click="EditPin" ToolTip="서버 지문을 직접 입력합니다"/>
               <TextBlock x:Name="PinSummary" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
             <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" Visibility="Collapsed" PreviewKeyDown="ClientPasswordKeyDown"/>
-            <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,10,0,0" MaxHeight="60" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-            <StackPanel x:Name="RecentPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,14,0,0" Visibility="Collapsed">
+            <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <StackPanel x:Name="RecentPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,10,0,0" Visibility="Collapsed">
               <TextBlock Text="최근 연결" Style="{StaticResource FieldLabel}"/>
-              <ScrollViewer MaxHeight="128" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <ScrollViewer VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto">
               <ItemsControl x:Name="RecentList">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"/>
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <DockPanel Margin="0,0,0,8" LastChildFill="False">
-                      <Button DockPanel.Dock="Right" Content="삭제" Margin="8,0,0,0" Click="ForgetRecent" Tag="{Binding}" ToolTip="이 최근 연결을 지웁니다"/>
-                      <Button Content="{Binding Address}" HorizontalAlignment="Left" Click="UseRecent" Tag="{Binding}" ToolTip="주소와 지문을 채웁니다. 비밀번호는 저장되지 않습니다."/>
-                    </DockPanel>
+                    <Border Margin="0,0,8,0" Background="{StaticResource QuietHoverBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="2,2,2,2">
+                      <StackPanel Orientation="Horizontal">
+                        <Button Content="{Binding Address}" Click="UseRecent" Tag="{Binding}" Padding="10,4" MinHeight="28" Background="Transparent" BorderThickness="0" ToolTip="주소와 지문을 채웁니다. 비밀번호는 저장되지 않습니다."/>
+                        <Button Content="×" Width="28" MinHeight="28" Padding="0" Margin="2,0,0,0" Background="Transparent" BorderThickness="0" Click="ForgetRecent" Tag="{Binding}" ToolTip="이 최근 연결을 지웁니다"/>
+                      </StackPanel>
+                    </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               </ScrollViewer>
             </StackPanel>
-          </Grid>
-        </Border>
-        <Grid>
-        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
-          <Grid>
-            <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
           </Grid>
         </Border>
         <Border x:Name="SessionToolbar" VerticalAlignment="Top" Visibility="Collapsed" Margin="12,10,12,0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="8,6" MouseMove="SessionToolbarActivity">

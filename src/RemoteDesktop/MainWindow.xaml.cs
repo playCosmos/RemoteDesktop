@@ -80,7 +80,7 @@ public partial class MainWindow : Window
         ServerTab.Header = UiText.HostTabLabel(inbound);
         Title = UiText.WindowTitle(productTitle, outbound, inbound);
         clientSession.SetFullscreenTitle(UiText.FullscreenTitle(outbound, inbound));
-        SessionReveal.ToolTip = string.IsNullOrEmpty(inbound) ? "세션 조작 열기" : "이 PC에 " + inbound + " 연결됨 · 세션 조작 열기";
+        SessionReveal.ToolTip = UiText.RevealTip(clientSession.ViewingLabel, inbound);
         if (departed) StopAttention();
         else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
     }

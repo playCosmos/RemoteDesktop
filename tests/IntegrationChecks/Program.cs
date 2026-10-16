@@ -76,6 +76,10 @@ Check(UiText.InputBacklog() == "입력이 밀려 눌린 키와 버튼을 놓습�
 Check(!UiText.ShowHostSetup(true) && UiText.ShowHostSetup(false), "host setup hides while the server is running");
 Check(UiText.HostCardTitle(false) == "접속 받기" && UiText.HostCardTitle(true) == "이 PC를 보는 중", "a connected client renames the host card");
 Check(UiText.HostPresence(true, true) == "LiveBrush" && UiText.HostPresence(false, true) == "AccentBrush" && UiText.HostPresence(false, false) == "MutedBrush", "the host dot distinguishes a connected client from waiting");
+Check(UiText.ElapsedClock(TimeSpan.FromSeconds(5)) == "00:05" && UiText.ElapsedClock(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "2:04:09", "elapsed time stays compact");
+Check(UiText.SessionHealth(null, "15 fps · 40 ms") == "15 fps · 40 ms" && UiText.SessionHealth("03:12", "15 fps · 40 ms") == "03:12 · 15 fps · 40 ms", "session health keeps the clock beside the frame rate");
+Check(UiText.SessionPreset(null, "균형", 15) == "균형 · 15 FPS" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15) == "10.0.0.8:45831 · 균형 · 15 FPS", "the toolbar names the remote pc");
+Check(UiText.RevealTip(null, null) == "세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", null) == "연결된 지 03:12 · 세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", "192.168.0.2") == "연결된 지 03:12 · 이 PC에 192.168.0.2 연결됨", "the hidden toolbar button explains the session");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";

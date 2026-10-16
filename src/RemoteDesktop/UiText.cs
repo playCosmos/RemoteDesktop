@@ -75,13 +75,36 @@ public static class UiText
         return hosting == null ? "이 PC" : "이 PC · " + hosting;
     }
 
-    public static string ConnectedFor(TimeSpan elapsed)
+    public static string ConnectedFor(TimeSpan elapsed) => "연결된 지 " + ElapsedClock(elapsed);
+
+    public static string ElapsedClock(TimeSpan elapsed)
     {
         if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
-        var clock = elapsed.TotalHours >= 1
+        return elapsed.TotalHours >= 1
             ? (int)elapsed.TotalHours + ":" + elapsed.Minutes.ToString("00") + ":" + elapsed.Seconds.ToString("00")
             : elapsed.Minutes.ToString("00") + ":" + elapsed.Seconds.ToString("00");
-        return "연결된 지 " + clock;
+    }
+
+    public static string SessionHealth(string? clock, string? detail)
+    {
+        detail = string.IsNullOrWhiteSpace(detail) ? "측정 중" : detail.Trim();
+        return string.IsNullOrWhiteSpace(clock) ? detail : clock.Trim() + " · " + detail;
+    }
+
+    public static string SessionPreset(string? address, string quality, int frameRate)
+    {
+        var preset = quality + " · " + frameRate + " FPS";
+        return string.IsNullOrWhiteSpace(address) ? preset : address.Trim() + " · " + preset;
+    }
+
+    public static string RevealTip(string? elapsedLabel, string? inbound)
+    {
+        var duration = Blank(elapsedLabel);
+        var peer = Blank(inbound);
+        if (duration != null && peer != null) return duration + " · 이 PC에 " + peer + " 연결됨";
+        if (duration != null) return duration + " · 세션 조작 열기";
+        if (peer != null) return "이 PC에 " + peer + " 연결됨 · 세션 조작 열기";
+        return "세션 조작 열기";
     }
 
     public static bool NeedsAttention(bool newlyConnected, bool windowActive) => newlyConnected && !windowActive;

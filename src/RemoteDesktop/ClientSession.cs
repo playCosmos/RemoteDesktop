@@ -33,8 +33,12 @@ public partial class MainWindow
         private bool connectedOnce;
         public string? RemoteEndpoint => client == null ? null : lastConnection.Address;
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
+        public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
         private long lastMove;
+        private DateTime? viewingSince;
+        private string healthDetail = "연결 전";
+        private System.Windows.Threading.DispatcherTimer? viewingClock;
         private int generation;
         private readonly ClientSettings lastConnection = ClientSettings.Load();
         private string? selectedDisplay;
@@ -454,7 +458,10 @@ public partial class MainWindow
             window.SessionMenuButton.IsEnabled = enabled;
             window.EndSessionButton.IsEnabled = enabled;
             ApplySessionChrome();
+            if (enabled) StartViewingClock();
+            else StopViewingClock();
             if (enabled) SetHealth("측정 중");
+            ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
@@ -476,8 +483,35 @@ public partial class MainWindow
 
         private void SetHealth(string text)
         {
+            healthDetail = text;
+            PublishHealth();
+        }
+
+        private void StartViewingClock()
+        {
+            viewingSince = DateTime.UtcNow;
+            viewingClock ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            viewingClock.Stop();
+            viewingClock.Tick -= PublishHealthTick;
+            viewingClock.Tick += PublishHealthTick;
+            viewingClock.Start();
+        }
+
+        private void StopViewingClock()
+        {
+            viewingClock?.Stop();
+            viewingSince = null;
+        }
+
+        private void PublishHealthTick(object? sender, EventArgs e) => PublishHealth();
+
+        private void PublishHealth()
+        {
+            var clock = viewingSince == null ? null : UiText.ElapsedClock(DateTime.UtcNow - viewingSince.Value);
+            var text = UiText.SessionHealth(clock, healthDetail);
             window.HealthText.Text = text;
             window.SessionReveal.Content = text;
+            window.SessionReveal.ToolTip = UiText.RevealTip(ViewingLabel, window.hostSession.ConnectedPeer);
         }
 
         private void ShowSessionToolbar()
@@ -598,7 +632,7 @@ public partial class MainWindow
             window.StageHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private void ShowSessionPreset() => window.SessionPresetText.Text = QualityLabel(frameQuality) + " · " + frameRate + " FPS";
+        private void ShowSessionPreset() => window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate);
 
         private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
 

@@ -107,7 +107,7 @@
                   </ContextMenu>
                 </Button.ContextMenu>
               </Button>
-              <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+              <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12" MaxWidth="320" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal">

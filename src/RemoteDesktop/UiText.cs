@@ -271,7 +271,11 @@ public static class UiText
 
     public static bool ShouldReconnect(DropKind kind) => kind is DropKind.Network or DropKind.Timeout;
 
-    public static TimeSpan ReconnectDelay(int attempt) => TimeSpan.FromSeconds(attempt <= 1 ? 1 : attempt == 2 ? 2 : 4);
+    public static bool CanResume(DropKind kind) => ShouldReconnect(kind) || kind == DropKind.Occupied;
+
+    public static bool ReplaceQuietSession(TimeSpan quiet) => quiet >= TimeSpan.FromSeconds(5);
+
+    public static TimeSpan ReconnectDelay(int attempt) => TimeSpan.FromSeconds(attempt <= 1 ? 2 : attempt == 2 ? 4 : 8);
 
     public static string Reconnecting(int attempt, int maximum, int seconds)
         => "연결이 끊겼습니다. " + seconds + "초 후 다시 연결합니다. (" + attempt + "/" + maximum + ")";

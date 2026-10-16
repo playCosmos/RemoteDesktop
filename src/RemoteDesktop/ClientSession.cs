@@ -225,7 +225,7 @@ public partial class MainWindow
             while (!suppressReconnect && resumeEpoch == epoch && sessionPassword != null && client == null && !connecting)
             {
                 var kind = UiText.ClassifyDrop(failure);
-                if (!UiText.ShouldReconnect(kind) || reconnectAttempt >= UiText.MaxAutomaticReconnects)
+                if (!UiText.CanResume(kind) || reconnectAttempt >= UiText.MaxAutomaticReconnects)
                 {
                     sessionPassword = null;
                     window.ClientNotice("연결 종료: " + UiText.ConnectionFailure(failure, true), problem: true);
@@ -473,7 +473,7 @@ public partial class MainWindow
             finally
             {
                 var current = ReferenceEquals(client, remote);
-                var retrying = current && failure != null && !suppressReconnect && sessionPassword != null && UiText.ShouldReconnect(UiText.ClassifyDrop(failure)) && reconnectAttempt < UiText.MaxAutomaticReconnects;
+                var retrying = current && failure != null && !suppressReconnect && sessionPassword != null && UiText.CanResume(UiText.ClassifyDrop(failure)) && reconnectAttempt < UiText.MaxAutomaticReconnects;
                 if (current) await DisconnectCore(retrying);
                 try { await Task.WhenAll(tasks); } catch { }
                 await clipboardTask;

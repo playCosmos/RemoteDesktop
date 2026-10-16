@@ -54,8 +54,10 @@ Check(UiText.ConnectionFailure(new TaskCanceledException(), true) == "서버 응
 Check(UiText.ConnectionFailure(new TaskCanceledException(), false) == "서버 응답이 없습니다. 주소와 포트를 확인하세요.", "a login timeout still points at the address");
 Check(UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("reset"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TimeoutException("slow"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TaskCanceledException())), "a dropped network or a timeout can reconnect");
 Check(!UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("busy", null, HttpStatusCode.Conflict))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("The SSL connection could not be established"))), "a rejected login, a busy host, or a certificate mismatch does not reconnect");
-Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(1) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(4) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
-Check(UiText.Reconnecting(1, 3, 1) == "연결이 끊겼습니다. 1초 후 다시 연결합니다. (1/3)", "reconnect tells how long the next try waits");
+Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(4) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(8) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
+Check(UiText.Reconnecting(1, 3, (int)UiText.ReconnectDelay(1).TotalSeconds) == "연결이 끊겼습니다. 2초 후 다시 연결합니다. (1/3)", "reconnect tells how long the next try waits");
+Check(UiText.CanResume(UiText.DropKind.Network) && UiText.CanResume(UiText.DropKind.Occupied) && !UiText.CanResume(UiText.DropKind.Rejected) && !UiText.CanResume(UiText.DropKind.Certificate), "a dropped session keeps trying while its old login is still reserved");
+Check(!UiText.ReplaceQuietSession(TimeSpan.FromSeconds(4.9)) && UiText.ReplaceQuietSession(TimeSpan.FromSeconds(5)), "a live session stays reserved and a quiet one can be replaced");
 Check(!RemoteClient.SendJpeg(true, true) && RemoteClient.SendJpeg(false, true) && RemoteClient.SendJpeg(true, false), "an unchanged frame is not sent again after the viewer has it");
 Check(RemoteClient.FrameInterval(30, false) == TimeSpan.FromSeconds(1.0 / 30), "motion keeps the selected frame interval");
 Check(RemoteClient.FrameInterval(30, true) == TimeSpan.FromMilliseconds(100), "an unchanged screen is checked ten times a second");
@@ -209,6 +211,16 @@ async Task Session()
     using (var response = await site.Http.PostAsync("input", body)) Check(response.StatusCode == HttpStatusCode.BadRequest, "oversized control message rejected");
     await Task.Delay(2100);
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password })) Check(response.StatusCode == HttpStatusCode.Conflict, "only one active session");
+    await Task.Delay(5200);
+    string? replacedToken;
+    using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password }))
+    {
+        Check(response.StatusCode == HttpStatusCode.OK, "a quiet session can be replaced by a new login");
+        replacedToken = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+    }
+    using (var response = await site.Http.GetAsync("ping")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "the replaced session token stops working");
+    site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", replacedToken);
+    using (var response = await site.Http.GetAsync("ping")) Check(response.IsSuccessStatusCode, "the replacement login can use the host");
     site.Host.Disconnect();
     Check(hostNotices[^1] == "접속 대기 중 · 포트 " + site.Port, "a departed client returns the host to listening");
     Check(site.Host.SessionPeer == null, "host forgets the client after it leaves");

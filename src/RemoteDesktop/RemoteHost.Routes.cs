@@ -19,7 +19,17 @@ public sealed partial class RemoteHost
                 if (login?.Password is null || !settings.Verify(login.Password)) return Results.Unauthorized();
                 lock (gate)
                 {
-                    if (token != null) return Results.Conflict(new { error = "사용 중인 서버입니다." });
+                    if (token != null && !UiText.ReplaceQuietSession(DateTime.UtcNow - lastSeen)) return Results.Conflict(new { error = "사용 중인 서버입니다." });
+                    if (token != null)
+                    {
+                        var oldToken = token;
+                        token = null;
+                        sessionPeer = null;
+                        sessionStarted = null;
+                        session.Cancel();
+                        if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
+                        try { desktop.Release(); } catch (InvalidOperationException) { }
+                    }
                     session.Dispose(); session = new();
                     token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
                     lastSeen = DateTime.UtcNow;

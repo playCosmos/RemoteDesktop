@@ -42,6 +42,8 @@ public partial class MainWindow
         private bool lastFrameReused;
         private int lastFrameQuality;
         private int lastFrameBytes;
+        private WriteableBitmap? frameSurface;
+        private byte[]? framePixels;
         private nint systemShortcutHook;
         private KeyboardHookProc? systemShortcutHookProc;
         private readonly HashSet<int> suppressedSystemKeys = [];
@@ -174,13 +176,7 @@ public partial class MainWindow
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
                     if (display != selectedDisplay) continue;
-                    var image = new BitmapImage();
-                    image.BeginInit();
-                    image.CacheOption = BitmapCacheOption.OnLoad;
-                    image.StreamSource = new MemoryStream(data);
-                    image.EndInit();
-                    image.Freeze();
-                    window.ScreenImage.Source = image;
+                    PresentFrame(data);
                     ShowStage(null);
                     renderedDisplay = display;
                     UpdateFrameHealth();
@@ -229,7 +225,7 @@ public partial class MainWindow
             fullscreen?.Close();
             connection?.Cancel();
             inputs?.Writer.TryComplete();
-            window.ScreenImage.Source = null;
+            ClearFrame();
             ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
             selectedDisplay = null;
@@ -296,6 +292,30 @@ public partial class MainWindow
         private void ShowSessionPreset() => window.SessionPresetText.Text = QualityLabel(frameQuality) + " · " + frameRate + " FPS";
 
         private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
+
+        private void PresentFrame(byte[] data)
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            var source = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+            var width = source.PixelWidth;
+            var height = source.PixelHeight;
+            var stride = width * ((source.Format.BitsPerPixel + 7) / 8);
+            var count = stride * height;
+            if (framePixels == null || framePixels.Length < count) framePixels = new byte[count];
+            source.CopyPixels(framePixels, stride, 0);
+            if (frameSurface == null || frameSurface.PixelWidth != width || frameSurface.PixelHeight != height || frameSurface.Format != source.Format)
+            {
+                frameSurface = new WriteableBitmap(width, height, source.DpiX, source.DpiY, source.Format, null);
+                window.ScreenImage.Source = frameSurface;
+            }
+            frameSurface.WritePixels(new Int32Rect(0, 0, width, height), framePixels, stride, 0);
+        }
+
+        private void ClearFrame()
+        {
+            frameSurface = null;
+            window.ScreenImage.Source = null;
+        }
 
         private bool Position(MouseEventArgs e)
         {
@@ -617,7 +637,7 @@ public partial class MainWindow
         {
             if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
             Queue(new("release"));
-            window.ScreenImage.Source = null;
+            ClearFrame();
             ShowStage(client == null ? "접속하면 원격 화면이 여기에 표시됩니다" : "화면을 받는 중…");
             renderedDisplay = null;
             selectedDisplay = display.Id;

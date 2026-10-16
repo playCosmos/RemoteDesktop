@@ -61,6 +61,7 @@ public partial class MainWindow
         private double lastEncodeMilliseconds;
         private bool lastFrameReused;
         private int lastFrameQuality;
+        private string? announcedDelivery;
         private int lastFrameBytes;
         private WriteableBitmap? frameSurface;
         private nint systemShortcutHook;
@@ -326,7 +327,13 @@ public partial class MainWindow
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
                         lastFrameReused = frame.Reused;
-                        lastFrameQuality = frame.Quality > 0 ? frame.Quality : frameQuality;
+                        var deliveredQuality = frame.Quality > 0 ? frame.Quality : frameQuality;
+                        if (deliveredQuality != lastFrameQuality)
+                        {
+                            lastFrameQuality = deliveredQuality;
+                            var snapshot = deliveredQuality;
+                            _ = window.Dispatcher.InvokeAsync(() => AnnounceQuality(snapshot));
+                        }
                         if (data.Length > 0) lastFrameBytes = data.Length;
                     }
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
@@ -477,6 +484,7 @@ public partial class MainWindow
             }
             ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
+            if (!enabled) { announcedDelivery = null; lastFrameQuality = 0; }
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
             else toolbarTimer?.Stop();
@@ -677,7 +685,23 @@ public partial class MainWindow
             window.StageHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         }
 
-        private void ShowSessionPreset() => window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate);
+        private void ShowSessionPreset()
+        {
+            var delivered = client != null && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) : null;
+            window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate, delivered);
+        }
+
+        private void AnnounceQuality(int quality)
+        {
+            if (client == null || quality <= 0) return;
+            lastFrameQuality = quality;
+            var requested = QualityLabel(frameQuality);
+            var delivered = QualityLabel(quality);
+            var notice = UiText.QualityShift(requested, announcedDelivery, delivered);
+            announcedDelivery = delivered;
+            ShowSessionPreset();
+            if (notice != null) window.SessionStatus(notice);
+        }
 
         private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
 
@@ -943,8 +967,17 @@ public partial class MainWindow
             frameQuality = Math.Clamp(quality, 25, 90);
             lastConnection.FrameQuality = frameQuality;
             SaveConnection();
-            ShowSessionPreset();
-            if (client != null) window.SessionStatus("화면 품질: " + selected.Header);
+            announcedDelivery = null;
+            if (client != null && lastFrameQuality > 0)
+            {
+                AnnounceQuality(lastFrameQuality);
+                if (QualityLabel(lastFrameQuality) == QualityLabel(frameQuality)) window.SessionStatus("화면 품질: " + selected.Header);
+            }
+            else
+            {
+                ShowSessionPreset();
+                if (client != null) window.SessionStatus("화면 품질: " + selected.Header);
+            }
         }
 
         public void FrameRateMenuChanged(object sender, RoutedEventArgs e)
@@ -998,8 +1031,8 @@ public partial class MainWindow
             return "대상: " + lastConnection.Address
                 + "\n모니터: " + (display?.Name ?? "선택 안 됨")
                 + "\n수신 해상도: " + resolution
-                + "\n요청 화질: " + frameQuality
-                + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? lastFrameQuality.ToString() : "측정 전")
+                + "\n요청 화질: " + QualityLabel(frameQuality) + " (" + frameQuality + ")"
+                + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) + " (" + lastFrameQuality + ")" : "측정 전")
                 + "\n최대 프레임 속도: " + frameRate + " FPS"
                 + "\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전")
                 + "\n압축: " + (measured ? lastEncodeMilliseconds.ToString("0.0") + " ms" : "측정 전")

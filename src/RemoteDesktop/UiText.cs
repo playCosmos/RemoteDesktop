@@ -117,6 +117,38 @@ public static class UiText
         return string.IsNullOrWhiteSpace(address) ? preset : address.Trim() + " · " + preset;
     }
 
+    public static string SessionPreset(string? address, string quality, int frameRate, string? delivered)
+        => SessionPreset(address, DeliveredQuality(quality, delivered), frameRate);
+
+    public static string DeliveredQuality(string requested, string? delivered)
+    {
+        requested = requested.Trim();
+        if (string.IsNullOrWhiteSpace(delivered) || delivered.Trim() == requested) return requested;
+        return requested + " → " + delivered.Trim();
+    }
+
+    public static int QualityRank(string label) => label == "고화질" ? 2 : label == "균형" ? 1 : 0;
+
+    public static string QualityReduced(string requested, string delivered) => "끊김을 줄이려고 화질을 낮췄습니다. " + requested + " 대신 " + delivered + ".";
+
+    public static string QualityRestored(string quality) => "여유가 생겨 화질을 " + Euro(quality) + " 되돌렸습니다.";
+
+    public static string? QualityShift(string requested, string? previousDelivered, string delivered)
+    {
+        if (string.Equals(previousDelivered, delivered, StringComparison.Ordinal)) return null;
+        if (delivered == requested) return string.IsNullOrEmpty(previousDelivered) || previousDelivered == requested ? null : QualityRestored(requested);
+        return QualityRank(delivered) < QualityRank(requested) ? QualityReduced(requested, delivered) : null;
+    }
+
+    private static string Euro(string word)
+    {
+        if (word.Length == 0) return "로";
+        var last = word[^1];
+        if (last is < '가' or > '힣') return word + "로";
+        var batchim = (last - '가') % 28;
+        return word + (batchim is 0 or 8 ? "로" : "으로");
+    }
+
     public static string RevealTip(string? elapsedLabel, string? inbound)
     {
         var duration = Blank(elapsedLabel);

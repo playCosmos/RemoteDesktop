@@ -20,6 +20,12 @@ public static class UiText
         return fallback;
     }
 
+    public static string ShortSecret(string? value)
+    {
+        value = value?.Trim() ?? "";
+        return value.Length <= 16 ? value : value[..16] + "…";
+    }
+
     private static bool HasHangul(string text)
     {
         foreach (var character in text)

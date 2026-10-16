@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
     private void CopyFingerprint(object sender, RoutedEventArgs e) => hostSession.CopyFingerprint(sender, e);
+    private void ToggleFingerprint(object sender, RoutedEventArgs e) => hostSession.ToggleFingerprint(sender, e);
     private void CopyAddress(object sender, RoutedEventArgs e) => hostSession.CopyAddress(sender, e);
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);

@@ -27,7 +27,15 @@ public partial class MainWindow
             window.HostPort.Text = settings.Port.ToString();
             UpdatePasswordState();
             window.Fingerprint.Text = Convert.ToHexString(SHA256.HashData(certificate.RawData));
+            window.FingerprintSummary.Text = UiText.ShortSecret(window.Fingerprint.Text);
             RefreshAddresses();
+        }
+
+        public void ToggleFingerprint(object sender, RoutedEventArgs e)
+        {
+            var open = window.Fingerprint.Visibility != Visibility.Visible;
+            window.Fingerprint.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+            window.ToggleFingerprintButton.Content = open ? "지문 숨기기" : "지문 보기";
         }
 
         public void RefreshAddresses()

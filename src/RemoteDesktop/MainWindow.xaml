@@ -110,10 +110,10 @@
           </Grid>
         </Border>
         <Button x:Name="SessionReveal" Content="세션" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 메뉴 열기"/>
-        <Border x:Name="SessionHealthChip" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" IsHitTestVisible="False">
+        <Border x:Name="SessionHealthChip" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="{StaticResource QuietHoverBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" IsHitTestVisible="False">
           <TextBlock x:Name="HealthText" Text="연결 전" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
         </Border>
-            <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">
+            <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">
               <DockPanel>
                 <Button DockPanel.Dock="Right" Content="닫기" Click="CloseSessionInfo" VerticalAlignment="Top" Margin="12,0,0,0"/>
                 <StackPanel>
@@ -127,24 +127,20 @@
     </TabItem>
     <TabItem x:Name="ServerTab" Header="이 PC">
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <Grid Margin="28,24" MaxWidth="980" HorizontalAlignment="Left">
+        <Grid Margin="28,24" MaxWidth="980" HorizontalAlignment="Center">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" MaxWidth="520"/>
             <ColumnDefinition Width="20"/>
             <ColumnDefinition Width="*" MaxWidth="420"/>
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
-            <Border Style="{StaticResource Card}" Margin="0,0,0,16">
+            <Border Style="{StaticResource Card}">
               <StackPanel>
                 <StackPanel Orientation="Horizontal">
                   <Ellipse x:Name="HostStateMark" Width="8" Height="8" Fill="{StaticResource MutedBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                   <TextBlock Text="접속 받기" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
                 </StackPanel>
-                <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-              </StackPanel>
-            </Border>
-            <Border Style="{StaticResource Card}">
-              <StackPanel>
+                <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,16" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
                 <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>
                 <StackPanel x:Name="PasswordEditor">
@@ -154,7 +150,7 @@
                 </StackPanel>
                 <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>
                 <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14"/>
-                <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged"/>
+                <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" ToolTip="화면이 거의 그대로일 때 이전 프레임을 다시 사용해 끊김을 줄입니다."/>
                 <WrapPanel>
                   <Button x:Name="StartButton" Content="접속 대기 시작" Style="{StaticResource PrimaryButton}" Click="StartHost" Margin="0,0,8,8"/>
                   <Button x:Name="StopButton" Content="서버 중지" Click="StopHost" IsEnabled="False" Margin="0,0,8,8"/>
@@ -180,8 +176,12 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
               <TextBlock Text="서버 지문" Style="{StaticResource FieldLabel}"/>
-              <TextBox x:Name="Fingerprint" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,10"/>
-              <Button Content="지문 복사" Click="CopyFingerprint" HorizontalAlignment="Left" Margin="0,0,0,16"/>
+              <DockPanel Margin="0,0,0,10" LastChildFill="True">
+                <Button x:Name="ToggleFingerprintButton" DockPanel.Dock="Right" Content="지문 보기" Click="ToggleFingerprint" Margin="8,0,0,0" ToolTip="64자리 지문 전체를 표시합니다"/>
+                <Button Content="지문 복사" DockPanel.Dock="Right" Click="CopyFingerprint" ToolTip="지문 전체를 복사합니다"/>
+                <TextBlock x:Name="FingerprintSummary" VerticalAlignment="Center" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis"/>
+              </DockPanel>
+              <TextBox x:Name="Fingerprint" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,16"/>
               <TextBlock Text="같은 LAN 또는 VPN에서 사용합니다. 탐색기에서 복사한 파일과 텍스트는 연결된 동안 상대 클립보드로 전달됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}"/>
             </StackPanel>
           </Border>

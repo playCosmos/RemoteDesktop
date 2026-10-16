@@ -26,6 +26,7 @@ public partial class MainWindow
         private Channel<byte>? inputSignal;
         private readonly object inputGate = new();
         private InputEvent? pendingMove;
+        private InputEvent? pendingWheel;
         private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
         private long lastMove;
@@ -115,7 +116,7 @@ public partial class MainWindow
                 connection = new();
                 inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
                 inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
-                lock (inputGate) { pendingMove = null; pendingKeyDowns.Clear(); }
+                lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
                 clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
                 clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
                 inputEnabled = true;
@@ -203,9 +204,10 @@ public partial class MainWindow
                         await remote.Input(input, ct);
                         if (input.Kind == "key" && input.Down) lock (inputGate) pendingKeyDowns.Remove(input.Code);
                     }
-                    InputEvent? move;
-                    lock (inputGate) { move = pendingMove; pendingMove = null; }
+                    InputEvent? move, wheel;
+                    lock (inputGate) { move = pendingMove; wheel = pendingWheel; pendingMove = null; pendingWheel = null; }
                     if (move != null) await remote.Input(move, ct);
+                    if (wheel != null) await remote.Input(wheel, ct);
                 }
             }
             async Task Heartbeat()
@@ -248,7 +250,7 @@ public partial class MainWindow
             connection?.Cancel();
             inputs?.Writer.TryComplete();
             inputSignal?.Writer.TryComplete();
-            lock (inputGate) { pendingMove = null; pendingKeyDowns.Clear(); }
+            lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
             ClearFrame();
             ShowStage("접속하면 원격 화면이 여기에 표시됩니다");
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -330,18 +332,44 @@ public partial class MainWindow
             lock (inputGate)
             {
                 if (input.Kind == "move") pendingMove = input;
+                else if (input.Kind == "wheel") overflow = !TryCoalesceWheel(channel, input.Code);
                 else if (input.Kind == "key" && input.Down && !pendingKeyDowns.Add(input.Code)) return;
-                else if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) overflow = true;
-                else
-                {
-                    pendingMove = null;
-                    if (input.Kind == "key" && !input.Down) pendingKeyDowns.Remove(input.Code);
-                    overflow = !channel.Writer.TryWrite(input);
-                }
+                else overflow = !EnqueueDiscrete(channel, input);
                 if (overflow && input.Kind == "key" && input.Down) pendingKeyDowns.Remove(input.Code);
             }
             if (overflow) { InputOverflow(); return; }
             signal.Writer.TryWrite(0);
+        }
+
+        private bool TryCoalesceWheel(Channel<InputEvent> channel, int delta)
+        {
+            var sum = (long)(pendingWheel?.Code ?? 0) + delta;
+            if (sum is >= -InputEvent.MaxWheelDelta and <= InputEvent.MaxWheelDelta)
+            {
+                pendingWheel = sum == 0 ? null : new InputEvent("wheel", Code: (int)sum);
+                return true;
+            }
+            if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) return false;
+            pendingMove = null;
+            pendingWheel = null;
+            while (sum is < -InputEvent.MaxWheelDelta or > InputEvent.MaxWheelDelta)
+            {
+                var chunk = sum > 0 ? InputEvent.MaxWheelDelta : -InputEvent.MaxWheelDelta;
+                if (!channel.Writer.TryWrite(new InputEvent("wheel", Code: chunk))) return false;
+                sum -= chunk;
+            }
+            pendingWheel = sum == 0 ? null : new InputEvent("wheel", Code: (int)sum);
+            return true;
+        }
+
+        private bool EnqueueDiscrete(Channel<InputEvent> channel, InputEvent input)
+        {
+            if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) return false;
+            pendingMove = null;
+            if (pendingWheel != null && !channel.Writer.TryWrite(pendingWheel)) return false;
+            pendingWheel = null;
+            if (input.Kind == "key" && !input.Down) pendingKeyDowns.Remove(input.Code);
+            return channel.Writer.TryWrite(input);
         }
 
         private void InputOverflow()

@@ -23,7 +23,7 @@ internal sealed class InputInjector
                     if (Mouse((uint)(e.Code == 0 ? (e.Down ? 2 : 4) : e.Code == 1 ? (e.Down ? 8 : 16) : (e.Down ? 32 : 64))))
                     { if (e.Down) buttons.Add(e.Code); else buttons.Remove(e.Code); }
                     break;
-                case "wheel": Mouse(0x800, unchecked((uint)Math.Clamp(e.Code, -1200, 1200))); break;
+                case "wheel": Mouse(0x800, unchecked((uint)Math.Clamp(e.Code, -InputEvent.MaxWheelDelta, InputEvent.MaxWheelDelta))); break;
                 case "key":
                     if (e.Code is < 1 or > 254) throw new ArgumentException("Invalid key");
                     if (Key((ushort)e.Code, 0, e.Down ? 0u : 2u))

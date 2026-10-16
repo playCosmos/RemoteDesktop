@@ -2,7 +2,10 @@ using System.Drawing;
 
 namespace RemoteDesktop;
 
-public record InputEvent(string Kind, double X = 0, double Y = 0, int Code = 0, bool Down = false, string? Text = null, string? Display = null);
+public record InputEvent(string Kind, double X = 0, double Y = 0, int Code = 0, bool Down = false, string? Text = null, string? Display = null)
+{
+    public const int MaxWheelDelta = 1200;
+}
 public record RemoteDisplay(string Id, string Name, int Left, int Top, int Width, int Height, bool Primary)
 { public override string ToString() => Name + " · " + Width + "×" + Height; }
 public readonly record struct CaptureTiming(double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality);

@@ -95,6 +95,8 @@ public sealed partial class RemoteHost
                 c.Response.Headers["X-Cursor-X"] = frame.CursorX.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Y"] = frame.CursorY.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Local"] = frame.LocalCursor ? "1" : "0";
+                if (!RemoteClient.SendJpeg(c.Request.Query["cached"].FirstOrDefault() == "1", frame.Timing.Reused))
+                    return Results.Bytes(Array.Empty<byte>(), "image/jpeg");
                 return Results.Bytes(frame.Bytes, "image/jpeg");
             }
             finally { captureGate.Release(); }

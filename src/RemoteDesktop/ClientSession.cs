@@ -305,18 +305,19 @@ public partial class MainWindow
                     RemoteFrame frame;
                     try
                     {
-                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled);
+                        var viewerHasFrame = renderedDisplay == display && window.ScreenImage.Source != null;
+                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame);
                         data = frame.Bytes;
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
                         lastFrameReused = frame.Reused;
                         lastFrameQuality = frame.Quality > 0 ? frame.Quality : frameQuality;
-                        lastFrameBytes = data.Length;
+                        if (data.Length > 0) lastFrameBytes = data.Length;
                     }
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
                     if (display != selectedDisplay) continue;
-                    await PresentFrameAsync(data, generation);
+                    if (data.Length > 0) await PresentFrameAsync(data, generation);
                     if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;

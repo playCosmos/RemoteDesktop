@@ -36,7 +36,7 @@
             <TextBox x:Name="Address" Grid.Row="1" Grid.Column="0" Text="127.0.0.1" PreviewKeyDown="ClientPasswordKeyDown"/>
             <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" PreviewKeyDown="ClientPasswordKeyDown"/>
             <PasswordBox x:Name="ClientPassword" Grid.Row="1" Grid.Column="4" PreviewKeyDown="ClientPasswordKeyDown"/>
-            <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="6" Content="접속" Style="{StaticResource PrimaryButton}" MinWidth="88" Click="Connect" VerticalAlignment="Bottom"/>
+            <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="6" Content="접속" Style="{StaticResource PrimaryButton}" MinWidth="104" Click="Connect" VerticalAlignment="Bottom"/>
             <DockPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,8,0,0" LastChildFill="True">
               <Button x:Name="ClearPinButton" DockPanel.Dock="Right" Content="지우기" Margin="8,0,0,0" Click="ClearPin" Visibility="Collapsed" ToolTip="저장된 지문을 지웁니다"/>
               <Button x:Name="EditPinButton" DockPanel.Dock="Right" Content="지문 입력" Click="EditPin" ToolTip="서버 지문을 직접 입력합니다"/>

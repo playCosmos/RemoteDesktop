@@ -27,7 +27,11 @@ public partial class MainWindow : Window
             clientSession.ApplyWindowPlacement();
             clientSession.InstallInputHooks();
         };
-        Loaded += async (_, _) => await hostSession.StartIfConfigured();
+        Loaded += async (_, _) =>
+        {
+            await hostSession.StartIfConfigured();
+            clientSession.FocusConnectField();
+        };
         Closing += (_, _) =>
         {
             clientSession.SaveWindowPlacement();

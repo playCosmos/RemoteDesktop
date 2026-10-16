@@ -29,6 +29,7 @@ public partial class MainWindow
         private InputEvent? pendingWheel;
         private readonly HashSet<int> pendingKeyDowns = [];
         private bool connecting;
+        private bool connectedOnce;
         private bool normalizingAddress;
         private long lastMove;
         private int generation;
@@ -162,11 +163,19 @@ public partial class MainWindow
         public Task DisconnectClient() => DisconnectCore();
         public void QueueRelease() => Queue(new("release"));
 
+        public void FocusConnectField()
+        {
+            if (!window.ClientTab.IsSelected || window.ConnectionControls.Visibility != Visibility.Visible) return;
+            if (string.IsNullOrWhiteSpace(window.Address.Text)) window.Address.Focus();
+            else window.ClientPassword.Focus();
+        }
+
         public async void Connect(object sender, RoutedEventArgs e)
         {
             if (connecting || client != null) return;
             connecting = true;
             window.ConnectButton.IsEnabled = false;
+            window.ConnectButton.Content = "접속 중…";
             window.ClientNotice("접속하는 중…");
             var attempt = generation;
             try
@@ -183,6 +192,7 @@ public partial class MainWindow
                 try { await remote.Login(window.ClientPassword.Password); } catch { remote.Dispose(); throw; }
                 if (attempt != generation) { try { await remote.Logout(); } finally { remote.Dispose(); } return; }
                 client = remote;
+                connectedOnce = true;
                 window.ClientPassword.Clear();
                 var previousHost = lastConnection.Address;
                 lastConnection.Address = endpoint;
@@ -210,7 +220,12 @@ public partial class MainWindow
                 _ = RunConnection(remote, connection.Token);
             }
             catch (Exception ex) { window.ClientNotice("접속 실패: " + FailureText(ex), problem: true); }
-            finally { connecting = false; window.ConnectButton.IsEnabled = client == null; }
+            finally
+            {
+                connecting = false;
+                window.ConnectButton.IsEnabled = client == null;
+                if (client == null) window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+            }
         }
 
         public void ClientPasswordKeyDown(object sender, KeyEventArgs e)
@@ -338,6 +353,7 @@ public partial class MainWindow
             window.HealthText.Text = "연결 종료";
             inputEnabled = false;
             window.ConnectButton.IsEnabled = true;
+            if (remote != null) window.ConnectButton.Content = "다시 접속";
             window.ServerPin.Visibility = Visibility.Collapsed;
             UpdatePinSummary();
             if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();

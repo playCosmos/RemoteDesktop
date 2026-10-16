@@ -17,6 +17,8 @@ public sealed class ClientSettings
     public double? WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
     public List<RecentConnection> Recent { get; set; } = [];
+    public string SelectedTab { get; set; } = "client";
+    [System.Text.Json.Serialization.JsonIgnore] public bool OpenHostTab => string.Equals(SelectedTab, "host", StringComparison.OrdinalIgnoreCase);
     private static string DefaultPath => Path.Combine(HostSettings.DataDirectory, "client.json");
 
     public readonly record struct WindowPlacement(double Left, double Top, double Width, double Height, bool Maximized);

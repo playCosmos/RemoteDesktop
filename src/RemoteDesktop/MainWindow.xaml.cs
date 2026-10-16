@@ -18,7 +18,6 @@ public partial class MainWindow : Window
         ServerPin.TextChanged += (_, _) => clientSession.UpdatePinSummary();
         var version = typeof(MainWindow).Assembly.GetName().Version;
         if (version is not null) Title = "Personal Remote Desktop " + version.ToString(3);
-        ClientTab.IsSelected = true;
         ServerTab.Visibility = Visibility.Visible;
         hostSession.Bind();
         clientSession.Bind();
@@ -83,6 +82,7 @@ public partial class MainWindow : Window
     private void ForgetRecent(object sender, RoutedEventArgs e) => clientSession.ForgetRecent(sender, e);
     private void EditPin(object sender, RoutedEventArgs e) => clientSession.EditPin(sender, e);
     private void ClearPin(object sender, RoutedEventArgs e) => clientSession.ClearPin(sender, e);
+    private void TabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => clientSession.TabChanged(e);
     private void Disconnect(object sender, RoutedEventArgs e) => clientSession.Disconnect(sender, e);
     private void Move(object sender, MouseEventArgs e) => clientSession.Move(sender, e);
     private void MouseDownRemote(object sender, MouseButtonEventArgs e) => clientSession.MouseDownRemote(sender, e);

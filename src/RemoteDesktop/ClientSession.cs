@@ -70,6 +70,16 @@ public partial class MainWindow
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
             ShowSessionPreset();
             RefreshRecent();
+            if (lastConnection.OpenHostTab) window.ServerTab.IsSelected = true;
+        }
+
+        public void TabChanged(System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (!window.IsLoaded || e.Source is not System.Windows.Controls.TabControl) return;
+            var tab = window.ServerTab.IsSelected ? "host" : "client";
+            if (string.Equals(lastConnection.SelectedTab, tab, StringComparison.OrdinalIgnoreCase)) return;
+            lastConnection.SelectedTab = tab;
+            SaveConnection();
         }
 
         public void UseRecent(object sender, RoutedEventArgs e)

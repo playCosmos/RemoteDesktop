@@ -34,10 +34,12 @@ Check(recent.Recent.Count == 2 && recent.Recent[0].Address == "192.168.0.2:45831
 for (var i = 0; i < 6; i++) recent.RememberRecent("10.1.0." + i + ":45831", "pin", "", 55, 15);
 Check(recent.Recent.Count == 5 && recent.Recent[0].Address == "10.1.0.5:45831", "recent hosts keep five entries");
 Check(recent.ForgetRecent("10.1.0.5:45831") && recent.Recent[0].Address == "10.1.0.4:45831", "a recent host can be removed");
+Check(new ClientSettings().OpenHostTab == false && new ClientSettings { SelectedTab = "nope" }.OpenHostTab == false, "unknown tab preference stays on the remote page");
+recent.SelectedTab = "host";
 var recentPath = Path.Combine(Path.GetTempPath(), "prd-recent-" + Guid.NewGuid().ToString("N") + ".json");
 recent.Save(recentPath);
 var loadedRecent = ClientSettings.Load(recentPath);
-Check(loadedRecent.Recent.Count == 4 && loadedRecent.Recent[0].Address == "10.1.0.4:45831" && loadedRecent.Recent[0].FrameRate == 15 && !File.ReadAllText(recentPath).Contains("password", StringComparison.OrdinalIgnoreCase), "recent hosts survive reload without a password");
+Check(loadedRecent.Recent.Count == 4 && loadedRecent.Recent[0].Address == "10.1.0.4:45831" && loadedRecent.Recent[0].FrameRate == 15 && loadedRecent.OpenHostTab && !File.ReadAllText(recentPath).Contains("password", StringComparison.OrdinalIgnoreCase), "recent hosts and the last tab survive reload without a password");
 File.Delete(recentPath);
 
 await Password();

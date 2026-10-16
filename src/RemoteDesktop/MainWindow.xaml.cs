@@ -52,6 +52,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        var version = typeof(MainWindow).Assembly.GetName().Version;
+        if (version is not null) Title = "Personal Remote Desktop " + version.ToString(3);
         ClientTab.IsSelected = true;
         ServerTab.Visibility = Visibility.Visible;
         SmoothHostToggle.IsChecked = settings.UseSmoothHost;
@@ -587,8 +589,20 @@ public partial class MainWindow : Window
     }
     private void OpenSessionMenu(object sender, RoutedEventArgs e)
     {
+        MarkChoice(0, frameQuality);
+        MarkChoice(1, frameRate);
         SessionMenu.PlacementTarget = SessionMenuButton;
         SessionMenu.IsOpen = true;
+    }
+    private void MarkChoice(int index, int selected)
+    {
+        if (SessionMenu.Items[index] is not System.Windows.Controls.MenuItem parent) return;
+        foreach (var item in parent.Items)
+        {
+            if (item is not System.Windows.Controls.MenuItem choice) continue;
+            choice.IsCheckable = int.TryParse(choice.Tag?.ToString(), out var value);
+            if (choice.IsCheckable) choice.IsChecked = value == selected;
+        }
     }
     private async Task LoadDisplays()
     {

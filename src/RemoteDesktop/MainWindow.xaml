@@ -19,6 +19,7 @@
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
+              <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Grid.Column="0" Text="주소" Style="{StaticResource FieldLabel}"/>
             <TextBlock Grid.Row="0" Grid.Column="2" Text="포트" Style="{StaticResource FieldLabel}"/>
@@ -30,6 +31,19 @@
             <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Text="서버 지문 (선택)" Style="{StaticResource FieldLabel}" Margin="0,14,0,6"/>
             <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" PreviewKeyDown="ClientPasswordKeyDown"/>
             <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,10,0,0" MaxHeight="60" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <StackPanel x:Name="RecentPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,14,0,0" Visibility="Collapsed">
+              <TextBlock Text="최근 연결" Style="{StaticResource FieldLabel}"/>
+              <ItemsControl x:Name="RecentList">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <DockPanel Margin="0,0,0,8" LastChildFill="False">
+                      <Button DockPanel.Dock="Right" Content="삭제" Margin="8,0,0,0" Click="ForgetRecent" Tag="{Binding}" ToolTip="이 최근 연결을 지웁니다"/>
+                      <Button Content="{Binding Address}" HorizontalAlignment="Left" Click="UseRecent" Tag="{Binding}" ToolTip="주소와 지문을 채웁니다. 비밀번호는 저장되지 않습니다."/>
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
           </Grid>
         </Border>
         <Grid>

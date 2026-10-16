@@ -67,6 +67,36 @@ public partial class MainWindow
             frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
             ShowSessionPreset();
+            RefreshRecent();
+        }
+
+        public void UseRecent(object sender, RoutedEventArgs e)
+        {
+            if (client != null || sender is not System.Windows.Controls.Button { Tag: RecentConnection recent }) return;
+            window.Address.Text = recent.Address;
+            window.ServerPin.Text = recent.Fingerprint;
+            if (recent.FrameQuality is >= 25 and <= 90) frameQuality = recent.FrameQuality;
+            if (recent.FrameRate is 5 or 10 or 15 or 30) frameRate = recent.FrameRate;
+            if (!string.IsNullOrEmpty(recent.Display)) lastConnection.Display = recent.Display;
+            ShowSessionPreset();
+            window.ClientPassword.Focus();
+            window.ClientNotice(recent.Address + " · 비밀번호를 입력하세요.");
+        }
+
+        public void ForgetRecent(object sender, RoutedEventArgs e)
+        {
+            if (sender is not System.Windows.Controls.Button { Tag: RecentConnection recent }) return;
+            if (!lastConnection.ForgetRecent(recent.Address)) return;
+            SaveConnection();
+            RefreshRecent();
+            window.ClientNotice("최근 연결에서 제거했습니다.");
+        }
+
+        private void RefreshRecent()
+        {
+            var recent = lastConnection.Recent ?? [];
+            window.RecentList.ItemsSource = recent.ToList();
+            window.RecentPanel.Visibility = recent.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         }
 
         public void NormalizePastedAddress()
@@ -144,7 +174,9 @@ public partial class MainWindow
                 lastConnection.Address = endpoint;
                 lastConnection.Fingerprint = pin;
                 if (previousHost != lastConnection.Address) lastConnection.Display = "";
+                lastConnection.RememberRecent(endpoint, pin, lastConnection.Display, frameQuality, frameRate);
                 SaveConnection();
+                RefreshRecent();
                 try { await LoadDisplays(); } catch { await DisconnectCore(); throw; }
                 connection = new();
                 inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });

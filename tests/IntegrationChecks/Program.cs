@@ -26,6 +26,19 @@ Check(HostAddresses.Endpoints(45831, [IPAddress.Loopback]).SequenceEqual(["127.0
 var placed = new ClientSettings { WindowLeft = -120, WindowTop = 40, WindowWidth = 1100, WindowHeight = 720, WindowMaximized = true };
 Check(placed.TryGetWindowPlacement(-1920, 0, 3840, 1080, out var placement) && placement.Left == -120 && placement.Maximized, "window placement restores on a shifted desktop");
 Check(!new ClientSettings { WindowLeft = 5000, WindowTop = 0, WindowWidth = 1000, WindowHeight = 700 }.TryGetWindowPlacement(0, 0, 1920, 1080, out _), "off-screen window placement is ignored");
+var recent = new ClientSettings();
+recent.RememberRecent("192.168.0.2:45831", "AA", "all", 75, 30);
+recent.RememberRecent("10.0.0.5:45831", "BB", "", 55, 15);
+recent.RememberRecent("192.168.0.2:45831", "CC", "2", 30, 5);
+Check(recent.Recent.Count == 2 && recent.Recent[0].Address == "192.168.0.2:45831" && recent.Recent[0].Fingerprint == "CC" && recent.Recent[1].Address == "10.0.0.5:45831", "recent hosts move the latest to the front");
+for (var i = 0; i < 6; i++) recent.RememberRecent("10.1.0." + i + ":45831", "pin", "", 55, 15);
+Check(recent.Recent.Count == 5 && recent.Recent[0].Address == "10.1.0.5:45831", "recent hosts keep five entries");
+Check(recent.ForgetRecent("10.1.0.5:45831") && recent.Recent[0].Address == "10.1.0.4:45831", "a recent host can be removed");
+var recentPath = Path.Combine(Path.GetTempPath(), "prd-recent-" + Guid.NewGuid().ToString("N") + ".json");
+recent.Save(recentPath);
+var loadedRecent = ClientSettings.Load(recentPath);
+Check(loadedRecent.Recent.Count == 4 && loadedRecent.Recent[0].Address == "10.1.0.4:45831" && loadedRecent.Recent[0].FrameRate == 15 && !File.ReadAllText(recentPath).Contains("password", StringComparison.OrdinalIgnoreCase), "recent hosts survive reload without a password");
+File.Delete(recentPath);
 
 await Password();
 await Session();

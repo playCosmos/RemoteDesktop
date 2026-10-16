@@ -16,6 +16,7 @@ public sealed class ClientSettings
     public double? WindowWidth { get; set; }
     public double? WindowHeight { get; set; }
     public bool WindowMaximized { get; set; }
+    public List<RecentConnection> Recent { get; set; } = [];
     private static string DefaultPath => Path.Combine(HostSettings.DataDirectory, "client.json");
 
     public readonly record struct WindowPlacement(double Left, double Top, double Width, double Height, bool Maximized);
@@ -41,6 +42,23 @@ public sealed class ClientSettings
         placement = new WindowPlacement(left, top, width, height, WindowMaximized);
         return true;
     }
+
+    public void RememberRecent(string address, string? fingerprint, string? display, int quality, int rate)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return;
+        Recent ??= [];
+        address = address.Trim();
+        Recent.RemoveAll(item => string.Equals(item.Address, address, StringComparison.OrdinalIgnoreCase));
+        Recent.Insert(0, new RecentConnection { Address = address, Fingerprint = fingerprint ?? "", Display = display ?? "", FrameQuality = quality, FrameRate = rate });
+        if (Recent.Count > 5) Recent.RemoveRange(5, Recent.Count - 5);
+    }
+
+    public bool ForgetRecent(string address)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return false;
+        Recent ??= [];
+        return Recent.RemoveAll(item => string.Equals(item.Address, address.Trim(), StringComparison.OrdinalIgnoreCase)) > 0;
+    }
     public static ClientSettings Load(string? path = null)
     {
         try { return JsonSerializer.Deserialize<ClientSettings>(File.ReadAllText(path ?? DefaultPath)) ?? new(); }
@@ -52,4 +70,13 @@ public sealed class ClientSettings
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         File.WriteAllText(path, JsonSerializer.Serialize(this));
     }
+}
+
+public sealed class RecentConnection
+{
+    public string Address { get; set; } = "";
+    public string Fingerprint { get; set; } = "";
+    public string Display { get; set; } = "";
+    public int FrameQuality { get; set; } = 55;
+    public int FrameRate { get; set; } = 15;
 }

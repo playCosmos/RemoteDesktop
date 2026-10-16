@@ -80,7 +80,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
         await app.StartAsync();
         timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(); } }, null, 1000, 1000);
         listenPort = port;
-        Status?.Invoke($"접속 대기 중 · 포트 {port}");
+        Status?.Invoke(UiText.Listening(port));
     }
     private static bool IsPublicAuthenticationPath(PathString path) => path == "/v1/login" || path == "/v1/pake/start" || path == "/v1/pake/finish";
     private async Task<IResult> StartOpaqueLogin(HttpContext context)
@@ -160,7 +160,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
             var oldToken = token; token = null; session.Cancel();
             if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
             try { desktop.Release(); } catch (InvalidOperationException) { }
-            Status?.Invoke(listenPort > 0 ? $"접속 대기 중 · 포트 {listenPort}" : "접속 대기 중");
+            Status?.Invoke(UiText.Listening(listenPort));
         }
     }
     public async ValueTask DisposeAsync()

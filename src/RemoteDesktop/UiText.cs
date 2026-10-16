@@ -34,6 +34,22 @@ public static class UiText
         return value.Length <= 16 ? value : value[..16] + "…";
     }
 
+    public static string ClientConnected(IPAddress? address)
+    {
+        var peer = DescribePeer(address);
+        return peer.Length == 0 ? "클라이언트 연결됨" : "클라이언트 연결됨 · " + peer;
+    }
+
+    public static string Listening(int port) => port is > 0 and <= 65535 ? "접속 대기 중 · 포트 " + port : "접속 대기 중";
+
+    private static string DescribePeer(IPAddress? address)
+    {
+        if (address is null) return "";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily == AddressFamily.InterNetworkV6) address = new IPAddress(address.GetAddressBytes());
+        return address.ToString();
+    }
+
     public static bool IsProblem(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;

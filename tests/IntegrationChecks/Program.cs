@@ -53,6 +53,10 @@ Check(RemoteClient.FrameInterval(30, false) == TimeSpan.FromSeconds(1.0 / 30), "
 Check(RemoteClient.FrameInterval(30, true) == TimeSpan.FromMilliseconds(100), "an unchanged screen is checked ten times a second");
 Check(RemoteClient.FrameInterval(5, true) == TimeSpan.FromSeconds(1.0 / 5), "idle polling does not go faster than a slower selected rate");
 Check(UiText.ShortSecret("99D8D8CC4DC57302") == "99D8D8CC4DC57302" && UiText.ShortSecret("99D8D8CC4DC5730254F7947AD64ADD88") == "99D8D8CC4DC57302…", "a long fingerprint is shortened for the host page");
+Check(UiText.ClientConnected(null) == "클라이언트 연결됨", "a client without an address is still announced");
+Check(UiText.ClientConnected(IPAddress.Parse("::ffff:192.168.0.8")) == "클라이언트 연결됨 · 192.168.0.8", "a mapped client address is shown as IPv4");
+Check(UiText.ClientConnected(IPAddress.Parse("fe80::1%12")) == "클라이언트 연결됨 · fe80::1", "a link-local client address drops the zone id");
+Check(UiText.Listening(45831) == "접속 대기 중 · 포트 45831" && UiText.Listening(0) == "접속 대기 중", "listening status keeps the port");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";
@@ -125,6 +129,8 @@ async Task Session()
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = "wrong" })) Check(response.StatusCode == HttpStatusCode.Unauthorized, "wrong password rejected");
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password })) Check((int)response.StatusCode == 429, "login rate limit");
     await Task.Delay(2100);
+    var hostNotices = new List<string>();
+    site.Host.Status += hostNotices.Add;
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password }))
     {
         Check(response.IsSuccessStatusCode, "password login without host approval");
@@ -132,6 +138,7 @@ async Task Session()
         Check(result.GetProperty("protocol").GetInt32() == 1 && result.GetProperty("maxFileBytes").GetInt64() == 1073741824, "login returns protocol version and file limit");
         site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.GetProperty("token").GetString());
     }
+    Check(hostNotices.Any(text => text is "클라이언트 연결됨 · 127.0.0.1" or "클라이언트 연결됨 · ::1"), "host shows who connected");
     using (var response = await site.Http.GetAsync("ping"))
     {
         var ping = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -157,6 +164,7 @@ async Task Session()
     await Task.Delay(2100);
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password })) Check(response.StatusCode == HttpStatusCode.Conflict, "only one active session");
     site.Host.Disconnect();
+    Check(hostNotices[^1] == "접속 대기 중 · 포트 " + site.Port, "a departed client returns the host to listening");
     using (var response = await site.Http.GetAsync("ping")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "host disconnect revokes token");
     using var wrongPinClient = new RemoteClient("localhost:" + site.Port, new string('0', 64));
     try { await wrongPinClient.Login(site.Password); Check(false, "wrong certificate pin"); } catch (HttpRequestException) { Check(true, "wrong certificate pin rejected"); }

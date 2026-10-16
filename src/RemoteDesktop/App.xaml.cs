@@ -19,7 +19,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show(ex.Message, "Personal Remote Desktop 실행 오류", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(UiText.Explain(ex, "프로그램을 시작하지 못했습니다."), "Personal Remote Desktop 실행 오류", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             Shutdown(-1);
         }
     }

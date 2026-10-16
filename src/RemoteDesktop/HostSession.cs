@@ -46,7 +46,7 @@ public partial class MainWindow
                 System.Windows.Clipboard.SetText(endpoint);
                 window.HostStatus(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
             }
-            catch (Exception ex) { window.HostStatus("주소 복사 실패: " + ex.Message); }
+            catch (Exception ex) { window.HostStatus("주소 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다.")); }
         }
 
         public async Task StartIfConfigured()
@@ -70,7 +70,7 @@ public partial class MainWindow
             if (!window.IsLoaded || window.SmoothHostToggle.IsChecked is not bool enabled) return;
             settings.SmoothHost = enabled;
             try { settings.Save(); }
-            catch (Exception ex) { window.HostStatus(ex.Message); }
+            catch (Exception ex) { window.HostStatus(UiText.Explain(ex, "끊김 줄이기 설정을 저장하지 못했습니다.")); }
         }
 
         private enum HostUiState { Stopped, Starting, Listening, Stopping }
@@ -111,7 +111,7 @@ public partial class MainWindow
             }
             else if (!settings.HasOpaqueIdentity)
             {
-                window.PasswordState.Text = "저장된 서버 비밀번호는 유지되어 있습니다. 빈 입력란은 보안상 정상이며, 첫 지문 등록을 위해 현재 비밀번호를 한 번 다시 입력하세요.";
+                window.PasswordState.Text = "비밀번호는 저장되어 있습니다. 비밀번호만으로 접속하려면 현재 비밀번호를 한 번 더 입력하세요.";
                 window.HostPasswordInstruction.Text = "현재 저장된 서버 비밀번호 (변경되지 않음)";
                 window.SaveHostPasswordButton.Content = "보안 등록";
                 window.PasswordEditor.Visibility = Visibility.Visible;
@@ -158,7 +158,7 @@ public partial class MainWindow
                 UpdatePasswordState();
                 await StartHostAsync(automatic: false);
             }
-            catch (Exception ex) { window.HostStatus(ex.Message); }
+            catch (Exception ex) { window.HostStatus(UiText.Explain(ex, "비밀번호를 저장하지 못했습니다.")); }
         }
 
         public void HostPasswordKeyDown(object sender, KeyEventArgs e)
@@ -199,13 +199,13 @@ public partial class MainWindow
                 UpdatePasswordState();
                 ShowListening(port);
                 window.HostStatus(!settings.HasOpaqueIdentity
-                    ? "접속 대기 중 · 기존 지문으로 연결 가능 · 비밀번호 기반 첫 등록은 현재 비밀번호를 다시 저장하세요."
+                    ? "접속 대기 중 · 포트 " + port + ". 비밀번호만 접속은 현재 비밀번호를 한 번 더 저장하면 켜집니다."
                     : automatic ? "자동 접속 대기 중 · 포트 " + port : "접속 대기 중 · 포트 " + port);
             }
             catch (Exception ex)
             {
                 if (host != null) { await host.DisposeAsync(); host = null; }
-                window.HostStatus((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + ex.Message);
+                window.HostStatus((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + UiText.Explain(ex, "포트와 비밀번호를 확인하세요."));
                 SetHostState(HostUiState.Stopped);
             }
             finally { hostStarting = false; }
@@ -231,7 +231,7 @@ public partial class MainWindow
                 System.Windows.Clipboard.SetText(window.Fingerprint.Text);
                 window.HostStatus("서버 지문을 복사했습니다.");
             }
-            catch (Exception ex) { window.HostStatus("지문 복사 실패: " + ex.Message); }
+            catch (Exception ex) { window.HostStatus("지문 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다.")); }
         }
     }
 }

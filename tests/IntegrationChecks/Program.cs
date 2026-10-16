@@ -35,6 +35,11 @@ for (var i = 0; i < 6; i++) recent.RememberRecent("10.1.0." + i + ":45831", "pin
 Check(recent.Recent.Count == 5 && recent.Recent[0].Address == "10.1.0.5:45831", "recent hosts keep five entries");
 Check(recent.ForgetRecent("10.1.0.5:45831") && recent.Recent[0].Address == "10.1.0.4:45831", "a recent host can be removed");
 Check(new ClientSettings().OpenHostTab == false && new ClientSettings { SelectedTab = "nope" }.OpenHostTab == false, "unknown tab preference stays on the remote page");
+Check(UiText.Explain(new IOException("Failed to bind to address https://[::]:45831: address already in use."), "fallback") == "이 포트는 이미 사용 중입니다. 남아 있는 이 프로그램을 종료한 뒤 다시 시작하세요.", "a busy port is explained without the framework text");
+Check(UiText.Explain(new SocketException((int)SocketError.AddressAlreadyInUse), "fallback").Contains("이미 사용 중"), "a socket bind failure is explained in Korean");
+Check(UiText.Explain(new ArgumentException("포트 범위: 1024–65535"), "fallback") == "포트 범위: 1024–65535", "Korean validation text is kept");
+Check(UiText.Explain(new InvalidOperationException("Windows password-key enrollment is required."), "fallback") == "보안 등록에 실패했습니다. 현재 비밀번호를 다시 저장하세요.", "secure enrollment failures stay in Korean");
+Check(!UiText.Explain(new InvalidOperationException("Object reference not set to an instance of an object."), "연결을 다시 시도하세요.").Contains("Object reference"), "unknown English failures do not reach the UI");
 recent.SelectedTab = "host";
 var recentPath = Path.Combine(Path.GetTempPath(), "prd-recent-" + Guid.NewGuid().ToString("N") + ".json");
 recent.Save(recentPath);

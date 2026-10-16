@@ -305,7 +305,7 @@ public partial class MainWindow
             {
                 try { await clipboardSync!.Run(ct); }
                 catch (OperationCanceledException) { }
-                catch (Exception ex) { window.SessionStatus("클립보드 동기화 오류: " + ex.Message); }
+                catch (Exception ex) { window.SessionStatus("클립보드 동기화 오류: " + UiText.Explain(ex, "다시 시도하세요.")); }
             }
             var clipboardTask = SyncClipboard();
             try { await await Task.WhenAny(tasks); }
@@ -710,7 +710,7 @@ public partial class MainWindow
                 Queue(new("key", Code: 17));
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { window.SessionStatus("붙여넣기 중단: " + ex.Message); }
+            catch (Exception ex) { window.SessionStatus("붙여넣기 중단: " + UiText.Explain(ex, "다시 시도하세요.")); }
             finally { pasting = false; }
         }
 
@@ -751,14 +751,14 @@ public partial class MainWindow
         {
             if (clipboardSync is not { } sync || connection is null) return;
             try { if (!await sync.PushAny(connection.Token)) window.SessionStatus("보낼 텍스트나 파일을 먼저 복사하세요."); }
-            catch (Exception ex) { window.SessionStatus("클립보드 보내기 실패: " + ex.Message); }
+            catch (Exception ex) { window.SessionStatus("클립보드 보내기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
         }
 
         public async void ClipboardReceive(object sender, RoutedEventArgs e)
         {
             if (clipboardSync is not { } sync || connection is null) return;
             try { await sync.Pull(connection.Token); window.SessionStatus("상대 클립보드를 확인했습니다."); }
-            catch (Exception ex) { window.SessionStatus("클립보드 받기 실패: " + ex.Message); }
+            catch (Exception ex) { window.SessionStatus("클립보드 받기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
         }
 
         public void QualityMenuChanged(object sender, RoutedEventArgs e)
@@ -836,7 +836,7 @@ public partial class MainWindow
                 if (http.StatusCode is null) return "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.";
             }
             if (ex is TaskCanceledException or TimeoutException) return "서버 응답이 없습니다. 주소와 포트를 확인하세요.";
-            return ex.Message;
+            return UiText.Explain(ex, "서버에 연결할 수 없습니다. 주소, 포트, 네트워크를 확인하세요.");
         }
 
         private void SaveConnection()
@@ -844,7 +844,7 @@ public partial class MainWindow
             try { lastConnection.Save(); }
             catch (Exception ex)
             {
-                var message = "연결 정보 저장 실패: " + ex.Message;
+                var message = "연결 정보 저장 실패: " + UiText.Explain(ex, "저장 위치를 확인하세요.");
                 if (client == null) window.ClientNotice(message, problem: true);
                 else window.SessionStatus(message);
             }
@@ -882,7 +882,7 @@ public partial class MainWindow
         public async void RefreshDisplays(object sender, RoutedEventArgs e)
         {
             try { await LoadDisplays(); }
-            catch (Exception ex) { window.SessionStatus(ex.Message); }
+            catch (Exception ex) { window.SessionStatus(UiText.Explain(ex, "모니터 목록을 가져오지 못했습니다.")); }
         }
 
         public void DisplayChanged(object sender, SelectionChangedEventArgs e)

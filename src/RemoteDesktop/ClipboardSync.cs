@@ -33,7 +33,7 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 await Pull(ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
-            catch (Exception ex) { status("클립보드: " + ex.Message); }
+            catch (Exception ex) { status("클립보드: " + UiText.Explain(ex, "다시 시도하세요.")); }
             await Task.Delay(600, ct);
         }
     }

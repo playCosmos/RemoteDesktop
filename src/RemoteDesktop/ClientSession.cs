@@ -1,0 +1,606 @@
+using System.Diagnostics;
+using System.IO;
+using System.Net;
+using System.Runtime.InteropServices;
+using System.Threading.Channels;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media.Imaging;
+
+namespace RemoteDesktop;
+
+public partial class MainWindow
+{
+    private sealed class ClientSession
+    {
+        private readonly MainWindow window;
+        private RemoteClient? client;
+        private CancellationTokenSource? connection;
+        private ClipboardSync? clipboardSync;
+        private bool pasting;
+        private bool suppressPasteKeyUp;
+        private Channel<InputEvent>? inputs;
+        private bool connecting;
+        private long lastMove;
+        private int generation;
+        private readonly ClientSettings lastConnection = ClientSettings.Load();
+        private string? selectedDisplay;
+        private string? renderedDisplay;
+        private Window? fullscreen;
+        private int unicodePackets;
+        private bool inputEnabled = true;
+        private int frameQuality;
+        private int frameRate;
+        private int framesSinceHealth;
+        private DateTime healthWindowStarted = DateTime.UtcNow;
+        private long roundTripMilliseconds = -1;
+        private double lastCaptureMilliseconds;
+        private double lastEncodeMilliseconds;
+        private bool lastFrameReused;
+        private int lastFrameQuality;
+        private int lastFrameBytes;
+        private nint systemShortcutHook;
+        private KeyboardHookProc? systemShortcutHookProc;
+        private readonly HashSet<int> suppressedSystemKeys = [];
+        private bool remoteAltDown;
+
+        public ClientSession(MainWindow window) => this.window = window;
+
+        public void Bind()
+        {
+            var endpoint = SplitEndpoint(lastConnection.Address);
+            window.Address.Text = endpoint.Host;
+            window.ClientPort.Text = endpoint.Port;
+            window.ServerPin.Text = lastConnection.Fingerprint;
+            frameQuality = Math.Clamp(lastConnection.FrameQuality, 25, 90);
+            frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
+            window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
+        }
+
+        public void InstallInputHooks()
+        {
+            HwndSource.FromHwnd(new WindowInteropHelper(window).Handle)?.AddHook(NativeKeyboard);
+            InstallSystemShortcutHook();
+        }
+
+        public void UninstallSystemShortcutHook()
+        {
+            if (systemShortcutHook != 0) UnhookWindowsHookEx(systemShortcutHook);
+            systemShortcutHook = 0;
+            systemShortcutHookProc = null;
+        }
+
+        public void CloseFullscreen() => fullscreen?.Close();
+        public Task DisconnectClient() => DisconnectCore();
+        public void QueueRelease() => Queue(new("release"));
+
+        public async void Connect(object sender, RoutedEventArgs e)
+        {
+            if (connecting || client != null) return;
+            connecting = true;
+            window.ConnectButton.IsEnabled = false;
+            window.ClientNotice("접속하는 중…");
+            var attempt = generation;
+            try
+            {
+                var endpoint = BuildEndpoint();
+                var pin = window.ServerPin.Text.Trim();
+                if (pin.Length == 0)
+                {
+                    window.ClientNotice("비밀번호로 서버 키를 확인하는 중입니다…");
+                    pin = await PakeBootstrap.AcquireServerFingerprint(endpoint, window.ClientPassword.Password);
+                    window.ServerPin.Text = pin;
+                }
+                var remote = new RemoteClient(endpoint, pin);
+                try { await remote.Login(window.ClientPassword.Password); } catch { remote.Dispose(); throw; }
+                if (attempt != generation) { try { await remote.Logout(); } finally { remote.Dispose(); } return; }
+                client = remote;
+                window.ClientPassword.Clear();
+                var previousHost = lastConnection.Address;
+                lastConnection.Address = endpoint;
+                lastConnection.Fingerprint = pin;
+                if (previousHost != lastConnection.Address) lastConnection.Display = "";
+                SaveConnection();
+                try { await LoadDisplays(); } catch { await DisconnectCore(); throw; }
+                connection = new();
+                inputs = Channel.CreateBounded<InputEvent>(256);
+                clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
+                clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
+                inputEnabled = true;
+                window.InputControlToggle.IsChecked = true;
+                window.ConnectionControls.Visibility = Visibility.Collapsed;
+                SetSessionControlsEnabled(true);
+                framesSinceHealth = 0;
+                healthWindowStarted = DateTime.UtcNow;
+                roundTripMilliseconds = -1;
+                window.SessionStatus("연결됨");
+                _ = RunConnection(remote, connection.Token);
+            }
+            catch (Exception ex) { window.ClientNotice("접속 실패: " + ex.Message, problem: true); }
+            finally { connecting = false; window.ConnectButton.IsEnabled = client == null; }
+        }
+
+        public void ClientPasswordKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key is Key.Enter or Key.Return)
+            {
+                e.Handled = true;
+                Connect(sender, e);
+            }
+        }
+
+        private string BuildEndpoint()
+        {
+            var host = window.Address.Text.Trim();
+            if (host.Length == 0) throw new ArgumentException("서버 주소를 입력하세요.");
+            if (!int.TryParse(window.ClientPort.Text, out var port) || port is < 1 or > 65535) throw new ArgumentException("포트 범위: 1–65535");
+            if (host.StartsWith('[') && host.EndsWith(']')) host = host[1..^1];
+            return host.Contains(':') ? "[" + host + "]:" + port : host + ":" + port;
+        }
+
+        private static (string Host, string Port) SplitEndpoint(string endpoint)
+        {
+            if (Uri.TryCreate("https://" + endpoint, UriKind.Absolute, out var uri) && uri.Host.Length > 0)
+                return (uri.Host.Trim('[', ']'), uri.IsDefaultPort ? "45831" : uri.Port.ToString());
+            return (endpoint, "45831");
+        }
+
+        private async Task RunConnection(RemoteClient remote, CancellationToken ct)
+        {
+            var reader = inputs!.Reader;
+            async Task Frames()
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var started = Stopwatch.GetTimestamp();
+                    var display = selectedDisplay;
+                    byte[] data;
+                    RemoteFrame frame;
+                    try
+                    {
+                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, false);
+                        data = frame.Bytes;
+                        lastCaptureMilliseconds = frame.CaptureMilliseconds;
+                        lastEncodeMilliseconds = frame.EncodeMilliseconds;
+                        lastFrameReused = frame.Reused;
+                        lastFrameQuality = frame.Quality > 0 ? frame.Quality : frameQuality;
+                        lastFrameBytes = data.Length;
+                    }
+                    catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
+                    { await LoadDisplays(); continue; }
+                    if (display != selectedDisplay) continue;
+                    var image = new BitmapImage();
+                    image.BeginInit();
+                    image.CacheOption = BitmapCacheOption.OnLoad;
+                    image.StreamSource = new MemoryStream(data);
+                    image.EndInit();
+                    image.Freeze();
+                    window.ScreenImage.Source = image;
+                    renderedDisplay = display;
+                    UpdateFrameHealth();
+                    var elapsed = Stopwatch.GetElapsedTime(started);
+                    var delay = TimeSpan.FromSeconds(1.0 / frameRate) - elapsed;
+                    if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
+                }
+            }
+            async Task SendInputs() { await foreach (var input in reader.ReadAllAsync(ct)) await remote.Input(input, ct); }
+            async Task Heartbeat()
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var timer = Stopwatch.StartNew();
+                    await remote.Ping(ct);
+                    timer.Stop();
+                    Interlocked.Exchange(ref roundTripMilliseconds, timer.ElapsedMilliseconds);
+                    UpdateHealthText();
+                    await Task.Delay(3000, ct);
+                }
+            }
+            var tasks = new[] { Frames(), SendInputs(), Heartbeat() };
+            async Task SyncClipboard()
+            {
+                try { await clipboardSync!.Run(ct); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { window.SessionStatus("클립보드 동기화 오류: " + ex.Message); }
+            }
+            var clipboardTask = SyncClipboard();
+            try { await await Task.WhenAny(tasks); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { window.ClientNotice("연결 종료: " + ex.Message, problem: true); }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                if (ReferenceEquals(client, remote)) await DisconnectCore();
+                try { await Task.WhenAll(tasks); } catch { }
+                await clipboardTask;
+            }
+        }
+
+        private async Task DisconnectCore()
+        {
+            generation++;
+            var remote = client;
+            client = null;
+            fullscreen?.Close();
+            connection?.Cancel();
+            inputs?.Writer.TryComplete();
+            window.ScreenImage.Source = null;
+            selectedDisplay = null;
+            SetSessionControlsEnabled(false);
+            window.ConnectionControls.Visibility = Visibility.Visible;
+            window.HealthText.Text = "연결 종료";
+            inputEnabled = false;
+            if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
+        }
+
+        public async void Disconnect(object sender, RoutedEventArgs e)
+        {
+            await DisconnectCore();
+            window.ClientNotice("연결 종료됨");
+        }
+
+        private void SetSessionControlsEnabled(bool enabled)
+        {
+            window.SessionToolbar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            window.InputControlToggle.IsEnabled = enabled;
+            window.DisplayList.IsEnabled = enabled;
+            window.SessionMenuButton.IsEnabled = enabled;
+            window.EndSessionButton.IsEnabled = enabled;
+            if (enabled) window.HealthText.Text = "측정 중";
+        }
+
+        private void Queue(InputEvent input)
+        {
+            if (!inputEnabled && input.Kind != "release") return;
+            if (client != null && inputs != null && !inputs.Writer.TryWrite(input))
+            {
+                window.ClientNotice("입력 대기열 초과로 연결을 종료합니다.", problem: true);
+                connection?.Cancel();
+            }
+        }
+
+        private void UpdateFrameHealth()
+        {
+            framesSinceHealth++;
+            if (DateTime.UtcNow - healthWindowStarted < TimeSpan.FromSeconds(1)) return;
+            var seconds = Math.Max(0.01, (DateTime.UtcNow - healthWindowStarted).TotalSeconds);
+            var fps = framesSinceHealth / seconds;
+            framesSinceHealth = 0;
+            healthWindowStarted = DateTime.UtcNow;
+            window.Dispatcher.InvokeAsync(() => window.HealthText.Text = fps.ToString("F0") + " fps · " + (roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms"));
+        }
+
+        private void UpdateHealthText()
+        {
+            window.Dispatcher.InvokeAsync(() =>
+            {
+                if (framesSinceHealth == 0) window.HealthText.Text = "연결됨 · " + roundTripMilliseconds + " ms";
+            });
+        }
+
+        private bool Position(MouseEventArgs e)
+        {
+            if (pasting) return false;
+            if (window.ScreenImage.Source is not BitmapSource image) return false;
+            var scale = Math.Min(window.ScreenImage.ActualWidth / image.PixelWidth, window.ScreenImage.ActualHeight / image.PixelHeight);
+            var w = image.PixelWidth * scale;
+            var h = image.PixelHeight * scale;
+            var p = e.GetPosition(window.ScreenImage);
+            var x = (p.X - (window.ScreenImage.ActualWidth - w) / 2) / w;
+            var y = (p.Y - (window.ScreenImage.ActualHeight - h) / 2) / h;
+            if (!window.ScreenImage.IsMouseCaptured && (x < 0 || x > 1 || y < 0 || y > 1)) return false;
+            Queue(new("move", Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), Display: renderedDisplay));
+            return true;
+        }
+
+        public void Move(object sender, MouseEventArgs e)
+        {
+            if (window.ScreenImage.IsKeyboardFocused && Environment.TickCount64 - lastMove >= 35)
+            {
+                lastMove = Environment.TickCount64;
+                Position(e);
+            }
+        }
+
+        public void MouseDownRemote(object sender, MouseButtonEventArgs e)
+        {
+            if (!Position(e)) return;
+            window.ScreenImage.Focus();
+            window.ScreenImage.CaptureMouse();
+            Queue(new("button", Code: Button(e.ChangedButton), Down: true));
+            e.Handled = true;
+        }
+
+        public void MouseUpRemote(object sender, MouseButtonEventArgs e)
+        {
+            Position(e);
+            Queue(new("button", Code: Button(e.ChangedButton)));
+            window.ScreenImage.ReleaseMouseCapture();
+            e.Handled = true;
+        }
+
+        private static int Button(MouseButton button) => button == MouseButton.Right ? 1 : button == MouseButton.Middle ? 2 : 0;
+        public void Wheel(object sender, MouseWheelEventArgs e) { Queue(new("wheel", Code: e.Delta)); e.Handled = true; }
+
+        public void KeyDownRemote(object sender, KeyEventArgs e)
+        {
+            var code = NativeKey(e);
+            if (code > 0) Queue(new("key", Code: code, Down: true));
+            e.Handled = true;
+        }
+
+        private static int NativeKey(KeyEventArgs e) => KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key == Key.ImeProcessed ? e.ImeProcessedKey : e.Key);
+
+        private void InstallSystemShortcutHook()
+        {
+            if (systemShortcutHook != 0) return;
+            systemShortcutHookProc = SystemShortcutHook;
+            systemShortcutHook = SetWindowsHookEx(13, systemShortcutHookProc, GetModuleHandle(null), 0);
+        }
+
+        private nint SystemShortcutHook(int code, nint message, nint data)
+        {
+            if (code < 0 || !RemoteInputFocused()) return CallNextHookEx(systemShortcutHook, code, message, data);
+            var keyboard = Marshal.PtrToStructure<KeyboardHookData>(data);
+            var key = (int)keyboard.VirtualKey;
+            var down = message is 0x0100 or 0x0104;
+            var up = message is 0x0101 or 0x0105;
+            if (!down && !up) return CallNextHookEx(systemShortcutHook, code, message, data);
+            lock (suppressedSystemKeys)
+            {
+                if (up && suppressedSystemKeys.Remove(key))
+                {
+                    if (key == 0x12) remoteAltDown = false;
+                    Queue(new("key", Code: key));
+                    return 1;
+                }
+                if (!down) return CallNextHookEx(systemShortcutHook, code, message, data);
+                var alt = remoteAltDown || (keyboard.Flags & 0x20) != 0;
+                var ctrl = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+                var shift = (GetAsyncKeyState(0x10) & 0x8000) != 0;
+                var isAlt = key == 0x12;
+                var isWin = key is 0x5B or 0x5C;
+                var reservedCombo = (alt && (key is 0x09 or 0x1B)) || (ctrl && key == 0x1B) || key == 0x2C;
+                if (!isAlt && !isWin && !reservedCombo) return CallNextHookEx(systemShortcutHook, code, message, data);
+                if (isAlt) remoteAltDown = true;
+                suppressedSystemKeys.Add(key);
+                Queue(new("key", Code: key, Down: true));
+                return 1;
+            }
+        }
+
+        private bool RemoteInputFocused() => client != null && inputEnabled && window.ScreenImage.IsKeyboardFocused && (window.IsActive || fullscreen?.IsActive == true);
+
+        private nint NativeKeyboard(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+        {
+            if (client == null || !window.ScreenImage.IsKeyboardFocused) return 0;
+            if (message is 0x100 or 0x101 or 0x104 or 0x105)
+            {
+                var code = (int)wParam;
+                if (code == 0xE5) code = (int)ImmGetVirtualKey(hwnd);
+                var down = message is 0x100 or 0x104;
+                if (code == 0x7A) { handled = true; if (down && ((long)lParam & (1L << 30)) == 0) ToggleFullscreen(window, new RoutedEventArgs()); return 0; }
+                if (code == 0x56 && !down && suppressPasteKeyUp) { suppressPasteKeyUp = false; handled = true; return 0; }
+                if (code == 0x56 && down && (GetAsyncKeyState(0x11) & 0x8000) != 0)
+                { handled = true; suppressPasteKeyUp = true; if (!pasting) PasteRemoteClipboard(); return 0; }
+                if (pasting) { handled = true; return 0; }
+                if (code == 0xE7) { if (down) unicodePackets++; handled = true; return 0; }
+                if (code is > 0 and < 255) { Queue(new("key", Code: code, Down: down)); handled = true; }
+            }
+            else if (message == 0x102)
+            {
+                if (unicodePackets > 0) { unicodePackets--; Queue(new("text", Text: ((char)wParam).ToString())); }
+                handled = true;
+            }
+            return 0;
+        }
+
+        [DllImport("imm32.dll")] private static extern uint ImmGetVirtualKey(nint hwnd);
+        [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+        [DllImport("user32.dll", SetLastError = true)] private static extern nint SetWindowsHookEx(int idHook, KeyboardHookProc callback, nint module, uint threadId);
+        [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool UnhookWindowsHookEx(nint hook);
+        [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nint message, nint data);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern nint GetModuleHandle(string? moduleName);
+        private delegate nint KeyboardHookProc(int code, nint message, nint data);
+        [StructLayout(LayoutKind.Sequential)] private struct KeyboardHookData { public uint VirtualKey, ScanCode, Flags, Time; public nuint ExtraInfo; }
+
+        private async void PasteRemoteClipboard()
+        {
+            if (client is not { } remote || clipboardSync is not { } sync || connection is null) return;
+            var ct = connection.Token;
+            pasting = true;
+            Queue(new("release"));
+            try
+            {
+                await sync.PushAny(ct);
+                if (!ReferenceEquals(client, remote) || ct.IsCancellationRequested) return;
+                Queue(new("key", Code: 17, Down: true));
+                Queue(new("key", Code: 86, Down: true));
+                Queue(new("key", Code: 86));
+                Queue(new("key", Code: 17));
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { window.SessionStatus("붙여넣기 중단: " + ex.Message); }
+            finally { pasting = false; }
+        }
+
+        public void KeyUpRemote(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F11) { e.Handled = true; return; }
+            var code = NativeKey(e);
+            if (code > 0) Queue(new("key", Code: code));
+            e.Handled = true;
+        }
+
+        public void ToggleKorean(object sender, RoutedEventArgs e)
+        {
+            Queue(new("key", Code: 21, Down: true));
+            Queue(new("key", Code: 21));
+            window.ScreenImage.Focus();
+        }
+
+        public void InputControlChanged(object sender, RoutedEventArgs e)
+        {
+            var enabled = window.InputControlToggle.IsChecked == true;
+            if (!enabled) Queue(new("release"));
+            inputEnabled = enabled;
+            if (client != null) window.SessionStatus(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
+        }
+
+        public void ClipboardAutoChanged(object sender, RoutedEventArgs e)
+        {
+            var enabled = window.ClipboardAutoMenu.IsChecked == true;
+            if (clipboardSync != null) clipboardSync.AutoEnabled = enabled;
+            lastConnection.ClipboardAutoSync = enabled;
+            SaveConnection();
+            if (client != null) window.SessionStatus(enabled ? "클립보드 자동 동기화 켜짐" : "클립보드 자동 동기화 꺼짐");
+        }
+
+        public async void ClipboardSend(object sender, RoutedEventArgs e)
+        {
+            if (clipboardSync is not { } sync || connection is null) return;
+            try { if (!await sync.PushAny(connection.Token)) window.SessionStatus("보낼 텍스트나 파일을 먼저 복사하세요."); }
+            catch (Exception ex) { window.SessionStatus("클립보드 보내기 실패: " + ex.Message); }
+        }
+
+        public async void ClipboardReceive(object sender, RoutedEventArgs e)
+        {
+            if (clipboardSync is not { } sync || connection is null) return;
+            try { await sync.Pull(connection.Token); window.SessionStatus("상대 클립보드를 확인했습니다."); }
+            catch (Exception ex) { window.SessionStatus("클립보드 받기 실패: " + ex.Message); }
+        }
+
+        public void QualityMenuChanged(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem selected || !int.TryParse(selected.Tag?.ToString(), out var quality)) return;
+            frameQuality = Math.Clamp(quality, 25, 90);
+            lastConnection.FrameQuality = frameQuality;
+            SaveConnection();
+            if (client != null) window.SessionStatus("화면 품질: " + selected.Header);
+        }
+
+        public void FrameRateMenuChanged(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem selected || !int.TryParse(selected.Tag?.ToString(), out var rate) || rate is not (5 or 10 or 15 or 30)) return;
+            frameRate = rate;
+            lastConnection.FrameRate = rate;
+            SaveConnection();
+            if (client != null) window.SessionStatus("최대 프레임 속도: " + rate + " FPS");
+        }
+
+        public void ShowSessionInfo(object sender, RoutedEventArgs e)
+        {
+            var display = window.DisplayList.SelectedItem as RemoteDisplay;
+            var resolution = window.ScreenImage.Source is BitmapSource bitmap ? bitmap.PixelWidth + "×" + bitmap.PixelHeight : "수신 전";
+            var measured = lastFrameBytes > 0;
+            MessageBox.Show(fullscreen ?? (Window)window,
+                "대상: " + lastConnection.Address + "\n모니터: " + (display?.Name ?? "선택 안 됨") + "\n수신 해상도: " + resolution + "\n요청 화질: " + frameQuality + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? lastFrameQuality.ToString() : "측정 전") + "\n최대 프레임 속도: " + frameRate + " FPS\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전") + "\n압축: " + (measured ? lastEncodeMilliseconds.ToString("0.0") + " ms" : "측정 전") + "\n프레임 크기: " + (measured ? (lastFrameBytes / 1024.0).ToString("0") + " KB" : "측정 전") + "\n화면 재사용: " + (measured ? (lastFrameReused ? "예" : "아니오") : "측정 전") + "\n왕복 지연: " + (roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms") + "\n입력 제어: " + (inputEnabled ? "켜짐" : "꺼짐") + "\n클립보드 자동 동기화: " + (window.ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐"),
+                "세션 정보", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void SaveConnection()
+        {
+            try { lastConnection.Save(); }
+            catch (Exception ex)
+            {
+                var message = "연결 정보 저장 실패: " + ex.Message;
+                if (client == null) window.ClientNotice(message, problem: true);
+                else window.SessionStatus(message);
+            }
+        }
+
+        public void OpenSessionMenu(object sender, RoutedEventArgs e)
+        {
+            MarkChoice(0, frameQuality);
+            MarkChoice(1, frameRate);
+            window.SessionMenu.PlacementTarget = window.SessionMenuButton;
+            window.SessionMenu.IsOpen = true;
+        }
+
+        private void MarkChoice(int index, int selected)
+        {
+            if (window.SessionMenu.Items[index] is not MenuItem parent) return;
+            foreach (var item in parent.Items)
+            {
+                if (item is not MenuItem choice) continue;
+                choice.IsCheckable = int.TryParse(choice.Tag?.ToString(), out var value);
+                if (choice.IsCheckable) choice.IsChecked = value == selected;
+            }
+        }
+
+        private async Task LoadDisplays()
+        {
+            if (client is not { } remote) return;
+            var displays = await remote.Displays() ?? [];
+            if (!ReferenceEquals(client, remote)) return;
+            var wanted = selectedDisplay ?? lastConnection.Display;
+            window.DisplayList.ItemsSource = displays;
+            window.DisplayList.SelectedItem = displays.FirstOrDefault(d => d.Id == wanted) ?? displays.FirstOrDefault(d => d.Primary) ?? displays.FirstOrDefault();
+        }
+
+        public async void RefreshDisplays(object sender, RoutedEventArgs e)
+        {
+            try { await LoadDisplays(); }
+            catch (Exception ex) { window.SessionStatus(ex.Message); }
+        }
+
+        public void DisplayChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
+            Queue(new("release"));
+            window.ScreenImage.Source = null;
+            renderedDisplay = null;
+            selectedDisplay = display.Id;
+            lastConnection.Display = display.Id;
+            if (client != null) SaveConnection();
+        }
+
+        public void FullscreenKey(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F11 && (fullscreen != null || window.ClientTab.IsSelected))
+            {
+                e.Handled = true;
+                ToggleFullscreen(sender, e);
+            }
+        }
+
+        public void ToggleFullscreen(object sender, RoutedEventArgs e)
+        {
+            if (fullscreen != null) { fullscreen.Close(); return; }
+            Queue(new("release"));
+            window.ClientTab.Content = null;
+            window.ConnectionControls.Visibility = Visibility.Collapsed;
+            window.ClientPanel.Margin = new Thickness(0);
+            var shell = new Window { Title = "Personal Remote Desktop · F11 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = window, Content = window.ClientPanel };
+            shell.WindowStartupLocation = WindowStartupLocation.Manual;
+            shell.Left = window.Left;
+            shell.Top = window.Top;
+            shell.Width = window.ActualWidth;
+            shell.Height = window.ActualHeight;
+            fullscreen = shell;
+            shell.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(shell).Handle)?.AddHook(NativeKeyboard);
+            shell.PreviewKeyDown += FullscreenKey;
+            shell.Deactivated += (_, _) => Queue(new("release"));
+            shell.Closed += (_, _) =>
+            {
+                Queue(new("release"));
+                shell.Content = null;
+                window.ClientTab.Content = window.ClientPanel;
+                window.ClientPanel.Margin = new Thickness(16);
+                window.ConnectionControls.Visibility = client is null ? Visibility.Visible : Visibility.Collapsed;
+                fullscreen = null;
+                window.ScreenImage.Focus();
+            };
+            shell.Show();
+            shell.WindowState = WindowState.Maximized;
+            window.ScreenImage.Focus();
+        }
+
+        public void ReleaseInput(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            lock (suppressedSystemKeys) { remoteAltDown = false; suppressedSystemKeys.Clear(); }
+            Queue(new("release"));
+        }
+    }
+}

@@ -50,6 +50,7 @@ public partial class MainWindow
         private KeyboardHookProc? systemShortcutHookProc;
         private readonly HashSet<int> suppressedSystemKeys = [];
         private bool remoteAltDown;
+        private System.Windows.Threading.DispatcherTimer? toolbarTimer;
 
         public ClientSession(MainWindow window) => this.window = window;
 
@@ -262,7 +263,9 @@ public partial class MainWindow
 
         private void SetSessionControlsEnabled(bool enabled)
         {
-            window.SessionToolbar.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            window.SessionToolbar.Visibility = Visibility.Collapsed;
+            window.SessionReveal.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+            window.SessionHealthChip.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
             window.InputControlToggle.IsEnabled = enabled;
             window.DisplayList.IsEnabled = enabled;
             window.SessionMenuButton.IsEnabled = enabled;
@@ -270,7 +273,47 @@ public partial class MainWindow
             window.ClientPanel.Margin = new Thickness(enabled ? 8 : 16);
             if (enabled) window.HealthText.Text = "측정 중";
             UpdateInputChrome();
+            if (enabled) ShowSessionToolbar();
+            else toolbarTimer?.Stop();
         }
+
+        private void ShowSessionToolbar()
+        {
+            if (client == null) return;
+            window.SessionToolbar.Visibility = Visibility.Visible;
+            window.SessionReveal.Visibility = Visibility.Collapsed;
+            RestartToolbarTimer();
+        }
+
+        private void RestartToolbarTimer()
+        {
+            toolbarTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3.2) };
+            toolbarTimer.Stop();
+            toolbarTimer.Tick -= HideSessionToolbar;
+            toolbarTimer.Tick += HideSessionToolbar;
+            toolbarTimer.Start();
+        }
+
+        private void HideSessionToolbar(object? sender, EventArgs e)
+        {
+            toolbarTimer?.Stop();
+            if (client == null) return;
+            if (window.SessionMenu.IsOpen || window.DisplayList.IsDropDownOpen || window.SessionToolbar.IsMouseOver || window.SessionToolbar.IsKeyboardFocusWithin)
+            {
+                RestartToolbarTimer();
+                return;
+            }
+            window.SessionToolbar.Visibility = Visibility.Collapsed;
+            window.SessionReveal.Visibility = Visibility.Visible;
+        }
+
+        public void RevealSessionToolbar(object sender, RoutedEventArgs e) => ShowSessionToolbar();
+
+        public void SessionToolbarActivity(object sender, MouseEventArgs e) => RestartToolbarTimer();
+
+        public void SessionMenuClosed(object sender, RoutedEventArgs e) => RestartToolbarTimer();
+
+        public void DisplayListClosed(object sender, EventArgs e) => RestartToolbarTimer();
 
         private void Queue(InputEvent input)
         {
@@ -401,6 +444,7 @@ public partial class MainWindow
 
         public void Move(object sender, MouseEventArgs e)
         {
+            if (client != null && e.GetPosition(window.Stage).Y <= 20) ShowSessionToolbar();
             if (Environment.TickCount64 - lastMove < 16) return;
             lastMove = Environment.TickCount64;
             Position(e);

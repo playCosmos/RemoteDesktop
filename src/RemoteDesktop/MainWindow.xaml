@@ -32,7 +32,14 @@
             <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,10,0,0" MaxHeight="60" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
           </Grid>
         </Border>
-        <Border x:Name="SessionToolbar" Visibility="Collapsed" DockPanel.Dock="Top" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="8,6" Margin="0,0,0,10">
+        <Grid>
+        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
+          <Grid>
+            <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+          </Grid>
+        </Border>
+        <Border x:Name="SessionToolbar" VerticalAlignment="Top" Visibility="Collapsed" Margin="12,10,12,0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="8,6" MouseMove="SessionToolbarActivity">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="Auto"/>
@@ -41,10 +48,10 @@
             </Grid.ColumnDefinitions>
             <StackPanel x:Name="SessionActions" Orientation="Horizontal">
               <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
-              <ComboBox x:Name="DisplayList" Width="210" IsEnabled="False" SelectionChanged="DisplayChanged" DisplayMemberPath="Name" Margin="8,0,0,0"/>
+              <ComboBox x:Name="DisplayList" Width="210" IsEnabled="False" SelectionChanged="DisplayChanged" DropDownClosed="DisplayListClosed" DisplayMemberPath="Name" Margin="8,0,0,0"/>
               <Button x:Name="SessionMenuButton" Content="조작" IsEnabled="False" Click="OpenSessionMenu" Margin="8,0,0,0">
                 <Button.ContextMenu>
-                  <ContextMenu x:Name="SessionMenu">
+                  <ContextMenu x:Name="SessionMenu" Closed="SessionMenuClosed">
                     <MenuItem Header="화면 품질">
                       <MenuItem Header="저대역폭" Tag="30" Click="QualityMenuChanged"/>
                       <MenuItem Header="균형" Tag="55" Click="QualityMenuChanged"/>
@@ -72,18 +79,13 @@
               <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
             </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-              <Border Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" VerticalAlignment="Center">
-                <TextBlock x:Name="HealthText" Text="연결 전" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
-              </Border>
-              <Button x:Name="EndSessionButton" Content="연결 종료" IsEnabled="False" Click="Disconnect" Margin="8,0,0,0" Foreground="{StaticResource DangerBrush}"/>
-            </StackPanel>
+            <Button x:Name="EndSessionButton" Grid.Column="2" Content="연결 종료" IsEnabled="False" Click="Disconnect" Foreground="{StaticResource DangerBrush}"/>
           </Grid>
         </Border>
-        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
-          <Grid>
-            <TextBlock x:Name="StageHint" Text="접속하면 원격 화면이 여기에 표시됩니다" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+        <Button x:Name="SessionReveal" Content="세션" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 메뉴 열기"/>
+        <Border x:Name="SessionHealthChip" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16" Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="10,6" IsHitTestVisible="False">
+          <TextBlock x:Name="HealthText" Text="연결 전" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+        </Border>
             <Border x:Name="SessionInfoCard" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="16" MaxWidth="420" Background="#F7F4EF" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="12" Padding="14">
               <DockPanel>
                 <Button DockPanel.Dock="Right" Content="닫기" Click="CloseSessionInfo" VerticalAlignment="Top" Margin="12,0,0,0"/>
@@ -93,8 +95,7 @@
                 </StackPanel>
               </DockPanel>
             </Border>
-          </Grid>
-        </Border>
+        </Grid>
       </DockPanel>
     </TabItem>
     <TabItem x:Name="ServerTab" Header="이 PC">

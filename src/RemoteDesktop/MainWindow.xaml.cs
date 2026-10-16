@@ -85,6 +85,10 @@ public partial class MainWindow : Window
     private void CloseSessionInfo(object sender, RoutedEventArgs e) => clientSession.CloseSessionInfo(sender, e);
     private void RemoteFocusChanged(object sender, KeyboardFocusChangedEventArgs e) => clientSession.RemoteFocusChanged(sender, e);
     private void OpenSessionMenu(object sender, RoutedEventArgs e) => clientSession.OpenSessionMenu(sender, e);
+    private void RevealSessionToolbar(object sender, RoutedEventArgs e) => clientSession.RevealSessionToolbar(sender, e);
+    private void SessionToolbarActivity(object sender, System.Windows.Input.MouseEventArgs e) => clientSession.SessionToolbarActivity(sender, e);
+    private void SessionMenuClosed(object sender, RoutedEventArgs e) => clientSession.SessionMenuClosed(sender, e);
+    private void DisplayListClosed(object sender, EventArgs e) => clientSession.DisplayListClosed(sender, e);
     private void RefreshDisplays(object sender, RoutedEventArgs e) => clientSession.RefreshDisplays(sender, e);
     private void DisplayChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => clientSession.DisplayChanged(sender, e);
     private void ToggleFullscreen(object sender, RoutedEventArgs e) => clientSession.ToggleFullscreen(sender, e);

@@ -112,7 +112,9 @@ public partial class MainWindow
             var occupied = hostState == HostUiState.Listening && host?.HasSession == true;
             var live = hostState is HostUiState.Starting or HostUiState.Listening;
             window.HostSetup.Visibility = UiText.ShowHostSetup(hostState != HostUiState.Stopped) ? Visibility.Visible : Visibility.Collapsed;
-            window.HostCardTitle.Text = UiText.HostCardTitle(occupied);
+            window.HostCardTitle.Text = UiText.HostCardTitle(occupied, ConnectedPeer);
+            window.ShareTitle.Text = UiText.ShareTitle(occupied);
+            window.ShareHint.Text = UiText.ShareHint(occupied);
             window.KickButton.Style = occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.StopButton.Style = hostState is HostUiState.Listening or HostUiState.Stopping && !occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(UiText.HostPresence(occupied, live));

@@ -709,15 +709,23 @@ public partial class MainWindow
 
         public void Move(object sender, MouseEventArgs e)
         {
-            if (client != null && e.GetPosition(window.Stage).Y <= 20) ShowSessionToolbar();
+            var stageY = e.GetPosition(window.Stage).Y;
+            if (client != null && stageY <= 20) ShowSessionToolbar();
             if (Environment.TickCount64 - lastMove < 16) return;
             lastMove = Environment.TickCount64;
+            if (client != null && !UiText.RemotePointer(stageY, window.ScreenImage.IsMouseCaptured)) return;
             Position(e);
         }
 
         public void MouseDownRemote(object sender, MouseButtonEventArgs e)
         {
             window.ScreenImage.Focus();
+            if (client != null && !UiText.RemotePointer(e.GetPosition(window.Stage).Y, window.ScreenImage.IsMouseCaptured))
+            {
+                ShowSessionToolbar();
+                e.Handled = true;
+                return;
+            }
             if (!Position(e)) return;
             window.ScreenImage.CaptureMouse();
             Queue(new("button", Code: Button(e.ChangedButton), Down: true));

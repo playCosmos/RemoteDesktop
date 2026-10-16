@@ -113,7 +113,20 @@ public static class UiText
 
     public static bool ShowHostSetup(bool serverRunning) => !serverRunning;
 
-    public static string HostCardTitle(bool clientConnected) => clientConnected ? "이 PC를 보는 중" : "접속 받기";
+    public static string HostCardTitle(bool clientConnected, string? peer)
+    {
+        if (!clientConnected) return "접속 받기";
+        var name = Blank(peer);
+        return name == null ? "이 PC를 보는 중" : name + " 연결 중";
+    }
+
+    public static string ShareTitle(bool occupied) => occupied ? "지금은 한 대만 연결됩니다" : "이 PC에 접속하려면";
+
+    public static string ShareHint(bool occupied) => occupied
+        ? "이미 다른 기기가 연결되어 있습니다. 현재 접속을 끊어야 다른 PC가 들어올 수 있습니다."
+        : "상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다.";
+
+    public static bool RemotePointer(double stageY, bool captured) => captured || stageY > 20;
 
     public static string HostPresence(bool clientConnected, bool serverLive) => clientConnected ? "LiveBrush" : serverLive ? "AccentBrush" : "MutedBrush";
 

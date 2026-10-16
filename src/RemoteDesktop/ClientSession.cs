@@ -63,6 +63,8 @@ public partial class MainWindow
             window.Address.Text = endpoint.Host;
             window.ClientPort.Text = endpoint.Port;
             window.ServerPin.Text = lastConnection.Fingerprint;
+            window.ServerPin.Visibility = Visibility.Collapsed;
+            UpdatePinSummary();
             frameQuality = Math.Clamp(lastConnection.FrameQuality, 25, 90);
             frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
@@ -75,6 +77,8 @@ public partial class MainWindow
             if (client != null || sender is not System.Windows.Controls.Button { Tag: RecentConnection recent }) return;
             window.Address.Text = recent.Address;
             window.ServerPin.Text = recent.Fingerprint;
+            window.ServerPin.Visibility = Visibility.Collapsed;
+            UpdatePinSummary();
             if (recent.FrameQuality is >= 25 and <= 90) frameQuality = recent.FrameQuality;
             if (recent.FrameRate is 5 or 10 or 15 or 30) frameRate = recent.FrameRate;
             if (!string.IsNullOrEmpty(recent.Display)) lastConnection.Display = recent.Display;
@@ -323,7 +327,35 @@ public partial class MainWindow
             window.ConnectionControls.Visibility = Visibility.Visible;
             window.HealthText.Text = "연결 종료";
             inputEnabled = false;
+            window.ConnectButton.IsEnabled = true;
+            window.ServerPin.Visibility = Visibility.Collapsed;
+            UpdatePinSummary();
+            if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
             if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
+        }
+
+        public void UpdatePinSummary()
+        {
+            var pin = window.ServerPin.Text.Trim();
+            var hasPin = pin.Length > 0;
+            window.ClearPinButton.Visibility = hasPin ? Visibility.Visible : Visibility.Collapsed;
+            window.EditPinButton.Content = hasPin ? "변경" : "지문 입력";
+            window.PinSummary.Text = hasPin ? "저장된 지문 " + (pin.Length <= 12 ? pin : pin[..12] + "…") : "";
+        }
+
+        public void EditPin(object sender, RoutedEventArgs e)
+        {
+            window.ServerPin.Visibility = Visibility.Visible;
+            window.ServerPin.Focus();
+            window.ServerPin.CaretIndex = window.ServerPin.Text.Length;
+        }
+
+        public void ClearPin(object sender, RoutedEventArgs e)
+        {
+            window.ServerPin.Clear();
+            window.ServerPin.Visibility = Visibility.Collapsed;
+            UpdatePinSummary();
+            window.ClientNotice("지문을 비우면 비밀번호로 서버 키를 확인합니다.");
         }
 
         public async void Disconnect(object sender, RoutedEventArgs e)

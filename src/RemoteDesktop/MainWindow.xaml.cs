@@ -15,6 +15,7 @@ public partial class MainWindow : Window
         clientSession = new ClientSession(this);
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
+        ServerPin.TextChanged += (_, _) => clientSession.UpdatePinSummary();
         var version = typeof(MainWindow).Assembly.GetName().Version;
         if (version is not null) Title = "Personal Remote Desktop " + version.ToString(3);
         ClientTab.IsSelected = true;
@@ -80,6 +81,8 @@ public partial class MainWindow : Window
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);
     private void UseRecent(object sender, RoutedEventArgs e) => clientSession.UseRecent(sender, e);
     private void ForgetRecent(object sender, RoutedEventArgs e) => clientSession.ForgetRecent(sender, e);
+    private void EditPin(object sender, RoutedEventArgs e) => clientSession.EditPin(sender, e);
+    private void ClearPin(object sender, RoutedEventArgs e) => clientSession.ClearPin(sender, e);
     private void Disconnect(object sender, RoutedEventArgs e) => clientSession.Disconnect(sender, e);
     private void Move(object sender, MouseEventArgs e) => clientSession.Move(sender, e);
     private void MouseDownRemote(object sender, MouseButtonEventArgs e) => clientSession.MouseDownRemote(sender, e);

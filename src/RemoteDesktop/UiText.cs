@@ -91,6 +91,26 @@ public static class UiText
         return string.IsNullOrWhiteSpace(clock) ? detail : clock.Trim() + " · " + detail;
     }
 
+    public static string FrameHealth(int changedFrames, double seconds, long roundTripMilliseconds, bool pictureHeld)
+    {
+        var latency = roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms";
+        if (changedFrames <= 0) return (pictureHeld ? "화면 유지" : "수신 대기") + " · " + latency;
+        var fps = changedFrames / Math.Max(0.01, seconds);
+        return fps.ToString("F0") + " fps · " + latency;
+    }
+
+    public static string StaleFrame() => "화면 응답 없음";
+
+    public static bool FrameStale(TimeSpan sinceFrame) => sinceFrame >= TimeSpan.FromSeconds(3);
+
+    public static string HealthTone(string? detail)
+    {
+        if (string.IsNullOrWhiteSpace(detail)) return "MutedBrush";
+        if (detail.Contains("응답 없음", StringComparison.Ordinal) || detail.Contains("종료", StringComparison.Ordinal)) return "DangerBrush";
+        if (detail.Contains("fps", StringComparison.Ordinal)) return "InkBrush";
+        return "MutedBrush";
+    }
+
     public static string SessionPreset(string? address, string quality, int frameRate)
     {
         var preset = quality + " · " + frameRate + " FPS";

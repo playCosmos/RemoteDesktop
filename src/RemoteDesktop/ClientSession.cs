@@ -50,6 +50,12 @@ public partial class MainWindow
         private int frameRate;
         private int changedSinceHealth;
         private DateTime healthWindowStarted = DateTime.UtcNow;
+        private int heldSinceHealth;
+        private bool haveFrameSample;
+        private int sampleChanged;
+        private double sampleSeconds = 1;
+        private bool sampleHeld;
+        private long lastFrameTicks;
         private long roundTripMilliseconds = -1;
         private double lastCaptureMilliseconds;
         private double lastEncodeMilliseconds;
@@ -330,7 +336,7 @@ public partial class MainWindow
                     if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;
-                    UpdateFrameHealth(data.Length > 0);
+                    UpdateFrameHealth(data.Length > 0, frame.Reused && data.Length == 0);
                     var elapsed = Stopwatch.GetElapsedTime(started);
                     var delay = RemoteClient.FrameInterval(frameRate, lastFrameReused) - elapsed;
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
@@ -461,6 +467,14 @@ public partial class MainWindow
             if (enabled) StartViewingClock();
             else StopViewingClock();
             if (enabled) SetHealth("측정 중");
+            if (enabled)
+            {
+                haveFrameSample = false;
+                changedSinceHealth = 0;
+                heldSinceHealth = 0;
+                healthWindowStarted = DateTime.UtcNow;
+                Interlocked.Exchange(ref lastFrameTicks, DateTime.UtcNow.Ticks);
+            }
             ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             UpdateInputChrome();
@@ -484,6 +498,9 @@ public partial class MainWindow
         private void SetHealth(string text)
         {
             healthDetail = text;
+            var tone = (System.Windows.Media.Brush)window.FindResource(UiText.HealthTone(text));
+            window.HealthText.Foreground = tone;
+            window.SessionReveal.Foreground = tone;
             PublishHealth();
         }
 
@@ -503,7 +520,12 @@ public partial class MainWindow
             viewingSince = null;
         }
 
-        private void PublishHealthTick(object? sender, EventArgs e) => PublishHealth();
+        private void PublishHealthTick(object? sender, EventArgs e)
+        {
+            if (client != null && SeenFrame() && UiText.FrameStale(DateTime.UtcNow - LastFrameUtc()) && healthDetail != UiText.StaleFrame())
+                SetHealth(UiText.StaleFrame());
+            else PublishHealth();
+        }
 
         private void PublishHealth()
         {
@@ -605,26 +627,49 @@ public partial class MainWindow
             return channel.Writer.TryWrite(input);
         }
 
-        private void UpdateFrameHealth(bool changed)
+        private void UpdateFrameHealth(bool changed, bool held)
         {
             if (changed) changedSinceHealth++;
+            else if (held) heldSinceHealth++;
+            Interlocked.Exchange(ref lastFrameTicks, DateTime.UtcNow.Ticks);
             if (DateTime.UtcNow - healthWindowStarted < TimeSpan.FromSeconds(1)) return;
             var seconds = Math.Max(0.01, (DateTime.UtcNow - healthWindowStarted).TotalSeconds);
             var changedFrames = changedSinceHealth;
-            var latency = roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms";
+            var pictureHeld = changedFrames == 0 && heldSinceHealth > 0;
             changedSinceHealth = 0;
+            heldSinceHealth = 0;
             healthWindowStarted = DateTime.UtcNow;
-            var text = changedFrames == 0 ? "변화 없음 · " + latency : (changedFrames / seconds).ToString("F0") + " fps · " + latency;
-            window.Dispatcher.InvokeAsync(() => SetHealth(text));
+            var latency = Interlocked.Read(ref roundTripMilliseconds);
+            var text = UiText.FrameHealth(changedFrames, seconds, latency, pictureHeld);
+            window.Dispatcher.InvokeAsync(() =>
+            {
+                sampleChanged = changedFrames;
+                sampleSeconds = seconds;
+                sampleHeld = pictureHeld;
+                haveFrameSample = true;
+                if (client != null) SetHealth(text);
+            });
         }
 
         private void UpdateHealthText()
         {
+            var latency = Interlocked.Read(ref roundTripMilliseconds);
             window.Dispatcher.InvokeAsync(() =>
             {
-                if (lastFrameBytes == 0) SetHealth("연결됨 · " + roundTripMilliseconds + " ms");
+                if (client == null) return;
+                if (SeenFrame() && UiText.FrameStale(DateTime.UtcNow - LastFrameUtc()))
+                {
+                    SetHealth(UiText.StaleFrame());
+                    return;
+                }
+                SetHealth(haveFrameSample
+                    ? UiText.FrameHealth(sampleChanged, sampleSeconds, latency, sampleHeld)
+                    : UiText.FrameHealth(0, 1, latency, false));
             });
         }
+
+        private bool SeenFrame() => Interlocked.Read(ref lastFrameTicks) != 0;
+        private DateTime LastFrameUtc() => new(Interlocked.Read(ref lastFrameTicks), DateTimeKind.Utc);
 
         private void ShowStage(string? hint)
         {

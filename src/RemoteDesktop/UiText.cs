@@ -26,6 +26,15 @@ public static class UiText
         return value.Length <= 16 ? value : value[..16] + "…";
     }
 
+    public static bool IsProblem(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains("실패", StringComparison.Ordinal)
+            || text.Contains("오류", StringComparison.Ordinal)
+            || text.Contains("중단", StringComparison.Ordinal)
+            || text.Contains("초과", StringComparison.Ordinal);
+    }
+
     private static bool HasHangul(string text)
     {
         foreach (var character in text)

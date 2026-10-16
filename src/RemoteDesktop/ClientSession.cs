@@ -385,6 +385,7 @@ public partial class MainWindow
             window.EndSessionButton.IsEnabled = enabled;
             window.ClientPanel.Margin = new Thickness(enabled ? 8 : 12);
             if (enabled) window.HealthText.Text = "측정 중";
+            if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
             else toolbarTimer?.Stop();

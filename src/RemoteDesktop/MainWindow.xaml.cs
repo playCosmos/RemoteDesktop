@@ -56,7 +56,22 @@ public partial class MainWindow : Window
         KickButton.IsEnabled = hostSession.HasClient && StopButton.IsEnabled;
     });
 
-    private void SessionStatus(string text) => Dispatcher.InvokeAsync(() => StatusText.Text = text);
+    private void SessionStatus(string text) => Dispatcher.InvokeAsync(() =>
+    {
+        StatusText.Text = text;
+        var problem = UiText.IsProblem(text);
+        StatusText.Foreground = problem
+            ? (System.Windows.Media.Brush)FindResource("DangerBrush")
+            : (System.Windows.Media.Brush)FindResource("InkBrush");
+        var inSession = SessionHealthChip.Visibility == Visibility.Visible;
+        if (problem && inSession)
+        {
+            SessionAlertText.Text = text;
+            SessionAlert.Visibility = Visibility.Visible;
+            clientSession.RevealSessionToolbar(this, new RoutedEventArgs());
+        }
+        else SessionAlert.Visibility = Visibility.Collapsed;
+    });
 
     private void ClientNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() =>
     {

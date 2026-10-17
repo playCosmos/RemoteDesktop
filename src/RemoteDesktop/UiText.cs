@@ -176,6 +176,22 @@ public static class UiText
 
     public static bool AnnounceInbound(bool newlyConnected, bool hostPageVisible) => newlyConnected && !hostPageVisible;
 
+    public static bool CompletesReleaseChord(int key, bool ctrlDown, bool altDown, bool shiftDown)
+    {
+        if (key is 0x11 or 0xA2 or 0xA3) return altDown && shiftDown;
+        if (key is 0x12 or 0xA4 or 0xA5) return ctrlDown && shiftDown;
+        if (key is 0x10 or 0xA0 or 0xA1) return ctrlDown && altDown;
+        return false;
+    }
+
+    public static string InputReleaseTip() => "Ctrl+Alt+Shift로 키보드를 이 PC에 되돌립니다.";
+
+    public static string InputHint(bool inputEnabled) => inputEnabled
+        ? "화면을 클릭하면 키보드가 원격 PC로 갑니다. " + InputReleaseTip()
+        : "입력 제어가 꺼져 있습니다. 화면만 보는 중입니다.";
+
+    public static string InputReleased() => "키보드를 이 PC로 되돌렸습니다.";
+
     public static string InputBacklog() => "입력이 밀려 눌린 키와 버튼을 놓습니다.";
 
     public static bool CaptureSystemShortcut(int key, bool down, bool altFlag, bool ctrlDown, bool altHeld, bool winHeld, bool suppressed)

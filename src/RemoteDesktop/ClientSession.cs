@@ -76,6 +76,7 @@ public partial class MainWindow
         private nint systemShortcutHook;
         private KeyboardHookProc? systemShortcutHookProc;
         private readonly HashSet<int> suppressedSystemKeys = [];
+        private readonly HashSet<int> localReleaseKeys = [];
         private bool remoteAltDown;
         private System.Windows.Threading.DispatcherTimer? toolbarTimer;
         private System.Windows.Threading.DispatcherTimer? sessionNoticeTimer;
@@ -1201,16 +1202,24 @@ public partial class MainWindow
 
         private nint SystemShortcutHook(int code, nint message, nint data)
         {
-            if (code < 0 || !RemoteInputFocused())
+            if (code < 0) return CallNextHookEx(systemShortcutHook, code, message, data);
+            if (!RemoteInputFocused() && !HasLocalRelease())
             {
-                if (!RemoteInputFocused()) ReleaseSystemShortcuts();
+                ReleaseSystemShortcuts();
                 return CallNextHookEx(systemShortcutHook, code, message, data);
             }
             var keyboard = Marshal.PtrToStructure<KeyboardHookData>(data);
             var key = (int)keyboard.VirtualKey;
             var down = message is 0x0100 or 0x0104;
             var up = message is 0x0101 or 0x0105;
+            if (up && EatLocalRelease(key)) return 1;
+            if (!RemoteInputFocused())
+            {
+                ReleaseSystemShortcuts();
+                return CallNextHookEx(systemShortcutHook, code, message, data);
+            }
             if (!down && !up) return CallNextHookEx(systemShortcutHook, code, message, data);
+            if (down && TakeLocalRelease(key)) return 1;
             lock (suppressedSystemKeys)
             {
                 if (!down)
@@ -1229,6 +1238,38 @@ public partial class MainWindow
                 return 1;
             }
         }
+
+        private bool TakeLocalRelease(int key)
+        {
+            if (!RemoteInputFocused() || !UiText.CompletesReleaseChord(key, ModifierDown(0x11), ModifierDown(0x12), ModifierDown(0x10))) return false;
+            lock (localReleaseKeys) localReleaseKeys.Add(key);
+            window.Dispatcher.BeginInvoke(ReleaseKeyboardToLocal);
+            return true;
+        }
+
+        private bool EatLocalRelease(int key)
+        {
+            lock (localReleaseKeys) return localReleaseKeys.Remove(key);
+        }
+
+        private bool HasLocalRelease()
+        {
+            lock (localReleaseKeys) return localReleaseKeys.Count > 0;
+        }
+
+        private void ReleaseKeyboardToLocal()
+        {
+            if (client == null || !window.ScreenImage.IsKeyboardFocused) return;
+            lock (suppressedSystemKeys)
+            lock (localReleaseKeys)
+                foreach (var held in suppressedSystemKeys) localReleaseKeys.Add(held);
+            ShowSessionToolbar();
+            window.SessionStatus(UiText.InputReleased());
+            window.InputControlToggle.Focus();
+            if (window.ScreenImage.IsKeyboardFocused) System.Windows.Input.Keyboard.ClearFocus();
+        }
+
+        private bool ModifierDown(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
 
         private void ReleaseSystemShortcuts()
         {
@@ -1250,6 +1291,8 @@ public partial class MainWindow
                 if (code == 0xE5) code = (int)ImmGetVirtualKey(hwnd);
                 var down = message is 0x100 or 0x104;
                 if (code == 0x7A) { handled = true; if (down && ((long)lParam & (1L << 30)) == 0) ToggleFullscreen(window, new RoutedEventArgs()); return 0; }
+                if (!down && EatLocalRelease(code)) { handled = true; return 0; }
+                if (down && ((long)lParam & (1L << 30)) == 0 && TakeLocalRelease(code)) { handled = true; return 0; }
                 if (code == 0x56 && !down && suppressPasteKeyUp) { suppressPasteKeyUp = false; handled = true; return 0; }
                 if (code == 0x56 && down && (GetAsyncKeyState(0x11) & 0x8000) != 0)
                 { handled = true; suppressPasteKeyUp = true; if (!pasting) PasteRemoteClipboard(); return 0; }
@@ -1429,11 +1472,12 @@ public partial class MainWindow
             string? hint = null;
             if (client != null && !controlling)
                 hint = inputEnabled
-                    ? "화면을 클릭하면 키보드가 원격 PC로 갑니다."
-                    : "입력 제어가 꺼져 있습니다. 화면만 보는 중입니다.";
+                    ? UiText.InputHint(true)
+                    : UiText.InputHint(false);
             window.InputHintText.Text = hint ?? "";
             window.InputHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
-            var alertLift = hint == null ? 16 : 58;
+            window.InputControlToggle.ToolTip = UiText.InputReleaseTip();
+            var alertLift = hint == null ? 16 : inputEnabled ? 76 : 58;
             window.SessionAlert.Margin = new Thickness(24, 16, 24, alertLift);
         }
 
@@ -1454,6 +1498,7 @@ public partial class MainWindow
                 + "\n화면 재사용: " + (measured ? (lastFrameReused ? "예" : "아니오") : "측정 전")
                 + "\n왕복 지연: " + (roundTripMilliseconds < 0 ? "측정 중" : roundTripMilliseconds + " ms")
                 + "\n입력 제어: " + (inputEnabled ? "켜짐" : "꺼짐")
+                + "\n" + UiText.InputReleaseTip()
                 + "\n클립보드 자동 동기화: " + (window.ClipboardAutoMenu.IsChecked == true ? "켜짐" : "꺼짐");
         }
 

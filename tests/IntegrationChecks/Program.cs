@@ -103,6 +103,7 @@ inputBacklog.Note();
 inputBacklog.Reset();
 Check(!inputBacklog.Take() && inputBacklog.Note(), "a new session does not inherit an old input backlog");
 Check(UiText.InputBacklog() == "입력이 밀려 눌린 키와 버튼을 놓습니다.", "an input backlog tells the viewer the keys were released");
+Check(UiText.PasswordReveal(false) == "보기" && UiText.PasswordReveal(true) == "숨김" && UiText.PasswordRevealTip(false) == "비밀번호 보기" && UiText.PasswordRevealTip(true) == "비밀번호 숨기기", "a password can be shown before it is saved");
 Check(UiText.CaptureSystemShortcut(0x12, true, false, false, false, false, false) && UiText.CaptureSystemShortcut(0x5B, true, false, false, false, false, false), "alt and the windows key go to the remote pc");
 Check(UiText.CaptureSystemShortcut(0x73, true, true, false, true, false, false) && UiText.CaptureSystemShortcut(0x09, true, true, false, true, false, false), "alt+f4 and alt+tab stay on the remote pc");
 Check(UiText.CaptureSystemShortcut(0x45, true, false, false, false, true, false), "win+e does not open the local explorer");

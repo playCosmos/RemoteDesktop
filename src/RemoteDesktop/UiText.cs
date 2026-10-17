@@ -312,6 +312,10 @@ public static class UiText
 
     public static string ReconnectHold() => "다시 연결하는 중…";
 
+    public static string PasswordReveal(bool shown) => shown ? "숨김" : "보기";
+
+    public static string PasswordRevealTip(bool shown) => shown ? "비밀번호 숨기기" : "비밀번호 보기";
+
     private static bool CertificateMismatch(HttpRequestException http)
     {
         var detail = http.InnerException?.Message ?? http.Message;

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
 
 namespace RemoteDesktop;
 
@@ -17,6 +18,7 @@ public partial class MainWindow
         private RemoteHost? host;
         private bool hostStarting;
         private bool changingPassword;
+        private bool suppressHostPasswordReveal;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
         private System.Windows.Threading.DispatcherTimer? sessionClock;
         private System.Windows.Threading.DispatcherTimer? addressRefresh;
@@ -264,7 +266,7 @@ public partial class MainWindow
                 window.ChangePasswordButton.Visibility = Visibility.Visible;
             }
             window.PasswordEditor.IsEnabled = host == null && !hostStarting;
-            window.HostPassword.Clear();
+            ClearHostPassword();
         }
 
         public void ChangeHostPassword(object sender, RoutedEventArgs e)
@@ -274,7 +276,7 @@ public partial class MainWindow
             window.PasswordEditor.Visibility = Visibility.Visible;
             window.HostPasswordInstruction.Text = changingPassword ? "새 접속 비밀번호 (8자 이상)" : "현재 서버 비밀번호 (기존 비밀번호 유지)";
             window.SaveHostPasswordButton.Content = changingPassword ? "새 비밀번호 저장" : "보안 등록";
-            window.HostPassword.Focus();
+            FocusHostPassword();
         }
 
         public async void SaveHostPassword(object sender, RoutedEventArgs e)
@@ -284,12 +286,12 @@ public partial class MainWindow
             {
                 if (settings.HasPassword && !settings.HasOpaqueIdentity)
                 {
-                    settings.EnrollOpaqueIdentity(window.HostPassword.Password);
+                    settings.EnrollOpaqueIdentity(CurrentHostPassword());
                     window.HostStatus("기존 비밀번호를 확인했고 첫 지문 등록을 준비했습니다.");
                 }
                 else
                 {
-                    settings.SetPassword(window.HostPassword.Password);
+                    settings.SetPassword(CurrentHostPassword());
                     window.HostStatus("비밀번호 저장됨 · 지금 자동으로 접속 대기를 시작합니다.");
                 }
                 changingPassword = false;
@@ -306,6 +308,66 @@ public partial class MainWindow
                 e.Handled = true;
                 SaveHostPassword(sender, e);
             }
+        }
+
+        public void HostPasswordRevealChanged(object sender, RoutedEventArgs e)
+        {
+            if (suppressHostPasswordReveal) return;
+            var shown = window.HostPasswordReveal.IsChecked == true;
+            window.HostPasswordReveal.Content = UiText.PasswordReveal(shown);
+            window.HostPasswordReveal.ToolTip = UiText.PasswordRevealTip(shown);
+            if (shown)
+            {
+                suppressHostPasswordReveal = true;
+                window.HostPasswordVisible.Text = window.HostPassword.Password;
+                suppressHostPasswordReveal = false;
+                window.HostPassword.Visibility = Visibility.Collapsed;
+                window.HostPasswordVisible.Visibility = Visibility.Visible;
+                window.HostPasswordVisible.CaretIndex = window.HostPasswordVisible.Text.Length;
+                if (window.HostPasswordVisible.IsEnabled) window.HostPasswordVisible.Focus();
+            }
+            else
+            {
+                window.HostPassword.Password = window.HostPasswordVisible.Text;
+                suppressHostPasswordReveal = true;
+                window.HostPasswordVisible.Clear();
+                suppressHostPasswordReveal = false;
+                window.HostPasswordVisible.Visibility = Visibility.Collapsed;
+                window.HostPassword.Visibility = Visibility.Visible;
+                if (window.HostPassword.IsEnabled) window.HostPassword.Focus();
+            }
+        }
+
+        public void HostPasswordVisibleChanged(object sender, TextChangedEventArgs e)
+        {
+            if (suppressHostPasswordReveal || window.HostPasswordReveal.IsChecked != true) return;
+            window.HostPassword.Password = window.HostPasswordVisible.Text;
+        }
+
+        private string CurrentHostPassword()
+        {
+            if (window.HostPasswordReveal.IsChecked == true)
+                window.HostPassword.Password = window.HostPasswordVisible.Text;
+            return window.HostPassword.Password;
+        }
+
+        private void FocusHostPassword()
+        {
+            if (window.HostPasswordReveal.IsChecked == true) window.HostPasswordVisible.Focus();
+            else window.HostPassword.Focus();
+        }
+
+        private void ClearHostPassword()
+        {
+            suppressHostPasswordReveal = true;
+            window.HostPassword.Clear();
+            window.HostPasswordVisible.Clear();
+            window.HostPasswordReveal.IsChecked = false;
+            window.HostPasswordReveal.Content = UiText.PasswordReveal(false);
+            window.HostPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
+            window.HostPasswordVisible.Visibility = Visibility.Collapsed;
+            window.HostPassword.Visibility = Visibility.Visible;
+            suppressHostPasswordReveal = false;
         }
 
         public async void StartHost(object sender, RoutedEventArgs e) => await StartHostAsync(automatic: false);
@@ -326,7 +388,8 @@ public partial class MainWindow
                 }
                 if (!int.TryParse(window.HostPort.Text, out var port) || port is < 1024 or > 65535) throw new ArgumentException("포트 범위: 1024–65535");
                 settings.Port = port;
-                if (window.HostPassword.Password.Length > 0) settings.SetPassword(window.HostPassword.Password);
+                var typedPassword = CurrentHostPassword();
+                if (typedPassword.Length > 0) settings.SetPassword(typedPassword);
                 if (!settings.HasPassword) throw new InvalidOperationException("비밀번호를 먼저 저장하세요.");
                 window.HostStatus("접속 대기를 시작하는 중…");
                 settings.Save();

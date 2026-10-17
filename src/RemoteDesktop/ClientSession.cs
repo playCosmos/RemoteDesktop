@@ -35,6 +35,7 @@ public partial class MainWindow
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
         public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
+        private bool suppressClientPasswordReveal;
         private long lastMove;
         private DateTime? viewingSince;
         private string healthDetail = "연결 전";
@@ -97,6 +98,8 @@ public partial class MainWindow
             if (lastConnection.OpenHostTab) window.ServerTab.IsSelected = true;
             window.StateChanged += (_, _) => NoteViewerWatch();
             NoteViewerWatch();
+            window.ClientPasswordReveal.Content = UiText.PasswordReveal(false);
+            window.ClientPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
         }
 
         public void TabChanged(System.Windows.Controls.SelectionChangedEventArgs e)
@@ -142,7 +145,7 @@ public partial class MainWindow
             if (recent.FrameRate is 5 or 10 or 15 or 30) frameRate = recent.FrameRate;
             if (!string.IsNullOrEmpty(recent.Display)) lastConnection.Display = recent.Display;
             ShowSessionPreset();
-            window.ClientPassword.Focus();
+            FocusClientPassword();
             window.ClientNotice(recent.Address + " · 비밀번호를 입력하세요.");
         }
 
@@ -260,7 +263,7 @@ public partial class MainWindow
         {
             if (!window.ClientTab.IsSelected || window.ConnectionControls.Visibility != Visibility.Visible) return;
             if (string.IsNullOrWhiteSpace(window.Address.Text)) window.Address.Focus();
-            else window.ClientPassword.Focus();
+            else FocusClientPassword();
         }
 
         public async void Connect(object sender, RoutedEventArgs e)
@@ -268,7 +271,7 @@ public partial class MainWindow
             suppressReconnect = false;
             reconnectAttempt = 0;
             resumeEpoch++;
-            await ConnectCore(window.ClientPassword.Password, announceFailure: true);
+            await ConnectCore(CurrentClientPassword(), announceFailure: true);
         }
 
         private async Task<bool> ConnectCore(string password, bool announceFailure)
@@ -296,7 +299,7 @@ public partial class MainWindow
                 client = remote;
                 connectedOnce = true;
                 sessionPassword = password;
-                window.ClientPassword.Clear();
+                ClearClientPassword();
                 var previousHost = lastConnection.Address;
                 lastConnection.Address = endpoint;
                 lastConnection.Fingerprint = pin;
@@ -350,6 +353,8 @@ public partial class MainWindow
             window.Address.IsEnabled = enabled;
             window.ClientPort.IsEnabled = enabled;
             window.ClientPassword.IsEnabled = enabled;
+            window.ClientPasswordVisible.IsEnabled = enabled;
+            window.ClientPasswordReveal.IsEnabled = enabled;
             window.ServerPin.IsEnabled = enabled;
             window.EditPinButton.IsEnabled = enabled;
             window.ClearPinButton.IsEnabled = enabled;
@@ -363,6 +368,66 @@ public partial class MainWindow
                 e.Handled = true;
                 Connect(sender, e);
             }
+        }
+
+        public void ClientPasswordRevealChanged(object sender, RoutedEventArgs e)
+        {
+            if (suppressClientPasswordReveal) return;
+            var shown = window.ClientPasswordReveal.IsChecked == true;
+            window.ClientPasswordReveal.Content = UiText.PasswordReveal(shown);
+            window.ClientPasswordReveal.ToolTip = UiText.PasswordRevealTip(shown);
+            if (shown)
+            {
+                suppressClientPasswordReveal = true;
+                window.ClientPasswordVisible.Text = window.ClientPassword.Password;
+                suppressClientPasswordReveal = false;
+                window.ClientPassword.Visibility = Visibility.Collapsed;
+                window.ClientPasswordVisible.Visibility = Visibility.Visible;
+                window.ClientPasswordVisible.CaretIndex = window.ClientPasswordVisible.Text.Length;
+                if (window.ClientPasswordVisible.IsEnabled) window.ClientPasswordVisible.Focus();
+            }
+            else
+            {
+                window.ClientPassword.Password = window.ClientPasswordVisible.Text;
+                suppressClientPasswordReveal = true;
+                window.ClientPasswordVisible.Clear();
+                suppressClientPasswordReveal = false;
+                window.ClientPasswordVisible.Visibility = Visibility.Collapsed;
+                window.ClientPassword.Visibility = Visibility.Visible;
+                if (window.ClientPassword.IsEnabled) window.ClientPassword.Focus();
+            }
+        }
+
+        public void ClientPasswordVisibleChanged(object sender, TextChangedEventArgs e)
+        {
+            if (suppressClientPasswordReveal || window.ClientPasswordReveal.IsChecked != true) return;
+            window.ClientPassword.Password = window.ClientPasswordVisible.Text;
+        }
+
+        private string CurrentClientPassword()
+        {
+            if (window.ClientPasswordReveal.IsChecked == true)
+                window.ClientPassword.Password = window.ClientPasswordVisible.Text;
+            return window.ClientPassword.Password;
+        }
+
+        private void FocusClientPassword()
+        {
+            if (window.ClientPasswordReveal.IsChecked == true) window.ClientPasswordVisible.Focus();
+            else window.ClientPassword.Focus();
+        }
+
+        private void ClearClientPassword()
+        {
+            suppressClientPasswordReveal = true;
+            window.ClientPassword.Clear();
+            window.ClientPasswordVisible.Clear();
+            window.ClientPasswordReveal.IsChecked = false;
+            window.ClientPasswordReveal.Content = UiText.PasswordReveal(false);
+            window.ClientPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
+            window.ClientPasswordVisible.Visibility = Visibility.Collapsed;
+            window.ClientPassword.Visibility = Visibility.Visible;
+            suppressClientPasswordReveal = false;
         }
 
         private string BuildEndpoint()
@@ -526,7 +591,7 @@ public partial class MainWindow
             if (remote != null) window.ConnectButton.Content = retrying ? "다시 연결 중…" : "다시 접속";
             window.ServerPin.Visibility = Visibility.Collapsed;
             UpdatePinSummary();
-            if (!retrying && window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
+            if (!retrying && window.IsVisible && window.ClientTab.IsSelected) FocusClientPassword();
             if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
         }
 
@@ -545,7 +610,7 @@ public partial class MainWindow
             SetHealth("연결 종료");
             window.RefreshIdentity();
             window.ClientNotice(notice, problem);
-            if (window.IsVisible && window.ClientTab.IsSelected) window.ClientPassword.Focus();
+            if (window.IsVisible && window.ClientTab.IsSelected) FocusClientPassword();
         }
 
         public void UpdatePinSummary()

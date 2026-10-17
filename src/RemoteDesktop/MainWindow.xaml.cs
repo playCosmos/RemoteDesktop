@@ -129,6 +129,8 @@ public partial class MainWindow : Window
     private void ChangeHostPassword(object sender, RoutedEventArgs e) => hostSession.ChangeHostPassword(sender, e);
     private void SaveHostPassword(object sender, RoutedEventArgs e) => hostSession.SaveHostPassword(sender, e);
     private void HostPasswordKeyDown(object sender, KeyEventArgs e) => hostSession.HostPasswordKeyDown(sender, e);
+    private void HostPasswordRevealChanged(object sender, RoutedEventArgs e) => hostSession.HostPasswordRevealChanged(sender, e);
+    private void HostPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => hostSession.HostPasswordVisibleChanged(sender, e);
     private void StartHost(object sender, RoutedEventArgs e) => hostSession.StartHost(sender, e);
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
@@ -138,6 +140,8 @@ public partial class MainWindow : Window
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);
+    private void ClientPasswordRevealChanged(object sender, RoutedEventArgs e) => clientSession.ClientPasswordRevealChanged(sender, e);
+    private void ClientPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => clientSession.ClientPasswordVisibleChanged(sender, e);
     private void UseRecent(object sender, RoutedEventArgs e) => clientSession.UseRecent(sender, e);
     private void ForgetRecent(object sender, RoutedEventArgs e) => clientSession.ForgetRecent(sender, e);
     private void EditPin(object sender, RoutedEventArgs e) => clientSession.EditPin(sender, e);

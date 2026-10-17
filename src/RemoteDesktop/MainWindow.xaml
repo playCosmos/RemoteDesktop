@@ -1,4 +1,4 @@
-<Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Width="1180" Height="800" MinWidth="920" MinHeight="640" Background="{StaticResource AppBrush}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
+<Window x:Class="RemoteDesktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Personal Remote Desktop" Icon="pack://application:,,,/AppIcon.ico" Width="1180" Height="800" MinWidth="920" MinHeight="640" Background="{StaticResource AppBrush}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" TextOptions.TextFormattingMode="Display">
   <TabControl x:Name="Pages" SelectionChanged="TabChanged">
     <TabItem x:Name="ClientTab" Header="원격 접속">
       <Grid x:Name="ClientHost">
@@ -36,7 +36,11 @@
             <TextBlock Grid.Row="0" Grid.Column="4" Text="비밀번호" Style="{StaticResource FieldLabel}"/>
             <TextBox x:Name="Address" Grid.Row="1" Grid.Column="0" Text="127.0.0.1" PreviewKeyDown="ClientPasswordKeyDown"/>
             <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" PreviewKeyDown="ClientPasswordKeyDown"/>
-            <PasswordBox x:Name="ClientPassword" Grid.Row="1" Grid.Column="4" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <Grid Grid.Row="1" Grid.Column="4">
+              <PasswordBox x:Name="ClientPassword" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown"/>
+              <TextBox x:Name="ClientPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown" TextChanged="ClientPasswordVisibleChanged"/>
+              <ToggleButton x:Name="ClientPasswordReveal" Style="{StaticResource RevealToggle}" Content="보기" ToolTip="비밀번호 보기" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Checked="ClientPasswordRevealChanged" Unchecked="ClientPasswordRevealChanged"/>
+            </Grid>
             <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="6" Content="접속" Style="{StaticResource PrimaryButton}" MinWidth="104" Click="Connect" VerticalAlignment="Bottom"/>
             <DockPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,8,0,0" LastChildFill="True">
               <Button x:Name="ClearPinButton" DockPanel.Dock="Right" Content="지우기" Margin="8,0,0,0" Click="ClearPin" Visibility="Collapsed" ToolTip="저장된 지문을 지웁니다"/>
@@ -169,7 +173,11 @@
                   <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>
                   <StackPanel x:Name="PasswordEditor">
                     <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상, 한 번 저장하면 계속 사용)" Style="{StaticResource FieldLabel}"/>
-                    <PasswordBox x:Name="HostPassword" Margin="0,0,0,10" PreviewKeyDown="HostPasswordKeyDown"/>
+                    <Grid Margin="0,0,0,10">
+                      <PasswordBox x:Name="HostPassword" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown"/>
+                      <TextBox x:Name="HostPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" TextChanged="HostPasswordVisibleChanged"/>
+                      <ToggleButton x:Name="HostPasswordReveal" Style="{StaticResource RevealToggle}" Content="보기" ToolTip="비밀번호 보기" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Checked="HostPasswordRevealChanged" Unchecked="HostPasswordRevealChanged"/>
+                    </Grid>
                     <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
                   </StackPanel>
                   <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>

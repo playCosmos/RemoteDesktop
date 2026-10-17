@@ -94,7 +94,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel x:Name="SessionActions" Orientation="Horizontal">
               <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
-              <ComboBox x:Name="DisplayList" Width="156" Visibility="Collapsed" IsEnabled="False" SelectionChanged="DisplayChanged" DropDownClosed="DisplayListClosed" DisplayMemberPath="Name" Margin="8,0,0,0"/>
+              <ComboBox x:Name="DisplayList" Width="248" Visibility="Collapsed" IsEnabled="False" SelectionChanged="DisplayChanged" DropDownClosed="DisplayListClosed" DisplayMemberPath="Label" Margin="8,0,0,0"/>
               <Button x:Name="SessionMenuButton" Content="조작" IsEnabled="False" Click="OpenSessionMenu" Margin="8,0,0,0">
                 <Button.ContextMenu>
                   <ContextMenu x:Name="SessionMenu" Closed="SessionMenuClosed">

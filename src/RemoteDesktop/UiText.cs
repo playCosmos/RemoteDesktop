@@ -382,6 +382,60 @@ public static class UiText
         return label == null ? "다른 모니터로 바꾸는 중…" : label + " 화면으로 바꾸는 중…";
     }
 
+    public readonly record struct MonitorSpot(int Left, int Top, int Width, int Height);
+
+    public static string DisplayPlace(bool entireDesktop, int left, int top, int width, int height, IReadOnlyList<MonitorSpot> monitors)
+    {
+        if (entireDesktop || monitors == null || monitors.Count <= 1 || width <= 0 || height <= 0) return "";
+        var centers = monitors.Where(m => m.Width > 0 && m.Height > 0).Select(m => (X: m.Left + m.Width / 2.0, Y: m.Top + m.Height / 2.0)).ToArray();
+        if (centers.Length <= 1) return "";
+        var minX = centers.Min(c => c.X);
+        var maxX = centers.Max(c => c.X);
+        var minY = centers.Min(c => c.Y);
+        var maxY = centers.Max(c => c.Y);
+        var spanX = maxX - minX;
+        var spanY = maxY - minY;
+        var cx = left + width / 2.0;
+        var cy = top + height / 2.0;
+        string? x = null;
+        string? y = null;
+        if (spanX >= 80 && spanX >= spanY)
+        {
+            var t = (cx - minX) / spanX;
+            x = t < 0.34 ? "왼쪽" : t > 0.66 ? "오른쪽" : "가운데";
+        }
+        if (spanY >= 80 && spanY >= spanX * 0.35)
+        {
+            var t = (cy - minY) / spanY;
+            y = t < 0.34 ? "위" : t > 0.66 ? "아래" : "중간";
+        }
+        if (x != null && y != null)
+        {
+            if (x == "가운데" && y == "중간") return "가운데";
+            return x + " " + y;
+        }
+        return x ?? y ?? "";
+    }
+
+    public static string DisplayChoice(string? name, string? place, int width, int height, bool primary, bool entireDesktop)
+    {
+        var size = width > 0 && height > 0 ? width + "×" + height : null;
+        if (entireDesktop)
+        {
+            var all = Blank(name) ?? "전체 모니터";
+            return size == null ? all : all + " · " + size;
+        }
+        var side = Blank(place);
+        if (side == null)
+        {
+            var fallback = Blank(name);
+            if (fallback == null) return size ?? "";
+            return size == null ? fallback : fallback + " · " + size;
+        }
+        var head = primary ? side + " · 기본" : side;
+        return size == null ? head : head + " · " + size;
+    }
+
     public static string ConnectionFailure(Exception exception, bool duringSession)
     {
         for (var current = exception; current != null; current = current.InnerException)

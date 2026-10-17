@@ -1518,11 +1518,11 @@ public partial class MainWindow
 
         private string DescribeSession()
         {
-            var display = window.DisplayList.SelectedItem as RemoteDisplay;
+            var row = window.DisplayList.SelectedItem as MonitorRow;
             var resolution = window.ScreenImage.Source is BitmapSource bitmap ? bitmap.PixelWidth + "×" + bitmap.PixelHeight : "수신 전";
             var measured = lastFrameBytes > 0;
             return "대상: " + lastConnection.Address
-                + "\n모니터: " + (display?.Name ?? "선택 안 됨")
+                + "\n모니터: " + (string.IsNullOrWhiteSpace(row?.Label) ? "선택 안 됨" : row!.Label)
                 + "\n수신 해상도: " + resolution
                 + "\n요청 화질: " + QualityLabel(frameQuality) + " (" + frameQuality + ")"
                 + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) + " (" + lastFrameQuality + ")" : "측정 전")
@@ -1573,8 +1573,13 @@ public partial class MainWindow
             var displays = await remote.Displays() ?? [];
             if (!ReferenceEquals(client, remote)) return;
             var wanted = selectedDisplay ?? lastConnection.Display;
-            window.DisplayList.ItemsSource = displays;
-            window.DisplayList.SelectedItem = displays.FirstOrDefault(d => d.Id == wanted) ?? displays.FirstOrDefault(d => d.Primary) ?? displays.FirstOrDefault();
+            var monitors = displays.Where(d => d.Id != "all").ToArray();
+            var spots = monitors.Select(d => new UiText.MonitorSpot(d.Left, d.Top, d.Width, d.Height)).ToArray();
+            var rows = displays.Where(d => d.Id == "all").Concat(monitors.OrderBy(d => d.Top).ThenBy(d => d.Left)).Select(d => new MonitorRow(d, UiText.DisplayChoice(d.Name, UiText.DisplayPlace(d.Id == "all", d.Left, d.Top, d.Width, d.Height, spots), d.Width, d.Height, d.Primary, d.Id == "all"))).ToArray();
+            window.DisplayList.ItemsSource = rows;
+            var selected = rows.FirstOrDefault(d => d.Display.Id == wanted) ?? rows.FirstOrDefault(d => d.Display.Primary) ?? rows.FirstOrDefault();
+            window.DisplayList.SelectedItem = selected;
+            window.DisplayList.ToolTip = selected?.Label;
             window.DisplayList.Visibility = UiText.OfferMonitorChoice(displays.Length) ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -1586,20 +1591,22 @@ public partial class MainWindow
 
         public void DisplayChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (window.DisplayList.SelectedItem is not RemoteDisplay display) return;
+            if (window.DisplayList.SelectedItem is not MonitorRow row) return;
+            var display = row.Display;
             if (display.Id == selectedDisplay) return;
             Queue(new("release"));
             ClearFrame();
             if (client == null) ShowStage(null);
             else
             {
-                var notice = UiText.SwitchingDisplay(display.Name);
+                var notice = UiText.SwitchingDisplay(row.Label);
                 ShowStage(notice);
                 window.SessionStatus(notice);
             }
             renderedDisplay = null;
             selectedDisplay = display.Id;
             lastConnection.Display = display.Id;
+            window.DisplayList.ToolTip = row.Label;
             if (client != null) SaveConnection();
         }
 
@@ -1677,6 +1684,18 @@ public partial class MainWindow
             lock (suppressedSystemKeys) { remoteAltDown = false; suppressedSystemKeys.Clear(); }
             Queue(new("release"));
             UpdateInputChrome();
+        }
+
+        private sealed class MonitorRow
+        {
+            public MonitorRow(RemoteDisplay display, string label)
+            {
+                Display = display;
+                Label = label;
+            }
+
+            public RemoteDisplay Display { get; }
+            public string Label { get; }
         }
     }
 }

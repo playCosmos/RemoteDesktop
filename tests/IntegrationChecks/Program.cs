@@ -584,6 +584,11 @@ async Task ClipboardFiles()
         request.Headers.Add("X-Upload-Offset", offset.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return await site.Http.SendAsync(request);
     }
+    var idleBatch = await BeginClipboard([new ClipboardFile("idle.bin", 4)], clipBefore.Id);
+    Check(await site.Host.ExpireIdleUploads(TimeSpan.FromMinutes(2)) == 0, "a fresh clipboard upload is not expired");
+    using (var alive = await site.Http.GetAsync("clipboard/uploads/" + idleBatch + "/0")) Check(alive.IsSuccessStatusCode, "a fresh clipboard upload can still report progress");
+    Check(await site.Host.ExpireIdleUploads(TimeSpan.Zero) == 1 && !Directory.Exists(Path.Combine(site.ClipboardCache, idleBatch)), "an idle clipboard upload expires");
+    using (var dead = await site.Http.GetAsync("clipboard/uploads/" + idleBatch + "/0")) Check(dead.StatusCode == HttpStatusCode.Conflict && (await dead.Content.ReadAsStringAsync()).Contains("만료"), "an expired clipboard upload asks for a new copy");
     var clipBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
     using (var response = await SendClipboardBytes(clipBatch, payload, new string('0', 64))) Check(response.StatusCode == HttpStatusCode.BadRequest, "clipboard rejects corrupt file hash");
     using (var response = await site.Http.PostAsync("clipboard/uploads/" + clipBatch + "/commit", null)) Check(response.StatusCode == HttpStatusCode.Conflict, "partial clipboard batch cannot publish");

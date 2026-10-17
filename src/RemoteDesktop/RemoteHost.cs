@@ -23,6 +23,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private readonly ConcurrentDictionary<string, PendingOpaqueLogin> pendingOpaqueLogins = new();
     private WebApplication? app;
     private Timer? timer;
+    private int uploadExpiryBusy;
     private string? token;
     private string? sessionPeer;
     private DateTime? sessionStarted;
@@ -41,6 +42,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     public string? SessionPeer { get { lock (gate) return sessionPeer; } }
     public DateTime? SessionStartedUtc { get { lock (gate) return sessionStarted; } }
     public DateTime? SessionLastSeenUtc { get { lock (gate) return token == null ? null : lastSeen; } }
+    public Task<int> ExpireIdleUploads(TimeSpan idle) => clipboard.ExpireIdleUploads(idle);
     public RemoteHost(HostSettings settings, IFileClipboard? fileClipboard = null, string? clipboardCache = null)
     {
         this.settings = settings;
@@ -91,7 +93,16 @@ public sealed partial class RemoteHost : IAsyncDisposable
         await app.StartAsync();
         try { await clipboard.Sweep(CancellationToken.None); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
-        timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(UiText.SessionEndKind.TimedOut); } }, null, 1000, 1000);
+        timer = new Timer(_ =>
+        {
+            lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(UiText.SessionEndKind.TimedOut); }
+            if (Interlocked.Exchange(ref uploadExpiryBusy, 1) != 0) return;
+            _ = clipboard.ExpireIdleUploads(ClipboardExchange.PendingUploadIdle).ContinueWith(task =>
+            {
+                Interlocked.Exchange(ref uploadExpiryBusy, 0);
+                _ = task.Exception;
+            }, TaskScheduler.Default);
+        }, null, 1000, 1000);
         listenPort = port;
         Status?.Invoke(UiText.Listening(port));
     }

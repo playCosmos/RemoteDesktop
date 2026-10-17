@@ -15,12 +15,15 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     private byte[] imageBytes = [];
     private string htmlText = "";
     private readonly Dictionary<string, Pending> pending = [];
+    public static readonly TimeSpan PendingUploadIdle = TimeSpan.FromMinutes(2);
     private sealed class Pending(string owner, ClipboardUpload request, string directory)
     {
         public string Owner = owner;
         public ClipboardUpload Request = request;
         public string Directory = directory;
         public bool[] Complete = new bool[request.Files.Length];
+        public DateTime Touched = DateTime.UtcNow;
+        public void Touch() => Touched = DateTime.UtcNow;
     }
     private async Task<ClipboardManifest> ReadCore(string scope, CancellationToken ct)
     {
@@ -50,7 +53,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, text, image.Length, html.Length); return manifest;
     }
     public async Task<ClipboardManifest> Read(string scope, CancellationToken ct)
-    { await mutex.WaitAsync(ct); try { return await ReadCore(scope, ct); } finally { mutex.Release(); } }
+    { await mutex.WaitAsync(ct); try { ExpireIdleCore(PendingUploadIdle); return await ReadCore(scope, ct); } finally { mutex.Release(); } }
     public async Task<string> Begin(string scope, ClipboardUpload request, CancellationToken ct)
     {
         ClipboardPaths.Validate(request.Files);
@@ -59,6 +62,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         try
         {
             if ((await ReadCore(scope, ct)).Id != request.ExpectedRevision) throw new ClipboardConflictException();
+            ExpireIdleCore(PendingUploadIdle);
             if (pending.Count >= 4) throw new ArgumentException("클립보드 전송이 이미 진행 중입니다.");
             var id = Guid.NewGuid().ToString("N"); var directory = Path.Combine(cacheRoot, id); Directory.CreateDirectory(directory);
             var batch = new Pending(scope, request, directory);
@@ -153,7 +157,10 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         await mutex.WaitAsync(ct);
         try
         {
+            ExpireIdleCore(PendingUploadIdle);
             var batch = Get(scope, id);
+            try
+            {
             if (index < 0 || index >= batch.Request.Files.Length || expectedHash.Length != 64 || !expectedHash.All(Uri.IsHexDigit)) throw new ArgumentException("Invalid clipboard file");
             var file = batch.Request.Files[index];
             if (file.Directory || start < 0 || start > file.Size) throw new ArgumentException("Invalid clipboard file");
@@ -185,6 +192,8 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
                 if (corrupt && File.Exists(path)) File.Delete(path);
                 throw;
             }
+            }
+            finally { batch.Touch(); }
         }
         finally { mutex.Release(); }
     }
@@ -194,6 +203,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         try
         {
             var batch = Get(scope, id);
+            batch.Touch();
             if (index < 0 || index >= batch.Request.Files.Length) throw new ArgumentException("Invalid clipboard file");
             var file = batch.Request.Files[index];
             if (file.Directory) return 0;
@@ -207,6 +217,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         await mutex.WaitAsync(ct);
         try
         {
+            ExpireIdleCore(PendingUploadIdle);
             var batch = Get(scope, id);
             if (batch.Complete.Any(done => !done)) throw new ClipboardConflictException();
             if ((await ReadCore(scope, ct)).Id != batch.Request.ExpectedRevision) throw new ClipboardConflictException();
@@ -263,11 +274,35 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
 
     private async Task SweepCore(CancellationToken ct)
     {
+        ExpireIdleCore(PendingUploadIdle);
         var current = await clipboard.Read(ct);
         var keep = new List<string>(current.Paths);
         foreach (var batch in pending.Values) keep.Add(batch.Directory);
         try { ClipboardPaths.DeleteRetired(cacheRoot, keep); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+    public async Task<int> ExpireIdleUploads(TimeSpan idle)
+    {
+        await mutex.WaitAsync();
+        try { return ExpireIdleCore(idle); }
+        finally { mutex.Release(); }
+    }
+    private int ExpireIdleCore(TimeSpan idle)
+    {
+        var removed = 0;
+        var now = DateTime.UtcNow;
+        foreach (var pair in pending.ToArray())
+        {
+            if (now - pair.Value.Touched < idle) continue;
+            try
+            {
+                ClipboardPaths.DeleteBatch(cacheRoot, pair.Value.Directory);
+                pending.Remove(pair.Key);
+                removed++;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return removed;
     }
 }
 public sealed class ClipboardConflictException : Exception

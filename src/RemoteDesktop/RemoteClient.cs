@@ -165,14 +165,38 @@ public sealed class RemoteClient : IDisposable
                     ReportClipboard(progress, "클립보드 확인", index, leaves.Length, name, hashed, size, reported);
                 }
                 var hash = Convert.ToHexString(incremental.GetHashAndReset());
-                stream.Position = 0;
-                reported.Percent = -1;
-                var content = new StreamContent(new CountingStream(stream, sent => ReportClipboard(progress, "클립보드 전송", index, leaves.Length, name, sent, size, reported)));
-                content.Headers.ContentLength = stream.Length;
-                using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = content };
-                request.Headers.Add("X-Content-SHA256", hash);
-                using var response = await http.SendAsync(request, ct);
-                await EnsureClipboard(response);
+                long offset = 0;
+                for (var attempt = 1; attempt <= 4; attempt++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (attempt > 1)
+                    {
+                        var probed = await ClipboardReceived(id, index, ct);
+                        if (probed < offset || probed > size || (probed == offset && attempt > 2)) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
+                        offset = probed;
+                        if (offset == size) break;
+                    }
+                    stream.Position = offset;
+                    reported.Percent = -1;
+                    var action = offset > 0 ? "클립보드 이어받기" : "클립보드 전송";
+                    var content = new StreamContent(new CountingStream(stream, sent => ReportClipboard(progress, action, index, leaves.Length, name, offset + sent, size, reported)));
+                    content.Headers.ContentLength = size - offset;
+                    using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = content };
+                    request.Headers.Add("X-Content-SHA256", hash);
+                    request.Headers.Add("X-Upload-Offset", offset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    HttpResponseMessage response;
+                    try { response = await http.SendAsync(request, ct); }
+                    catch (HttpRequestException) when (attempt < 4) { continue; }
+                    using (response)
+                    {
+                        if (response.StatusCode == System.Net.HttpStatusCode.Conflict && response.Headers.TryGetValues("X-Received-Bytes", out var values) && long.TryParse(System.Linq.Enumerable.Single(values), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var received) && received > offset && received <= size)
+                        { offset = received; continue; }
+                        await EnsureClipboard(response);
+                        offset = size;
+                        break;
+                    }
+                }
+                if (offset != size) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
             }
             using var commit = await http.PostAsync($"clipboard/uploads/{id}/commit", null, ct);
             await EnsureClipboard(commit);
@@ -189,35 +213,77 @@ public sealed class RemoteClient : IDisposable
         var temporary = target + "." + Guid.NewGuid() + ".partial";
         try
         {
-            using var response = await http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, ct);
-            await EnsureClipboard(response);
-            var expectedSize = response.Content.Headers.ContentLength ?? 0;
-            var reported = -1;
-            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            await using (var output = File.Create(temporary))
-            await using (var source = await response.Content.ReadAsStreamAsync(ct))
+            long lastLength = -1;
+            for (var attempt = 1; attempt <= 4; attempt++)
             {
-                var buffer = new byte[65536]; long total = 0; int read;
-                while ((read = await source.ReadAsync(buffer, ct)) > 0)
+                ct.ThrowIfCancellationRequested();
+                var have = File.Exists(temporary) ? new FileInfo(temporary).Length : 0;
+                if (attempt > 2 && have <= lastLength) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
+                lastLength = have;
+                try
                 {
-                    total += read;
-                    if (total > RemoteHost.MaxFileBytes) throw new IOException("최대 파일 크기 초과");
-                    hash.AppendData(buffer, 0, read);
-                    await output.WriteAsync(buffer.AsMemory(0, read), ct);
-                    if (progress != null && UiText.ShouldReportProgress(reported, Percent(total, expectedSize)))
+                using var request = new HttpRequestMessage(HttpMethod.Get, path);
+                if (have > 0) request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(have, null);
+                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                    lastLength = -1;
+                    continue;
+                }
+                await EnsureClipboard(response);
+                var partial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                var start = partial ? response.Content.Headers.ContentRange?.From ?? have : 0;
+                var expectedSize = partial ? response.Content.Headers.ContentRange?.Length ?? start + (response.Content.Headers.ContentLength ?? 0) : response.Content.Headers.ContentLength ?? 0;
+                var reported = -1;
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                if (partial && File.Exists(temporary))
+                {
+                    await using var prefix = new FileStream(temporary, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                    var prefixBuffer = new byte[65536]; int prefixRead;
+                    while ((prefixRead = await prefix.ReadAsync(prefixBuffer, ct)) > 0) hash.AppendData(prefixBuffer, 0, prefixRead);
+                }
+                await using (var output = new FileStream(temporary, partial ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                await using (var source = await response.Content.ReadAsStreamAsync(ct))
+                {
+                    var buffer = new byte[65536]; long total = partial ? start : 0; int read;
+                    while ((read = await source.ReadAsync(buffer, ct)) > 0)
                     {
-                        reported = Percent(total, expectedSize);
-                        progress(total, expectedSize);
+                        total += read;
+                        if (total > RemoteHost.MaxFileBytes) throw new IOException("최대 파일 크기 초과");
+                        hash.AppendData(buffer, 0, read);
+                        await output.WriteAsync(buffer.AsMemory(0, read), ct);
+                        if (progress != null && UiText.ShouldReportProgress(reported, Percent(total, expectedSize)))
+                        {
+                            reported = Percent(total, expectedSize);
+                            progress(total, expectedSize);
+                        }
                     }
                 }
+                var expected = response.Headers.GetValues("X-Content-SHA256").Single();
+                if (!string.Equals(expected, Convert.ToHexString(hash.GetHashAndReset()), StringComparison.OrdinalIgnoreCase))
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                    throw new IOException("파일 해시 불일치");
+                }
+                File.Move(temporary, target, false);
+                return;
+                }
+                catch (HttpRequestException ex) when (attempt < 4 && !ct.IsCancellationRequested && ex.StatusCode is null or System.Net.HttpStatusCode.RequestTimeout) { continue; }
+                catch (IOException ex) when (attempt < 4 && !ct.IsCancellationRequested && ex.Message != "파일 해시 불일치" && ex.Message != "최대 파일 크기 초과") { continue; }
             }
-            var expected = response.Headers.GetValues("X-Content-SHA256").Single();
-            if (!string.Equals(expected, Convert.ToHexString(hash.GetHashAndReset()), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
-            File.Move(temporary, target, false);
+            throw new IOException("클립보드 전송을 이어받지 못했습니다.");
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Dispose() => http.Dispose();
+    private async Task<long> ClipboardReceived(string id, int index, CancellationToken ct)
+    {
+        using var response = await http.GetAsync($"clipboard/uploads/{id}/{index}", ct);
+        await EnsureClipboard(response);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        return json.GetProperty("received").GetInt64();
+    }
 
     private static async Task EnsureClipboard(HttpResponseMessage response)
     {

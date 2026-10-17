@@ -259,7 +259,7 @@ final class ClipboardFiles {
                     total+=size;
                     if(size<0 || size>1073741824L || total>4294967296L)throw new IOException("클립보드 파일 크기 제한");
                     File folder=new File(directory,Integer.toString(i)); folder.mkdirs(); File file=nestedFile(folder, name);
-                    try(OutputStream out=new FileOutputStream(file)) { api.downloadClipboard(id,i,out,bytes -> progress(bytes)); }
+                    api.downloadClipboardFile(id,i,file,bytes -> progress(bytes));
                     if(file.length()!=size)throw new IOException("파일 크기 불일치");
                     Uri.Builder builder=new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(directory.getName()).appendPath(Integer.toString(i));
                     for(String part:name.split("/", -1))builder.appendPath(part);

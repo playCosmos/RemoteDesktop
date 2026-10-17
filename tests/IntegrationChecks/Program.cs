@@ -577,6 +577,13 @@ async Task ClipboardFiles()
         using var request = new HttpRequestMessage(HttpMethod.Put, "clipboard/uploads/" + id + "/0") { Content = new ByteArrayContent(bytes) };
         request.Headers.Add("X-Content-SHA256", hash); return await site.Http.SendAsync(request);
     }
+    async Task<HttpResponseMessage> SendClipboardRange(string id, byte[] bytes, int offset, int count)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Put, "clipboard/uploads/" + id + "/0") { Content = new ByteArrayContent(bytes, offset, count) };
+        request.Headers.Add("X-Content-SHA256", Convert.ToHexString(SHA256.HashData(bytes)));
+        request.Headers.Add("X-Upload-Offset", offset.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return await site.Http.SendAsync(request);
+    }
     var clipBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
     using (var response = await SendClipboardBytes(clipBatch, payload, new string('0', 64))) Check(response.StatusCode == HttpStatusCode.BadRequest, "clipboard rejects corrupt file hash");
     using (var response = await site.Http.PostAsync("clipboard/uploads/" + clipBatch + "/commit", null)) Check(response.StatusCode == HttpStatusCode.Conflict, "partial clipboard batch cannot publish");
@@ -596,6 +603,27 @@ async Task ClipboardFiles()
     clipBefore = (await site.Http.GetFromJsonAsync<ClipboardManifest>("clipboard"))!;
     var cancelledBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
     using (var response = await site.Http.DeleteAsync("clipboard/uploads/" + cancelledBatch)) Check(response.IsSuccessStatusCode && !Directory.Exists(Path.Combine(site.ClipboardCache, cancelledBatch)), "cancel cleans staged clipboard files");
+    var resumeBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
+    var half = payload.Length / 2;
+    using (var response = await SendClipboardRange(resumeBatch, payload, 0, half)) Check(response.StatusCode == HttpStatusCode.Conflict && response.Headers.Contains("X-Received-Bytes"), "a short clipboard upload stays resumable");
+    var probed = (await site.Http.GetFromJsonAsync<JsonElement>("clipboard/uploads/" + resumeBatch + "/0"))!;
+    Check(probed.GetProperty("received").GetInt64() == half, "clipboard upload reports received bytes");
+    using (var response = await SendClipboardRange(resumeBatch, payload, half, payload.Length - half)) Check(response.IsSuccessStatusCode, "clipboard upload resumes after the received bytes");
+    string resumeId;
+    using (var response = await site.Http.PostAsync("clipboard/uploads/" + resumeBatch + "/commit", null))
+    {
+        Check(response.IsSuccessStatusCode, "a resumed clipboard upload can publish");
+        resumeId = (await response.Content.ReadFromJsonAsync<JsonElement>())!.GetProperty("id").GetString()!;
+    }
+    Check(File.ReadAllBytes((await site.Clipboard.Read(CancellationToken.None)).Paths.Single()).SequenceEqual(payload), "a resumed clipboard upload keeps every byte");
+    using (var rangeRequest = new HttpRequestMessage(HttpMethod.Get, "clipboard/" + Uri.EscapeDataString(resumeId) + "/0"))
+    {
+        rangeRequest.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(100, null);
+        using var rangeResponse = await site.Http.SendAsync(rangeRequest);
+        var suffix = await rangeResponse.Content.ReadAsByteArrayAsync();
+        Check(rangeResponse.StatusCode == HttpStatusCode.PartialContent && suffix.AsSpan().SequenceEqual(payload.AsSpan(100)) && rangeResponse.Headers.GetValues("X-Content-SHA256").Single().Equals(Convert.ToHexString(SHA256.HashData(payload)), StringComparison.OrdinalIgnoreCase), "a resumed clipboard download returns the remaining bytes and the full hash");
+    }
+    clipBefore = (await site.Http.GetFromJsonAsync<ClipboardManifest>("clipboard"))!;
     using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test", clipBefore.Id, [new("../escape.bin", 1)]))) Check(response.StatusCode == HttpStatusCode.BadRequest, "clipboard filename traversal rejected");
     using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test", clipBefore.Id, [new("oversize.bin", RemoteHost.MaxFileBytes + 1)]))) Check(response.StatusCode == HttpStatusCode.BadRequest && (await response.Content.ReadAsStringAsync()).Contains("1GiB"), "clipboard file size limit enforced before upload");
     var staleBatch = await BeginClipboard(stagedFiles, clipBefore.Id);

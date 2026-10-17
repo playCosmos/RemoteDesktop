@@ -96,8 +96,16 @@ public sealed partial class RemoteHost
         routes.MapPut("/v1/clipboard/uploads/{id}/{index:int}", async (string id, int index, HttpContext c) =>
         {
             var (scope, cancellation) = ClipboardContext(c);
-            using (cancellation) await clipboard.Receive(scope, id, index, c.Request.Body, c.Request.Headers["X-Content-SHA256"].ToString(), cancellation.Token);
+            var offsetHeader = c.Request.Headers["X-Upload-Offset"].ToString();
+            if (!string.IsNullOrEmpty(offsetHeader) && !long.TryParse(offsetHeader, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _)) throw new ArgumentException("Invalid clipboard offset");
+            var offset = string.IsNullOrEmpty(offsetHeader) ? 0 : long.Parse(offsetHeader, System.Globalization.CultureInfo.InvariantCulture);
+            using (cancellation) await clipboard.Receive(scope, id, index, c.Request.Body, c.Request.Headers["X-Content-SHA256"].ToString(), cancellation.Token, offset);
             return Results.Ok();
+        });
+        routes.MapGet("/v1/clipboard/uploads/{id}/{index:int}", async (string id, int index, HttpContext c) =>
+        {
+            var (scope, cancellation) = ClipboardContext(c);
+            using (cancellation) return Results.Ok(new { received = await clipboard.Received(scope, id, index, cancellation.Token) });
         });
         routes.MapPost("/v1/clipboard/uploads/{id}/commit", async (string id, HttpContext c) =>
         { var (scope, cancellation) = ClipboardContext(c); using (cancellation) return Results.Ok(await clipboard.Commit(scope, id, cancellation.Token)); });
@@ -110,11 +118,33 @@ public sealed partial class RemoteHost
             await using (var stream = await clipboard.Open(scope, id, index, cancellation.Token))
             {
                 var hash = await SHA256.HashDataAsync(stream, cancellation.Token); stream.Position = 0;
-                c.Response.ContentType = "application/octet-stream"; c.Response.ContentLength = stream.Length;
+                long start = 0;
+                if (TryResumeRange(c.Request.Headers.Range.ToString(), stream.Length, out var requested))
+                {
+                    if (requested < 0 || requested >= stream.Length) { c.Response.StatusCode = StatusCodes.Status416RangeNotSatisfiable; return; }
+                    if (requested > 0)
+                    {
+                        start = requested; stream.Position = start; c.Response.StatusCode = StatusCodes.Status206PartialContent;
+                        c.Response.Headers.ContentRange = "bytes " + start.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + (stream.Length - 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + stream.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                }
+                c.Response.ContentType = "application/octet-stream"; c.Response.ContentLength = stream.Length - start;
                 c.Response.Headers["X-Content-SHA256"] = Convert.ToHexString(hash);
                 await stream.CopyToAsync(c.Response.Body, cancellation.Token);
             }
         });
+    }
+
+    private static bool TryResumeRange(string header, long length, out long start)
+    {
+        start = 0;
+        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)) return false;
+        var body = header["bytes=".Length..].Trim();
+        var dash = body.IndexOf('-');
+        if (dash <= 0 || !long.TryParse(body[..dash], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out start)) return false;
+        var end = body[(dash + 1)..].Trim();
+        if (end.Length == 0) return true;
+        return long.TryParse(end, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var endByte) && length > 0 && endByte == length - 1;
     }
 
     private void MapDesktop(WebApplication routes)

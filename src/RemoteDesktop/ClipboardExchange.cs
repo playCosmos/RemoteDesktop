@@ -148,7 +148,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         finally { mutex.Release(); }
     }
     private Pending Get(string scope, string id) => pending.TryGetValue(id, out var value) && value.Owner == scope ? value : throw new ClipboardConflictException();
-    public async Task Receive(string scope, string id, int index, Stream input, string expectedHash, CancellationToken ct)
+    public async Task Receive(string scope, string id, int index, Stream input, string expectedHash, CancellationToken ct, long start = 0)
     {
         await mutex.WaitAsync(ct);
         try
@@ -156,23 +156,49 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             var batch = Get(scope, id);
             if (index < 0 || index >= batch.Request.Files.Length || expectedHash.Length != 64 || !expectedHash.All(Uri.IsHexDigit)) throw new ArgumentException("Invalid clipboard file");
             var file = batch.Request.Files[index];
-            if (file.Directory) throw new ArgumentException("Invalid clipboard file");
+            if (file.Directory || start < 0 || start > file.Size) throw new ArgumentException("Invalid clipboard file");
             var path = ClipboardPaths.FileAt(batch.Directory, index, file);
+            if (start > 0 && (!File.Exists(path) || new FileInfo(path).Length != start)) throw new ClipboardConflictException();
             batch.Complete[index] = false;
+            var corrupt = false;
             try
             {
                 using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                await using (var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                if (start > 0)
                 {
-                    var buffer = new byte[65536]; long count = 0; int n;
+                    await using var prefix = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                    var prefixBuffer = new byte[65536]; int read;
+                    while ((read = await prefix.ReadAsync(prefixBuffer, ct)) > 0) hash.AppendData(prefixBuffer, 0, read);
+                }
+                await using (var output = new FileStream(path, start == 0 ? FileMode.Create : FileMode.Append, FileAccess.Write, FileShare.None, 65536, true))
+                {
+                    var buffer = new byte[65536]; long count = start; int n;
                     while ((n = await input.ReadAsync(buffer, ct)) > 0)
                     { count += n; if (count > file.Size) throw new ArgumentException("File size mismatch"); hash.AppendData(buffer, 0, n); await output.WriteAsync(buffer.AsMemory(0, n), ct); }
-                    if (count != file.Size) throw new ArgumentException("File size mismatch");
+                    if (count != file.Size) throw new ClipboardIncompleteException(count);
                 }
-                if (!Convert.ToHexString(hash.GetHashAndReset()).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("File hash mismatch");
+                if (!Convert.ToHexString(hash.GetHashAndReset()).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) { corrupt = true; throw new ArgumentException("File hash mismatch"); }
                 batch.Complete[index] = true;
             }
-            catch { if (File.Exists(path)) File.Delete(path); throw; }
+            catch
+            {
+                if (corrupt && File.Exists(path)) File.Delete(path);
+                throw;
+            }
+        }
+        finally { mutex.Release(); }
+    }
+    public async Task<long> Received(string scope, string id, int index, CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            var batch = Get(scope, id);
+            if (index < 0 || index >= batch.Request.Files.Length) throw new ArgumentException("Invalid clipboard file");
+            var file = batch.Request.Files[index];
+            if (file.Directory) return 0;
+            var path = ClipboardPaths.FileAt(batch.Directory, index, file);
+            return File.Exists(path) ? Math.Min(new FileInfo(path).Length, file.Size) : 0;
         }
         finally { mutex.Release(); }
     }
@@ -246,3 +272,9 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
 }
 public sealed class ClipboardConflictException : Exception
 { public ClipboardConflictException() : base("클립보드가 변경되었거나 전송이 만료되었습니다. 다시 복사하세요.") { } }
+
+public sealed class ClipboardIncompleteException : Exception
+{
+    public ClipboardIncompleteException(long received) : base("전송이 아직 끝나지 않았습니다.") { Received = received; }
+    public long Received { get; }
+}

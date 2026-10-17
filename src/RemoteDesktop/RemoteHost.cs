@@ -74,6 +74,11 @@ public sealed partial class RemoteHost : IAsyncDisposable
             }
             catch (OperationCanceledException) { if (!context.Response.HasStarted) context.Response.StatusCode = 408; }
             catch (ClipboardConflictException e) { await WriteClientError(context, 409, e.Message); }
+            catch (ClipboardIncompleteException e)
+            {
+                if (!context.Response.HasStarted) context.Response.Headers["X-Received-Bytes"] = e.Received.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                await WriteClientError(context, 409, e.Message);
+            }
             catch (Exception e) when (e is ArgumentException or System.Text.Json.JsonException or BadHttpRequestException)
             { await WriteClientError(context, 400, e.Message); }
             catch (Exception) { if (!context.Response.HasStarted) context.Response.StatusCode = 500; }

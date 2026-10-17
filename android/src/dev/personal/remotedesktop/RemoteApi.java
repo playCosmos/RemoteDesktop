@@ -159,18 +159,77 @@ final class RemoteApi {
                 if(cancelled)throw new IOException("전송 취소됨");
                 MessageDigest hash=MessageDigest.getInstance("SHA-256"); byte[] buffer=new byte[65536]; int n;
                 try(InputStream input=new FileInputStream(files.get(i))) { while((n=input.read(buffer))!=-1) { if(cancelled)throw new IOException("전송 취소됨"); hash.update(buffer,0,n); } }
-                HttpsURLConnection c=open("clipboard/uploads/"+id+"/"+i,"PUT");
-                try {
-                    c.setDoOutput(true); c.setFixedLengthStreamingMode(files.get(i).length()); c.setRequestProperty("X-Content-SHA256",hex(hash.digest()));
-                    try(InputStream in=new FileInputStream(files.get(i)); OutputStream out=c.getOutputStream()) { long count=0; while((n=in.read(buffer))!=-1) { if(cancelled)throw new IOException("전송 취소됨"); out.write(buffer,0,n); count+=n; progress.update(count); } }
-                    check(c);
-                } finally { c.disconnect(); }
+                String fileHash=hex(hash.digest());
+                long offset=0; int attempt=0;
+                while(true) {
+                    if(cancelled)throw new IOException("전송 취소됨");
+                    if(attempt++>0) {
+                        if(attempt>4)throw new IOException("클립보드 전송을 이어받지 못했습니다.");
+                        long probed=receivedClipboard(id,i);
+                        if(probed<offset || probed>files.get(i).length() || probed==offset) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
+                        offset=probed;
+                        if(offset==files.get(i).length()) break;
+                    }
+                    HttpsURLConnection c=open("clipboard/uploads/"+id+"/"+i,"PUT");
+                    try {
+                        c.setDoOutput(true); c.setFixedLengthStreamingMode(files.get(i).length()-offset); c.setRequestProperty("X-Content-SHA256",fileHash); c.setRequestProperty("X-Upload-Offset",Long.toString(offset));
+                        try(InputStream in=new FileInputStream(files.get(i)); OutputStream out=c.getOutputStream()) {
+                            long skip=offset;
+                            while(skip>0) { long skipped=in.skip(skip); if(skipped<=0) { if(in.read()<0) throw new IOException("클립보드 전송을 이어받지 못했습니다."); skipped=1; } skip-=skipped; }
+                            int read; long count=offset;
+                            while((read=in.read(buffer))!=-1) { if(cancelled)throw new IOException("전송 취소됨"); out.write(buffer,0,read); count+=read; progress.update(count); }
+                        }
+                        int code=c.getResponseCode();
+                        if(code==409) {
+                            String got=c.getHeaderField("X-Received-Bytes");
+                            if(got!=null) { long received=Long.parseLong(got); if(received>offset && received<=files.get(i).length()) { offset=received; if(offset==files.get(i).length()) break; continue; } }
+                        }
+                        check(c);
+                        break;
+                    } catch(IOException e) { if(cancelled || attempt>=4) throw e; }
+                    finally { c.disconnect(); }
+                }
             }
             if(cancelled)throw new IOException("전송 취소됨");
             request("clipboard/uploads/"+id+"/commit","POST",new JSONObject()); committed=true;
         } finally { if(!committed)try { request("clipboard/uploads/"+id,"DELETE",null); } catch(Exception ignored) {} }
     }
     void downloadClipboard(String id,int index,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/"+index,out,1024L*1024*1024,progress); }
+    void downloadClipboardFile(String id,int index,File file,Progress progress) throws Exception {
+        String path="clipboard/"+URLEncoder.encode(id,"UTF-8")+"/"+index;
+        int attempt=0; long stuck=-1;
+        while(true) {
+            if(cancelled)throw new IOException("전송 취소됨");
+            long start=file.isFile()?file.length():0;
+            HttpsURLConnection c=open(path,"GET");
+            try {
+                if(start>0)c.setRequestProperty("Range","bytes="+start+"-");
+                check(c);
+                int code=c.getResponseCode(); boolean partial=code==206;
+                if(!partial && start>0) { file.delete(); start=0; }
+                MessageDigest hash=MessageDigest.getInstance("SHA-256");
+                if(partial) { try(InputStream prefix=new FileInputStream(file)) { byte[] buffer=new byte[65536]; int n; while((n=prefix.read(buffer))!=-1) hash.update(buffer,0,n); } }
+                long total=partial?start:0;
+                try(InputStream in=c.getInputStream(); OutputStream out=new FileOutputStream(file, partial)) {
+                    byte[] buffer=new byte[65536]; int n;
+                    while((n=in.read(buffer))!=-1) {
+                        if(cancelled)throw new IOException("전송 취소됨");
+                        total+=n; if(total>1024L*1024*1024)throw new IOException("최대 파일 크기 초과");
+                        hash.update(buffer,0,n); out.write(buffer,0,n); progress.update(total);
+                    }
+                }
+                if(!hex(hash.digest()).equalsIgnoreCase(c.getHeaderField("X-Content-SHA256"))) { file.delete(); throw new IOException("파일 해시 불일치"); }
+                return;
+            } catch(IOException e) {
+                long now=file.isFile()?file.length():0;
+                if(cancelled || attempt++>=3 || now<=stuck || "파일 해시 불일치".equals(e.getMessage()) || "최대 파일 크기 초과".equals(e.getMessage())) throw e;
+                stuck=now;
+            } finally { c.disconnect(); }
+        }
+    }
+    private long receivedClipboard(String id,int index) throws Exception {
+        return new JSONObject(new String(request("clipboard/uploads/"+id+"/"+index,"GET",null),"UTF-8")).getLong("received");
+    }
     void downloadClipboardImage(String id,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/image",out,16L*1024*1024,progress); }
     String downloadClipboardHtml(String id) throws Exception {
         ByteArrayOutputStream out=new ByteArrayOutputStream();

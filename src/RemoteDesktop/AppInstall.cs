@@ -94,6 +94,15 @@ public static class AppInstall
 
     public static bool ShowUserInstall(InstallScope scope) => scope == InstallScope.Portable;
     public static bool ShowMachineInstall(InstallScope scope) => scope != InstallScope.Machine;
-    public static bool ShowAutostart(InstallScope scope) => scope == InstallScope.Portable;
+    public static bool ShowAutostart(InstallScope scope) => scope is InstallScope.Portable or InstallScope.PerUser;
     public static bool ShowUninstall(InstallScope scope) => scope != InstallScope.Portable;
+
+    public static bool AutostartMatches(string? registered, string? executable)
+    {
+        if (string.IsNullOrWhiteSpace(registered) || string.IsNullOrWhiteSpace(executable)) return false;
+        var value = registered.Trim();
+        if (value.Length >= 2 && value[0] == (char)34 && value[^1] == (char)34) value = value[1..^1];
+        try { return Normalize(value).Equals(Normalize(executable), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
 }

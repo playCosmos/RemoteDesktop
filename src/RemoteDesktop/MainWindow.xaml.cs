@@ -241,6 +241,7 @@ public partial class MainWindow : Window
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
     private void InstallForUser(object sender, RoutedEventArgs e) => hostSession.InstallForUser(sender, e);
+    private void AutostartChanged(object sender, RoutedEventArgs e) => hostSession.AutostartChanged(sender, e);
     private void InstallForMachine(object sender, RoutedEventArgs e) => hostSession.InstallForMachine(sender, e);
     private void UninstallApp(object sender, RoutedEventArgs e) => hostSession.UninstallApp(sender, e);
     private void CopyFingerprint(object sender, RoutedEventArgs e) => hostSession.CopyFingerprint(sender, e);

@@ -77,6 +77,21 @@ public static class AppInstaller
         key?.DeleteValue(AppInstall.RunValueName, false);
     }
 
+    public static bool UserAutostartEnabled(string executable)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey, false);
+        return AppInstall.AutostartMatches(key?.GetValue(AppInstall.RunValueName) as string, executable);
+    }
+
+    public static void RetirePerUserInstall(string localAppData, string programsDirectory)
+    {
+        ClearUserAutostart();
+        var shortcut = AppInstall.ShortcutPath(programsDirectory);
+        if (File.Exists(shortcut)) File.Delete(shortcut);
+        var directory = AppInstall.PerUserDirectory(localAppData);
+        if (Directory.Exists(directory)) DeleteAfterExit(directory);
+    }
+
     public static void DeleteAfterExit(string directory)
     {
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);

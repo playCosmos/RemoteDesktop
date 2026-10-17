@@ -636,6 +636,7 @@ public partial class MainWindow
 
         private bool installBusy;
         private bool uninstallArmed;
+        private bool suppressAutostart;
 
         private void RefreshPlacement()
         {
@@ -644,6 +645,12 @@ public partial class MainWindow
             window.PlacementTitle.Text = UiText.PlacementTitle(scope);
             window.PlacementBody.Text = UiText.PlacementBody(scope, published);
             window.InstallAutostart.Visibility = AppInstall.ShowAutostart(scope) ? Visibility.Visible : Visibility.Collapsed;
+            if (scope == InstallScope.PerUser)
+            {
+                suppressAutostart = true;
+                window.InstallAutostart.IsChecked = AppInstaller.UserAutostartEnabled(Environment.ProcessPath ?? "");
+                suppressAutostart = false;
+            }
             window.InstallUserButton.Visibility = AppInstall.ShowUserInstall(scope) ? Visibility.Visible : Visibility.Collapsed;
             window.InstallMachineButton.Visibility = AppInstall.ShowMachineInstall(scope) ? Visibility.Visible : Visibility.Collapsed;
             window.UninstallButton.Visibility = AppInstall.ShowUninstall(scope) ? Visibility.Visible : Visibility.Collapsed;
@@ -701,10 +708,31 @@ public partial class MainWindow
                 if (elevated == null) throw new InvalidOperationException("설치 권한 창을 열지 못했습니다.");
                 await Task.Run(() => elevated.WaitForExit());
                 if (elevated.ExitCode != 0) throw new InvalidOperationException("모든 사용자 설치가 끝나지 않았습니다.");
+                try { AppInstaller.RetirePerUserInstall(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Environment.GetFolderPath(Environment.SpecialFolder.Programs)); }
+                catch (Exception ex) { window.HostNotice(UiText.RemoveFailed(ex), problem: true); }
                 AppInstaller.Relaunch(AppInstall.Executable(AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles))));
             }
             catch (Exception ex) { window.HostNotice(UiText.InstallFailed(ex), problem: true); }
             finally { installBusy = false; }
+        }
+
+        public void AutostartChanged(object sender, RoutedEventArgs e)
+        {
+            if (suppressAutostart || CurrentScope() != InstallScope.PerUser) return;
+            var executable = Environment.ProcessPath ?? "";
+            try
+            {
+                if (window.InstallAutostart.IsChecked == true) AppInstaller.SetUserAutostart(executable);
+                else AppInstaller.ClearUserAutostart();
+                window.HostNotice(window.InstallAutostart.IsChecked == true ? UiText.AutostartEnabled() : UiText.AutostartDisabled());
+            }
+            catch (Exception ex)
+            {
+                suppressAutostart = true;
+                window.InstallAutostart.IsChecked = AppInstaller.UserAutostartEnabled(executable);
+                suppressAutostart = false;
+                window.HostNotice(UiText.AutostartFailed(ex), problem: true);
+            }
         }
 
         public async void UninstallApp(object sender, RoutedEventArgs e)

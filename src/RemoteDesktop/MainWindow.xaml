@@ -225,7 +225,7 @@
               <StackPanel>
                 <TextBlock x:Name="PlacementTitle" Text="설치하지 않고 실행 중" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}"/>
                 <TextBlock x:Name="PlacementBody" Style="{StaticResource BodyText}" Margin="0,8,0,12" TextWrapping="Wrap"/>
-                <CheckBox x:Name="InstallAutostart" Content="로그인하면 접속 대기" IsChecked="True" Margin="0,0,0,12" ToolTip="이 사용자만 설치할 때, Windows에 로그인하면 접속 대기를 시작합니다."/>
+                <CheckBox x:Name="InstallAutostart" Content="로그인하면 접속 대기" IsChecked="True" Margin="0,0,0,12" Checked="AutostartChanged" Unchecked="AutostartChanged" ToolTip="이 사용자만 설치할 때 로그인 후 접속 대기를 켭니다. 설치한 뒤에는 여기서 바로 바꾸면 다음 로그인부터 적용됩니다."/>
                 <WrapPanel>
                   <Button x:Name="InstallUserButton" Content="이 사용자만 설치" Style="{StaticResource PrimaryButton}" Click="InstallForUser" Margin="0,0,8,8" ToolTip="관리자 권한 없이 시작 메뉴에 설치합니다. UAC 화면은 원격으로 보이지 않습니다."/>
                   <Button x:Name="InstallMachineButton" Content="모든 사용자에게 설치" Click="InstallForMachine" Margin="0,0,8,8" ToolTip="관리자 권한으로 설치하고 Windows 서비스가 보안 화면까지 상대 PC에 보여 줍니다."/>

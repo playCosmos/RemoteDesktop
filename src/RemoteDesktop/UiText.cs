@@ -612,6 +612,9 @@ public static class UiText
     }
 
     public static string InstallNeedsPublished() => "배포된 RemoteDesktop.exe에서만 이 PC에 설치할 수 있습니다.";
+    public static string AutostartEnabled() => "로그인하면 접속 대기를 시작합니다.";
+    public static string AutostartDisabled() => "로그인 후 자동 실행을 껐습니다.";
+    public static string AutostartFailed(Exception exception) => "자동 실행을 바꾸지 못했습니다. " + Explain(exception, "다시 시도하세요.");
     public static string InstallCancelled() => "설치를 취소했습니다.";
     public static string InstallFailed(Exception exception) => "설치하지 못했습니다. " + Explain(exception, "다시 시도하세요.");
     public static string RemoveFailed(Exception exception) => "제거하지 못했습니다. " + Explain(exception, "다시 시도하세요.");

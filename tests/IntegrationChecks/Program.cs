@@ -117,6 +117,19 @@ Check(UiText.EdgeToEdge(true, true, false) && !UiText.EdgeToEdge(true, true, tru
 Check(UiText.ShareTitle(false) == "이 PC에 접속하려면" && UiText.ShareTitle(true) == "지금은 한 대만 연결됩니다" && UiText.ShareHint(false).Contains("수락 없이") && UiText.ShareHint(true).StartsWith("이미 다른 기기가 연결되어 있습니다."), "an occupied host says another device cannot connect");
 Check(!UiText.RemotePointer(0, false) && !UiText.RemotePointer(20, false) && UiText.RemotePointer(20.1, false) && UiText.RemotePointer(0, true), "the toolbar strip does not move the remote pointer unless a drag is captured");
 Check(UiText.RemoteButtonRelease(true) && !UiText.RemoteButtonRelease(false) && !UiText.RemotePointer(8, false), "the toolbar does not release or scroll a remote button unless a drag is captured");
+Check(UiText.JpegFullColor(75) && UiText.JpegFullColor(55) && !UiText.JpegFullColor(40) && !UiText.JpegFullColor(25), "normal picture quality keeps full color");
+Check(UiText.CrispPicture(1) && UiText.CrispPicture(2.04) && !UiText.CrispPicture(0.67) && !UiText.CrispPicture(1.4), "a picture near its own size stays crisp");
+using (var picture = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+{
+    using (var graphics = System.Drawing.Graphics.FromImage(picture)) graphics.Clear(System.Drawing.Color.FromArgb(255, 220, 16, 24));
+    var sharp = ScreenJpeg.Encode(picture, 75);
+    var small = ScreenJpeg.Encode(picture, 25);
+    Check(sharp.Length > 4 && sharp[0] == 0xFF && sharp[1] == 0xD8 && ScreenJpeg.Chroma(sharp) == 444, "normal quality keeps red and blue samples");
+    Check(small[0] == 0xFF && small[1] == 0xD8 && ScreenJpeg.Chroma(small) == 420, "the lowest quality saves bandwidth");
+    using var decoded = new System.Drawing.Bitmap(new MemoryStream(sharp));
+    var pixel = decoded.GetPixel(16, 16);
+    Check(pixel.R > 160 && pixel.R > pixel.G + 60 && pixel.R > pixel.B + 60, "a red screen stays red after compression");
+}
 Check(UiText.HostPresence(true, true) == "LiveBrush" && UiText.HostPresence(false, true) == "AccentBrush" && UiText.HostPresence(false, false) == "MutedBrush", "the host dot distinguishes a connected client from waiting");
 Check(!UiText.HostShowsQuiet(TimeSpan.FromSeconds(4.9)) && UiText.HostShowsQuiet(TimeSpan.FromSeconds(5)) && UiText.HostPresence(true, true, true) == "DangerBrush", "the host marks a client quiet when a new login may replace it");
 Check(UiText.ElapsedClock(TimeSpan.FromSeconds(5)) == "00:05" && UiText.ElapsedClock(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "2:04:09", "elapsed time stays compact");

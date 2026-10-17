@@ -227,6 +227,15 @@ public static class UiText
 
     public static bool RemoteButtonRelease(bool captured) => captured;
 
+    public static bool JpegFullColor(int quality) => quality >= 55;
+
+    public static bool CrispPicture(double deviceScale)
+    {
+        if (!double.IsFinite(deviceScale) || deviceScale <= 0) return false;
+        var whole = Math.Round(deviceScale);
+        return whole is >= 1 and <= 3 && Math.Abs(deviceScale - whole) <= 0.08;
+    }
+
     public static string HostPresence(bool clientConnected, bool serverLive, bool quiet = false)
         => clientConnected ? (quiet ? "DangerBrush" : "LiveBrush") : serverLive ? "AccentBrush" : "MutedBrush";
 

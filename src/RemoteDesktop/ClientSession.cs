@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace RemoteDesktop;
@@ -98,6 +99,7 @@ public partial class MainWindow
             if (lastConnection.OpenHostTab) window.ServerTab.IsSelected = true;
             window.StateChanged += (_, _) => NoteViewerWatch();
             NoteViewerWatch();
+            window.ScreenImage.SizeChanged += (_, _) => ApplyPictureScaling();
             window.ClientPasswordReveal.Content = UiText.PasswordReveal(false);
             window.ClientPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
         }
@@ -990,8 +992,21 @@ public partial class MainWindow
                     window.ScreenImage.Source = frameSurface;
                 }
                 frameSurface.WritePixels(new Int32Rect(0, 0, decoded.Width, decoded.Height), decoded.Pixels, decoded.Stride, 0);
+                ApplyPictureScaling();
             }
             finally { System.Buffers.ArrayPool<byte>.Shared.Return(decoded.Pixels); }
+        }
+
+        private void ApplyPictureScaling()
+        {
+            if (window.ScreenImage.Source is not BitmapSource image || image.PixelWidth <= 0 || image.PixelHeight <= 0) return;
+            var dpi = VisualTreeHelper.GetDpi(window.ScreenImage);
+            var width = window.ScreenImage.ActualWidth * dpi.DpiScaleX;
+            var height = window.ScreenImage.ActualHeight * dpi.DpiScaleY;
+            if (width <= 0 || height <= 0) return;
+            var scale = Math.Min(width / image.PixelWidth, height / image.PixelHeight);
+            var mode = UiText.CrispPicture(scale) ? BitmapScalingMode.NearestNeighbor : BitmapScalingMode.Linear;
+            RenderOptions.SetBitmapScalingMode(window.ScreenImage, mode);
         }
 
         private void ClearFrame()

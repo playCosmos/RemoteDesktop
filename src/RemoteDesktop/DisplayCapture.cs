@@ -303,9 +303,19 @@ internal sealed class DisplayCapture
     }
     private static byte[] Encode(Bitmap bitmap, long quality)
     {
+        var level = (int)Math.Clamp(quality, 25, 90);
+        try { return ScreenJpeg.Encode(bitmap, level); }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ExternalException or Win32Exception)
+        {
+            return EncodeWithGdi(bitmap, level);
+        }
+    }
+
+    private static byte[] EncodeWithGdi(Bitmap bitmap, int quality)
+    {
         using var stream = new MemoryStream();
         using var parameters = new EncoderParameters(1);
-        parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, Math.Clamp(quality, 25, 90));
+        parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
         bitmap.Save(stream, ImageCodecInfo.GetImageEncoders().First(c => c.MimeType == "image/jpeg"), parameters);
         return stream.ToArray();
     }

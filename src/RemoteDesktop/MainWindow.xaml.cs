@@ -324,6 +324,7 @@ public partial class MainWindow : Window
     private void ClipboardReceive(object sender, RoutedEventArgs e) => clientSession.ClipboardReceive(sender, e);
     private void QualityMenuChanged(object sender, RoutedEventArgs e) => clientSession.QualityMenuChanged(sender, e);
     private void FrameRateMenuChanged(object sender, RoutedEventArgs e) => clientSession.FrameRateMenuChanged(sender, e);
+    private void ZoomMenuChanged(object sender, RoutedEventArgs e) => clientSession.ZoomMenuChanged(sender, e);
     private void ShowSessionInfo(object sender, RoutedEventArgs e) => clientSession.ShowSessionInfo(sender, e);
     private void ShowHostPage(object sender, RoutedEventArgs e) => clientSession.ShowHostPage(sender, e);
     private void CloseSessionInfo(object sender, RoutedEventArgs e) => clientSession.CloseSessionInfo(sender, e);

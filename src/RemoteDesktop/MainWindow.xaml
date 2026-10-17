@@ -112,6 +112,12 @@
                       <MenuItem Header="15 FPS" Tag="15" Click="FrameRateMenuChanged"/>
                       <MenuItem Header="30 FPS" Tag="30" Click="FrameRateMenuChanged"/>
                     </MenuItem>
+                    <MenuItem Header="화면 확대">
+                      <MenuItem Header="100%" Tag="1" Click="ZoomMenuChanged"/>
+                      <MenuItem Header="150%" Tag="1.5" Click="ZoomMenuChanged"/>
+                      <MenuItem Header="200%" Tag="2" Click="ZoomMenuChanged"/>
+                      <MenuItem Header="400%" Tag="4" Click="ZoomMenuChanged"/>
+                    </MenuItem>
                     <Separator/>
                     <MenuItem x:Name="ClipboardAutoMenu" Header="클립보드 자동 동기화" IsCheckable="True" Checked="ClipboardAutoChanged" Unchecked="ClipboardAutoChanged"/>
                     <MenuItem Header="클립보드 지금 보내기" Click="ClipboardSend"/>

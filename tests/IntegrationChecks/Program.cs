@@ -329,6 +329,17 @@ Check(UiText.ClosePrompt("10.0.0.8:45831", null) == "10.0.0.8:45831 화면을 �
 Check(UiText.ClosePrompt("10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 화면을 보고 있고, 192.168.0.2 이 PC를 보고 있습니다. 종료하고 둘 다 끊을까요?", "exit names both sessions when each side is connected");
 Check(!UiText.AskBeforeRemoteBack(true, true) && UiText.AskBeforeRemoteBack(false, true) && !UiText.AskBeforeRemoteBack(false, false) && !UiText.AskBeforeRemoteBack(true, false), "back closes the controls before it asks to drop a session");
 Check(UiText.DisconnectPrompt("10.0.0.8:45831") == "10.0.0.8:45831 화면을 보고 있습니다. 연결을 끊을까요?" && UiText.DisconnectPrompt("  ") == "원격 화면을 보고 있습니다. 연결을 끊을까요?" && UiText.DisconnectPrompt(null) == "원격 화면을 보고 있습니다. 연결을 끊을까요?" && !UiText.IsProblem(UiText.DisconnectPrompt("10.0.0.8:45831")), "leaving a remote picture asks before the session drops");
+var fullView = PictureView.Full;
+var closer = PictureZoom.At(fullView, 2, 0.25, 0.75);
+var zoomedPoint = PictureZoom.ToDisplay(closer, 0.25, 0.75);
+var panned = PictureZoom.Pan(closer, 0.2, 0);
+var restoredView = PictureZoom.At(closer, 1, 0.5, 0.5);
+var cappedView = PictureZoom.At(fullView, 9, 0.5, 0.5);
+Check(fullView.Zoom == 1 && fullView.Width == 1 && fullView.X == 0, "a picture starts at its full size");
+Check(Math.Abs(closer.Zoom - 2) < 0.001 && Math.Abs(closer.Width - 0.5) < 0.001 && Math.Abs(zoomedPoint.X - 0.25) < 0.001 && Math.Abs(zoomedPoint.Y - 0.75) < 0.001, "zoom keeps the chosen point on the whole display");
+Check(panned.X < closer.X && Math.Abs(panned.Width - closer.Width) < 0.001 && PictureZoom.CanPan(closer) && !PictureZoom.CanPan(fullView), "dragging a zoomed picture moves the view with the pointer");
+Check(restoredView.Zoom == 1 && restoredView.Width == 1 && restoredView.X == 0 && Math.Abs(cappedView.Zoom - 4) < 0.001, "picture zoom returns to the whole screen and stops at four times");
+Check(PictureZoom.Notice(restoredView) == "확대를 원래대로 되돌렸습니다." && PictureZoom.Notice(closer) == "화면을 2.0배로 확대했습니다. 휠 버튼으로 끌면 보이는 영역을 옮깁니다." && !UiText.IsProblem(PictureZoom.Notice(closer)), "zoom tells the viewer how far the picture moved");
 Check(UiText.TrayHidden(true) == "접속 대기는 계속됩니다. 아이콘을 누르면 창이 다시 열립니다." && UiText.TrayHidden(false) == "아이콘을 누르면 창이 다시 열립니다." && UiText.TrayTip(true) == "Personal Remote Desktop · 접속 대기 중" && UiText.TrayOpen() == "창 열기" && UiText.TrayExit() == "종료" && !UiText.IsProblem(UiText.TrayHidden(true)), "closing the window leaves a quiet tray hint");
 Check(WindowClose.Decide(false, false, true) == WindowClose.Result.Hide && WindowClose.Decide(true, false, true) == WindowClose.Result.Ask && WindowClose.Decide(true, true, true) == WindowClose.Result.Exit && WindowClose.Decide(true, false, false) == WindowClose.Result.Exit, "the close button hides and only exit can end a live session");
 Check(UiText.ConnectedFor(TimeSpan.FromSeconds(5)) == "연결된 지 00:05" && UiText.ConnectedFor(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7)) == "연결된 지 03:07", "connection duration stays in minutes and seconds");

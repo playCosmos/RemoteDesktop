@@ -61,6 +61,14 @@ public partial class MainWindow
         private int pacedQuality = 55;
         private int paceSlow;
         private int paceFast;
+        private readonly object viewGate = new();
+        private PictureView pictureView = PictureView.Full;
+        private PictureView sentView = PictureView.Full;
+        private bool panCandidate;
+        private bool panning;
+        private double panStartX;
+        private double panStartY;
+        private PictureView panOrigin = PictureView.Full;
         private int changedSinceHealth;
         private DateTime healthWindowStarted = DateTime.UtcNow;
         private int heldSinceHealth;
@@ -638,7 +646,10 @@ public partial class MainWindow
                     {
                         var viewerHasFrame = renderedDisplay == display && window.ScreenImage.Source != null;
                         var fetchStarted = Stopwatch.GetTimestamp();
-                        frame = await remote.FrameDetailed(ct, display, asked, frameRate, inputEnabled, viewerHasFrame, cursorHash, !viewerHasFrame || needKeyframe);
+                        var view = CurrentView();
+                        var key = !viewerHasFrame || needKeyframe || !PictureZoom.Same(view, sentView);
+                        frame = await remote.FrameDetailed(ct, display, asked, frameRate, inputEnabled, viewerHasFrame, cursorHash, key, view.X, view.Y, view.Width, view.Height);
+                        sentView = view;
                         data = frame.Bytes;
                         transferMs = data.Length == 0 ? -1 : Math.Max(0, Stopwatch.GetElapsedTime(fetchStarted).TotalMilliseconds - frame.CaptureMilliseconds - frame.EncodeMilliseconds - frame.WaitMilliseconds);
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
@@ -758,6 +769,9 @@ public partial class MainWindow
             if (!retrying) ClearFrame();
             if (!retrying) ResetVideo();
             if (!retrying) ResetPace();
+            if (!retrying) SetView(PictureView.Full);
+            panCandidate = false;
+            panning = false;
             ShowStage(retrying ? UiText.ReconnectHold() : null);
             if (retrying) window.SessionStatus(UiText.ReconnectHold());
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -1424,15 +1438,27 @@ public partial class MainWindow
         private bool Position(MouseEventArgs e)
         {
             if (pasting) return false;
+            if (!TryPicturePoint(e, out var x, out var y)) return false;
+            var point = PictureZoom.ToDisplay(CurrentView(), x, y);
+            Queue(new("move", point.X, point.Y, Display: renderedDisplay));
+            return true;
+        }
+
+        private bool TryPicturePoint(MouseEventArgs e, out double x, out double y)
+        {
+            x = 0;
+            y = 0;
             if (window.ScreenImage.Source is not BitmapSource image) return false;
             var scale = Math.Min(window.ScreenImage.ActualWidth / image.PixelWidth, window.ScreenImage.ActualHeight / image.PixelHeight);
             var w = image.PixelWidth * scale;
             var h = image.PixelHeight * scale;
+            if (w <= 0 || h <= 0) return false;
             var p = e.GetPosition(window.ScreenImage);
-            var x = (p.X - (window.ScreenImage.ActualWidth - w) / 2) / w;
-            var y = (p.Y - (window.ScreenImage.ActualHeight - h) / 2) / h;
+            x = (p.X - (window.ScreenImage.ActualWidth - w) / 2) / w;
+            y = (p.Y - (window.ScreenImage.ActualHeight - h) / 2) / h;
             if (!window.ScreenImage.IsMouseCaptured && (x < 0 || x > 1 || y < 0 || y > 1)) return false;
-            Queue(new("move", Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), Display: renderedDisplay));
+            x = Math.Clamp(x, 0, 1);
+            y = Math.Clamp(y, 0, 1);
             return true;
         }
 
@@ -1442,6 +1468,18 @@ public partial class MainWindow
             if (client != null && stageY <= 20) ShowSessionToolbar();
             lastPointer = e.GetPosition(window.ScreenImage);
             PlaceRemoteCursor();
+            if (panCandidate)
+            {
+                if (TryPicturePoint(e, out var x, out var y))
+                {
+                    var dx = x - panStartX;
+                    var dy = y - panStartY;
+                    if (!panning && (Math.Abs(dx) > 0.01 || Math.Abs(dy) > 0.01)) panning = true;
+                    if (panning) ApplyView(PictureZoom.Pan(panOrigin, dx, dy), false);
+                }
+                e.Handled = true;
+                return;
+            }
             if (Environment.TickCount64 - lastMove < 16) return;
             lastMove = Environment.TickCount64;
             if (client != null && !UiText.RemotePointer(stageY, window.ScreenImage.IsMouseCaptured)) return;
@@ -1459,12 +1497,40 @@ public partial class MainWindow
             }
             if (!Position(e)) return;
             window.ScreenImage.CaptureMouse();
+            if (e.ChangedButton == MouseButton.Middle && PictureZoom.CanPan(CurrentView()))
+            {
+                if (!TryPicturePoint(e, out panStartX, out panStartY))
+                {
+                    window.ScreenImage.ReleaseMouseCapture();
+                    e.Handled = true;
+                    return;
+                }
+                panCandidate = true;
+                panning = false;
+                panOrigin = CurrentView();
+                e.Handled = true;
+                return;
+            }
             Queue(new("button", Code: Button(e.ChangedButton), Down: true));
             e.Handled = true;
         }
 
         public void MouseUpRemote(object sender, MouseButtonEventArgs e)
         {
+            if (e.ChangedButton == MouseButton.Middle && panCandidate)
+            {
+                var click = !panning;
+                panCandidate = false;
+                panning = false;
+                window.ScreenImage.ReleaseMouseCapture();
+                if (click && Position(e))
+                {
+                    Queue(new("button", Code: 2, Down: true));
+                    Queue(new("button", Code: 2));
+                }
+                e.Handled = true;
+                return;
+            }
             if (!UiText.RemoteButtonRelease(window.ScreenImage.IsMouseCaptured))
             {
                 e.Handled = true;
@@ -1775,6 +1841,29 @@ public partial class MainWindow
             if (client != null) window.SessionStatus("최대 프레임 속도: " + rate + " FPS");
         }
 
+        public void ZoomMenuChanged(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem selected || !double.TryParse(selected.Tag?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var zoom)) return;
+            ApplyView(PictureZoom.At(CurrentView(), zoom, 0.5, 0.5), true);
+        }
+
+        private PictureView CurrentView()
+        {
+            lock (viewGate) return pictureView;
+        }
+
+        private void SetView(PictureView next)
+        {
+            lock (viewGate) pictureView = next;
+        }
+
+        private void ApplyView(PictureView next, bool announce)
+        {
+            if (PictureZoom.Same(CurrentView(), next)) return;
+            SetView(next);
+            if (announce && client != null) window.SessionStatus(PictureZoom.Notice(next));
+        }
+
         public void ShowSessionInfo(object sender, RoutedEventArgs e)
         {
             window.SessionInfoText.Text = DescribeSession();
@@ -1822,6 +1911,7 @@ public partial class MainWindow
                 + "\n전송 화질: " + (AskedQuality() == frameQuality ? "요청과 같음" : QualityLabel(pacedQuality) + " (" + pacedQuality + ")")
                 + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) + " (" + lastFrameQuality + ")" : "측정 전")
                 + "\n최대 프레임 속도: " + frameRate + " FPS"
+                + "\n확대: " + (PictureZoom.CanPan(CurrentView()) ? CurrentView().Zoom.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "배" : "원래 크기")
                 + "\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전")
                 + "\n압축: " + (measured ? lastEncodeMilliseconds.ToString("0.0") + " ms" : "측정 전")
                 + "\n프레임 크기: " + (measured ? (lastFrameBytes / 1024.0).ToString("0") + " KB" : "측정 전")
@@ -1900,6 +1990,7 @@ public partial class MainWindow
             }
             renderedDisplay = null;
             selectedDisplay = display.Id;
+            SetView(PictureView.Full);
             lastConnection.Display = display.Id;
             window.DisplayList.ToolTip = row.Label;
             if (client != null) SaveConnection();

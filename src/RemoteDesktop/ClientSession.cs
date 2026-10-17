@@ -58,6 +58,9 @@ public partial class MainWindow
         private bool inputEnabled = true;
         private int frameQuality;
         private int frameRate;
+        private int pacedQuality = 55;
+        private int paceSlow;
+        private int paceFast;
         private int changedSinceHealth;
         private DateTime healthWindowStarted = DateTime.UtcNow;
         private int heldSinceHealth;
@@ -110,6 +113,7 @@ public partial class MainWindow
             UpdatePinSummary();
             frameQuality = Math.Clamp(lastConnection.FrameQuality, 25, 90);
             frameRate = lastConnection.FrameRate is 5 or 10 or 15 or 30 ? lastConnection.FrameRate : 15;
+            ResetPace();
             window.ClipboardAutoMenu.IsChecked = lastConnection.ClipboardAutoSync;
             ShowSessionPreset();
             RefreshRecent();
@@ -163,6 +167,7 @@ public partial class MainWindow
             UpdatePinSummary();
             if (recent.FrameQuality is >= 25 and <= 90) frameQuality = recent.FrameQuality;
             if (recent.FrameRate is 5 or 10 or 15 or 30) frameRate = recent.FrameRate;
+            ResetPace();
             if (!string.IsNullOrEmpty(recent.Display)) lastConnection.Display = recent.Display;
             ShowSessionPreset();
             FocusClientPassword();
@@ -625,22 +630,27 @@ public partial class MainWindow
                     }
                     var started = Stopwatch.GetTimestamp();
                     var display = selectedDisplay;
+                    var asked = AskedQuality();
+                    double transferMs = -1;
                     byte[] data;
                     RemoteFrame frame;
                     try
                     {
                         var viewerHasFrame = renderedDisplay == display && window.ScreenImage.Source != null;
-                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame, cursorHash, !viewerHasFrame || needKeyframe);
+                        var fetchStarted = Stopwatch.GetTimestamp();
+                        frame = await remote.FrameDetailed(ct, display, asked, frameRate, inputEnabled, viewerHasFrame, cursorHash, !viewerHasFrame || needKeyframe);
                         data = frame.Bytes;
+                        transferMs = data.Length == 0 ? -1 : Math.Max(0, Stopwatch.GetElapsedTime(fetchStarted).TotalMilliseconds - frame.CaptureMilliseconds - frame.EncodeMilliseconds - frame.WaitMilliseconds);
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
                         lastFrameReused = frame.Reused;
-                        var deliveredQuality = frame.Quality > 0 ? frame.Quality : frameQuality;
+                        var deliveredQuality = frame.Quality > 0 ? frame.Quality : asked;
                         if (deliveredQuality != lastFrameQuality)
                         {
                             lastFrameQuality = deliveredQuality;
                             var snapshot = deliveredQuality;
-                            _ = window.Dispatcher.InvokeAsync(() => AnnounceQuality(snapshot));
+                            var askedSnapshot = asked;
+                            _ = window.Dispatcher.InvokeAsync(() => AnnounceQuality(snapshot, askedSnapshot));
                         }
                         if (data.Length > 0) lastFrameBytes = data.Length;
                         var cursorFrame = frame;
@@ -650,8 +660,10 @@ public partial class MainWindow
                     }
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
+                    var wantKey = NotePace(asked, transferMs, data.Length > 0);
                     if (display != selectedDisplay) continue;
                     if (data.Length > 0) await PresentFrameAsync(data, generation, frame.Codec);
+                    if (wantKey) needKeyframe = true;
                     if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;
@@ -745,6 +757,7 @@ public partial class MainWindow
             inputBacklog.Reset();
             if (!retrying) ClearFrame();
             if (!retrying) ResetVideo();
+            if (!retrying) ResetPace();
             ShowStage(retrying ? UiText.ReconnectHold() : null);
             if (retrying) window.SessionStatus(UiText.ReconnectHold());
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -1166,11 +1179,11 @@ public partial class MainWindow
             window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate, delivered, client == null ? null : pictureCodec);
         }
 
-        private void AnnounceQuality(int quality)
+        private void AnnounceQuality(int quality, int asked)
         {
             if (client == null || quality <= 0) return;
             lastFrameQuality = quality;
-            var requested = QualityLabel(frameQuality);
+            var requested = QualityLabel(asked);
             var delivered = QualityLabel(quality);
             var notice = UiText.QualityShift(requested, announcedDelivery, delivered);
             announcedDelivery = delivered;
@@ -1178,7 +1191,43 @@ public partial class MainWindow
             if (notice != null) window.SessionStatus(notice);
         }
 
-        private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
+        private static string QualityLabel(int quality) => UiText.QualityName(quality);
+
+        private int QualityCeiling() => frameQuality is >= 25 and <= 90 ? frameQuality : 55;
+
+        private int AskedQuality()
+        {
+            var ceiling = QualityCeiling();
+            var current = pacedQuality is >= 25 and <= 90 ? pacedQuality : ceiling;
+            return Math.Min(current, ceiling);
+        }
+
+        private void ResetPace()
+        {
+            pacedQuality = QualityCeiling();
+            paceSlow = 0;
+            paceFast = 0;
+        }
+
+        private bool NotePace(int asked, double transferMs, bool picture)
+        {
+            var step = VideoCodec.Pace(QualityCeiling(), asked, transferMs, frameRate, paceSlow, paceFast, picture);
+            paceSlow = step.Slow;
+            paceFast = step.Fast;
+            if (!step.Changed) return false;
+            pacedQuality = step.Quality;
+            var ceiling = QualityCeiling();
+            var from = asked;
+            var to = step.Quality;
+            _ = window.Dispatcher.InvokeAsync(() =>
+            {
+                announcedDelivery = QualityLabel(to);
+                ShowSessionPreset();
+                var notice = UiText.PaceShift(ceiling, from, to);
+                if (!string.IsNullOrEmpty(notice)) window.SessionStatus(notice);
+            });
+            return true;
+        }
 
         private readonly record struct DecodedFrame(int Width, int Height, double DpiX, double DpiY, int Stride, byte[] Pixels);
         private enum PictureRead { None, Frame, Failed }
@@ -1699,10 +1748,12 @@ public partial class MainWindow
             frameQuality = Math.Clamp(quality, 25, 90);
             lastConnection.FrameQuality = frameQuality;
             SaveConnection();
+            ResetPace();
+            needKeyframe = true;
             announcedDelivery = null;
             if (client != null && lastFrameQuality > 0)
             {
-                AnnounceQuality(lastFrameQuality);
+                AnnounceQuality(lastFrameQuality, frameQuality);
                 if (QualityLabel(lastFrameQuality) == QualityLabel(frameQuality)) window.SessionStatus("화면 품질: " + selected.Header);
             }
             else
@@ -1718,6 +1769,8 @@ public partial class MainWindow
             frameRate = rate;
             lastConnection.FrameRate = rate;
             SaveConnection();
+            paceSlow = 0;
+            paceFast = 0;
             ShowSessionPreset();
             if (client != null) window.SessionStatus("최대 프레임 속도: " + rate + " FPS");
         }
@@ -1766,6 +1819,7 @@ public partial class MainWindow
                 + "\n모니터: " + (string.IsNullOrWhiteSpace(row?.Label) ? "선택 안 됨" : row!.Label)
                 + "\n수신 해상도: " + resolution
                 + "\n요청 화질: " + QualityLabel(frameQuality) + " (" + frameQuality + ")"
+                + "\n전송 화질: " + (AskedQuality() == frameQuality ? "요청과 같음" : QualityLabel(pacedQuality) + " (" + pacedQuality + ")")
                 + "\n서버 화질: " + (measured && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) + " (" + lastFrameQuality + ")" : "측정 전")
                 + "\n최대 프레임 속도: " + frameRate + " FPS"
                 + "\n캡처: " + (measured ? lastCaptureMilliseconds.ToString("0.0") + " ms" : "측정 전")

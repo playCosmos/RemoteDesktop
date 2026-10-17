@@ -97,6 +97,23 @@ Check(HostFirewall.Decide(firewallPlan, HostFirewall.ParseShow(firewallShown)) =
 Check(UiText.FirewallOpened(45831) == "방화벽에서 포트 45831 수신을 허용했습니다." && UiText.FirewallDeclined() == "방화벽 허용을 취소했습니다. 접속 대기는 계속됩니다." && UiText.FirewallLeft() == "방화벽은 그대로입니다. 같은 네트워크에서 접속이 안 되면 이 포트를 허용해 주세요." && !UiText.IsProblem(UiText.FirewallOpened(45831)) && !UiText.IsProblem(UiText.FirewallDeclined()) && !UiText.IsProblem(UiText.FirewallLeft()), "leaving the firewall unchanged stays quiet");
 Check(VideoCodec.Negotiate("h264", true) == "h264" && VideoCodec.Negotiate("h264", false) == "jpeg" && VideoCodec.Negotiate(null, true) == "jpeg" && VideoCodec.Negotiate("jpeg", true) == "jpeg", "h264 is used only when the client asks and the encoder is ready");
 Check(VideoCodec.Bitrate(55, 1920, 1080) == 4_000_000 && VideoCodec.Bitrate(30, 1920, 1080) == 1_500_000 && VideoCodec.Bitrate(80, 1920, 1080) == 8_000_000 && VideoCodec.Bitrate(55, 960, 540) == 1_000_000 && VideoCodec.Bitrate(90, 16, 16) == 400_000, "video bitrate follows the picture size and quality");
+var held = VideoCodec.Pace(75, 75, 10, 15, 0, 0, false);
+Check(held.Quality == 75 && held.Slow == 0 && !held.Changed, "an unchanged picture does not move the link pace");
+var late = VideoCodec.Pace(75, 75, 200, 15, 2, 4, true);
+Check(late.Changed && late.Quality == 55 && late.Slow == 0 && late.Fast == 0, "three late pictures step the requested quality down");
+var waiting = VideoCodec.Pace(75, 75, 200, 15, 1, 0, true);
+Check(!waiting.Changed && waiting.Slow == 2 && waiting.Quality == 75, "one late picture only counts toward the step");
+var middle = VideoCodec.Pace(75, 75, 50, 15, 2, 0, true);
+Check(!middle.Changed && middle.Slow == 0 && middle.Fast == 0, "a picture inside the frame interval clears the pace count");
+var early = VideoCodec.Pace(75, 55, 10, 15, 0, 7, true);
+Check(early.Changed && early.Quality == 75 && early.Fast == 0, "eight quick pictures restore the chosen quality");
+var capped = VideoCodec.Pace(30, 25, 5, 5, 0, 7, true);
+Check(capped.Quality == 30 && capped.Changed, "link pace never asks above the chosen quality");
+var floor = VideoCodec.Pace(75, 25, 400, 15, 2, 0, true);
+Check(!floor.Changed && floor.Quality == 25, "link pace stays at the lowest quality");
+var missing = VideoCodec.Pace(75, 55, double.NaN, 15, 2, 3, true);
+Check(!missing.Changed && missing.Quality == 55 && missing.Slow == 2 && missing.Fast == 3, "a missing transfer time leaves the pace alone");
+Check(UiText.PaceShift(75, 75, 55) == "화면이 밀려 화질을 낮췄습니다. 고화질 대신 균형." && UiText.PaceShift(40, 40, 30) == "화면이 밀려 화질을 더 낮췄습니다." && UiText.PaceShift(75, 55, 75) == "화면에 여유가 생겨 화질을 고화질로 되돌렸습니다." && UiText.PaceShift(75, 40, 55) == "화면에 여유가 생겨 화질을 균형으로 올렸습니다." && UiText.PaceShift(75, 55, 55) == null && !UiText.IsProblem(UiText.PaceShift(75, 75, 55)), "a paced quality change is explained once");
 Check(VideoCodec.NeedsKeyframe(0, 15, false) && VideoCodec.NeedsKeyframe(30, 15, false) && !VideoCodec.NeedsKeyframe(10, 15, false) && VideoCodec.NeedsKeyframe(1, 15, true), "a skipped or forced picture starts a new video keyframe");
 var avcc = new byte[] { 0, 0, 0, 2, 9, 16, 0, 0, 0, 1, 5 };
 var annex = VideoCodec.ToAnnexB(avcc);
@@ -801,6 +818,7 @@ async Task Capture()
     Check(repeatedFrame.Bytes[0] == 0xFF && repeatedFrame.Bytes[1] == 0xD8 && repeatedFrame.LocalCursor, "smooth capture serves a prepared frame");
     var h264Frame = await client.FrameDetailed(CancellationToken.None, null, 55, 15, true, false, null, true);
     Check(h264Frame.Codec == "h264" && h264Frame.Bytes.Length > 8 && VideoCodec.IsAnnexB(h264Frame.Bytes), "a windows frame request receives h264");
+    Check(h264Frame.WaitMilliseconds >= 0 && h264Frame.WaitMilliseconds < 10000, "a frame reports how long the host waited");
     using var h264 = new H264Decoder();
     var opened = h264.TryDecode(h264Frame.Bytes, out var h264Pixels, out var h264Width, out var h264Height);
     if (!opened)

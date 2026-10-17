@@ -80,25 +80,39 @@ final class RemoteApi {
     static final class Picture {
         final byte[] bytes;
         final String codec;
-        Picture(byte[] bytes, String codec) {
+        final double transferMs;
+        Picture(byte[] bytes, String codec, double transferMs) {
             this.bytes = bytes;
             this.codec = codec == null || codec.trim().isEmpty() ? "jpeg" : codec.trim();
+            this.transferMs = transferMs;
         }
     }
     Picture frame(String path) throws Exception {
+        long started = System.currentTimeMillis();
         HttpsURLConnection c = open(path, "GET", 15000);
         try {
             check(c);
             String codec = c.getHeaderField("X-Codec");
+            double capture = headerMillis(c.getHeaderField("X-Capture-Ms"));
+            double encode = headerMillis(c.getHeaderField("X-Encode-Ms"));
+            double wait = headerMillis(c.getHeaderField("X-Wait-Ms"));
             try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[65536]; int n;
                 while ((n = in.read(buffer)) != -1) {
                     if (out.size() + n > 32 * 1024 * 1024) throw new IOException("응답 크기 초과");
                     out.write(buffer, 0, n);
                 }
-                return new Picture(out.toByteArray(), codec);
+                byte[] bytes = out.toByteArray();
+                double spent = System.currentTimeMillis() - started;
+                double transfer = bytes.length == 0 ? -1 : Math.max(0, spent - capture - encode - wait);
+                return new Picture(bytes, codec, transfer);
             }
         } finally { c.disconnect(); }
+    }
+    private static double headerMillis(String value) {
+        if (value == null || value.isEmpty()) return 0;
+        try { return Double.parseDouble(value); }
+        catch (NumberFormatException error) { return 0; }
     }
     void login(String password) throws Exception {
         JSONObject reply = new JSONObject(new String(request("login", "POST", new JSONObject().put("password",password)), "UTF-8"));

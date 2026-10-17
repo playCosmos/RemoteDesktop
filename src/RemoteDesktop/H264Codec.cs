@@ -26,6 +26,44 @@ public static class VideoCodec
     public static bool NeedsKeyframe(int framesSinceKey, int fps, bool force)
         => force || framesSinceKey <= 0 || framesSinceKey >= Math.Max(1, fps) * 2;
 
+    public readonly record struct PaceStep(int Quality, int Slow, int Fast, bool Changed);
+
+    public static PaceStep Pace(int ceiling, int current, double transferMs, int fps, int slow, int fast, bool picture)
+    {
+        ceiling = Math.Clamp(ceiling, 25, 90);
+        current = Math.Clamp(current, 25, ceiling);
+        if (!picture || transferMs < 0 || double.IsNaN(transferMs) || double.IsInfinity(transferMs)) return new(current, slow, fast, false);
+        var rate = fps is 5 or 10 or 15 or 30 ? fps : 15;
+        var budget = 1000.0 / rate;
+        if (transferMs > budget * 1.25) { slow++; fast = 0; }
+        else if (transferMs <= budget * 0.5) { fast++; slow = 0; }
+        else slow = fast = 0;
+        if (slow >= 3 && current > 25)
+        {
+            var next = LowerQuality(current);
+            if (next < current) return new(next, 0, 0, true);
+        }
+        if (fast >= 8 && current < ceiling)
+        {
+            var next = RaiseQuality(current, ceiling);
+            if (next > current) return new(next, 0, 0, true);
+        }
+        return new(current, slow, fast, false);
+    }
+
+    private static int LowerQuality(int quality)
+    {
+        if (quality >= 70) return 55;
+        if (quality >= 50) return 40;
+        return 25;
+    }
+
+    private static int RaiseQuality(int quality, int ceiling)
+    {
+        var next = quality < 40 ? 40 : quality < 55 ? 55 : quality < 75 ? 75 : 90;
+        return Math.Min(ceiling, next);
+    }
+
     public static bool IsAnnexB(ReadOnlySpan<byte> sample)
         => sample.Length >= 4 && sample[0] == 0 && sample[1] == 0 && (sample[2] == 1 || (sample[2] == 0 && sample[3] == 1));
 

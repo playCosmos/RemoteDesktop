@@ -69,6 +69,11 @@ public final class MainActivity extends Activity {
     private boolean inputEnabled=true;
     private int frameQuality=55;
     private int frameRate=15;
+    private volatile int pacedQuality=55;
+    private volatile int paceSlow;
+    private volatile int paceFast;
+    private volatile int requestedQuality=55;
+    private volatile double lastTransferMs=-1;
     private final Object pictureGate=new Object();
     private H264Picture h264Picture;
     private volatile RemoteApi picturedSession;
@@ -154,6 +159,7 @@ public final class MainActivity extends Activity {
         address.setText(preferences.getString("address","")); pin.setText(preferences.getString("pin",""));
         frameQuality=Math.max(25,Math.min(90,preferences.getInt("frameQuality",55)));
         frameRate=validFrameRate(preferences.getInt("frameRate",15));
+        pacedQuality=frameQuality;
         touchMode=Math.max(DIRECT_TOUCH,Math.min(TRACKPAD_RIGHT_CLICK,preferences.getInt("touchMode",DIRECT_TOUCH)));
         LinearLayout actions=row(connectionPanel); button(actions,"접속", this::connect); button(actions,"종료", () -> { disconnect(); info("연결 종료됨"); });
         connectionScroll=new ScrollView(this);
@@ -231,6 +237,17 @@ public final class MainActivity extends Activity {
                 PolledFrame polled=pollFrame(api, display);
                 if(polled==null) return;
                 lastFrameMillis=SystemClock.elapsedRealtime()-started;
+                if(!polled.keep) {
+                    int[] step=LinkPace.pace(frameQuality, requestedQuality, lastTransferMs, frameRate, paceSlow, paceFast, true);
+                    paceSlow=step[1];
+                    paceFast=step[2];
+                    if(step[3]==1) {
+                        pacedQuality=step[0];
+                        needKey=true;
+                        String notice=LinkPace.notice(frameQuality, requestedQuality, step[0]);
+                        if(notice!=null) info(notice);
+                    }
+                }
                 receivedFrames++;
                 foregroundFailures=0;
                 updateHealth();
@@ -498,6 +515,9 @@ public final class MainActivity extends Activity {
             preferH264=true;
             activeCodec="H.264";
             picturedSession=null;
+            pacedQuality=frameQuality;
+            paceSlow=0;
+            paceFast=0;
         }
         closePicture();
         if(api!=null) { api.cancelled=true; if(!control.isShutdown()) control.execute(api::logout); }
@@ -749,20 +769,22 @@ public final class MainActivity extends Activity {
     }
     private void chooseQuality() {
         String[] labels=qualityLabels(); int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
-        new AlertDialog.Builder(this).setTitle("화면 품질").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameQuality=values[which]; needKey=true; preferences.edit().putInt("frameQuality",frameQuality).apply(); dialog.dismiss(); info("화면 품질: "+qualityLabels()[which]); }).setNegativeButton("취소",null).show();
+        new AlertDialog.Builder(this).setTitle("화면 품질").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameQuality=values[which]; pacedQuality=frameQuality; paceSlow=0; paceFast=0; needKey=true; preferences.edit().putInt("frameQuality",frameQuality).apply(); dialog.dismiss(); info("화면 품질: "+qualityLabels()[which]); }).setNegativeButton("취소",null).show();
     }
-    private void lowBandwidth() { frameQuality=25; frameRate=5; needKey=true; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info(preferH264 && "H.264".equals(activeCodec)?"저대역폭 모드: 품질 25 · 5 FPS":"저대역폭 모드: JPEG 25 · 5 FPS"); }
+    private void lowBandwidth() { frameQuality=25; frameRate=5; pacedQuality=25; paceSlow=0; paceFast=0; needKey=true; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info(preferH264 && "H.264".equals(activeCodec)?"저대역폭 모드: 품질 25 · 5 FPS":"저대역폭 모드: JPEG 25 · 5 FPS"); }
     private static float clamp(float value,float min,float max) { return Math.max(min,Math.min(max,value)); }
     private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; nextFrameAt=0; info("확대 초기화"); }
     private void chooseFrameRate() {
         String[] labels={"5 FPS · 저전력","10 FPS · 절약","15 FPS · 균형","30 FPS · 최대"}; int[] values={5,10,15,30}; int selected=frameRate==5?0:frameRate==10?1:frameRate==30?3:2;
-        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; nextFrameAt=0; needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
+        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; paceSlow=0; paceFast=0; nextFrameAt=0; needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
     }
     private static int validFrameRate(int rate) { return rate==5 || rate==10 || rate==15 || rate==30 ? rate : 15; }
     private void showSessionInfo() {
         String resolution=bitmap==null?"수신 전":bitmap.getWidth()+"×"+bitmap.getHeight();
         String nl=String.valueOf((char)10);
-        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
+        int asked=Math.max(25,Math.min(pacedQuality,frameQuality));
+        String paced=asked==frameQuality?"요청과 같음":Integer.toString(asked);
+        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"전송 화질: "+paced+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
     }
     private void updateHealth() {
         long now=SystemClock.elapsedRealtime(); if(now-healthWindow<1000)return;
@@ -798,8 +820,10 @@ public final class MainActivity extends Activity {
         if(picturedSession!=api) { picturedSession=api; needKey=true; }
         String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",viewX,viewY,viewWidth,viewHeight);
         boolean video=preferH264;
-        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+frameQuality+"&fps="+frameRate+"&view="+view+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
+        requestedQuality=Math.max(25,Math.min(pacedQuality,frameQuality));
+        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+frameRate+"&view="+view+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
         RemoteApi.Picture picture=api.frame(path);
+        lastTransferMs=picture.transferMs;
         if(picture.bytes.length==0) return havePicture?new PolledFrame(null,true):null;
         if(video && "h264".equalsIgnoreCase(picture.codec)) {
             Bitmap decoded;

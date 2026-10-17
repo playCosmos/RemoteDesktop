@@ -159,9 +159,13 @@ public sealed partial class RemoteHost
             var viewport = ParseViewport(c.Request.Query["view"].FirstOrDefault());
             try
             {
+                var held = System.Diagnostics.Stopwatch.StartNew();
                 var frame = desktop.CaptureDetailed(c.Request.Query["display"].FirstOrDefault(), requestedQuality, viewport.X, viewport.Y, viewport.Width, viewport.Height, requestedRate, localCursor);
+                held.Stop();
                 c.Response.Headers["X-Capture-Ms"] = frame.Timing.CaptureMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Encode-Ms"] = frame.Timing.EncodeMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+                var wait = Math.Max(0, held.Elapsed.TotalMilliseconds - frame.Timing.CaptureMilliseconds - frame.Timing.EncodeMilliseconds);
+                c.Response.Headers["X-Wait-Ms"] = wait.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Frame-Reused"] = frame.Timing.Reused ? "1" : "0";
                 c.Response.Headers["X-Jpeg-Quality"] = frame.Timing.Quality.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Secure-Desktop"] = SecureDesktop.Header(SecureDesktop.LastView);

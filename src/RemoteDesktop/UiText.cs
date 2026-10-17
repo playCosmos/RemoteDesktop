@@ -198,6 +198,26 @@ public static class UiText
         return QualityRank(delivered) < QualityRank(requested) ? QualityReduced(requested, delivered) : null;
     }
 
+    public static string QualityName(int quality)
+    {
+        var level = Math.Clamp(quality, 25, 90);
+        return level <= 40 ? "저대역폭" : level >= 70 ? "고화질" : "균형";
+    }
+
+    public static string? PaceShift(int ceiling, int previous, int next)
+    {
+        if (previous == next) return null;
+        if (next < previous)
+        {
+            var from = QualityName(ceiling);
+            var to = QualityName(next);
+            return from == to ? "화면이 밀려 화질을 더 낮췄습니다." : "화면이 밀려 화질을 낮췄습니다. " + from + " 대신 " + to + ".";
+        }
+        if (next >= ceiling) return "화면에 여유가 생겨 화질을 " + Euro(QualityName(ceiling)) + " 되돌렸습니다.";
+        var raised = QualityName(next);
+        return raised == QualityName(previous) ? "화면에 여유가 생겨 화질을 조금 올렸습니다." : "화면에 여유가 생겨 화질을 " + Euro(raised) + " 올렸습니다.";
+    }
+
     private static string Euro(string word)
     {
         if (word.Length == 0) return "로";

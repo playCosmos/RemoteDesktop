@@ -108,6 +108,16 @@ public sealed partial class RemoteHost
                 c.Response.Headers["X-Cursor-X"] = frame.CursorX.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Y"] = frame.CursorY.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Local"] = frame.LocalCursor ? "1" : "0";
+                c.Response.Headers["X-Cursor-Visible"] = frame.CursorVisible ? "1" : "0";
+                c.Response.Headers["X-Cursor-Hot-X"] = frame.CursorHotX.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                c.Response.Headers["X-Cursor-Hot-Y"] = frame.CursorHotY.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(frame.CursorHash)) c.Response.Headers["X-Cursor-Hash"] = frame.CursorHash;
+                var knownShape = c.Request.Query["shape"].FirstOrDefault();
+                if (frame.CursorVisible && frame.CursorPng is { Length: > 0 } png && !string.Equals(knownShape, frame.CursorHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    var encoded = Convert.ToBase64String(png);
+                    if (encoded.Length <= 24000) c.Response.Headers["X-Cursor-Png"] = encoded;
+                }
                 if (!RemoteClient.SendJpeg(c.Request.Query["cached"].FirstOrDefault() == "1", frame.Timing.Reused))
                     return Results.Bytes(Array.Empty<byte>(), "image/jpeg");
                 return Results.Bytes(frame.Bytes, "image/jpeg");

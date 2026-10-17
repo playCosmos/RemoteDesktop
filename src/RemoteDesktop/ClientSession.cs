@@ -38,6 +38,12 @@ public partial class MainWindow
         private bool normalizingAddress;
         private bool suppressClientPasswordReveal;
         private long lastMove;
+        private string? cursorHash;
+        private BitmapSource? cursorImage;
+        private int cursorHotX;
+        private int cursorHotY;
+        private bool cursorVisible;
+        private Point? lastPointer;
         private DateTime? viewingSince;
         private string healthDetail = "연결 전";
         private System.Windows.Threading.DispatcherTimer? viewingClock;
@@ -466,7 +472,7 @@ public partial class MainWindow
                     try
                     {
                         var viewerHasFrame = renderedDisplay == display && window.ScreenImage.Source != null;
-                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame);
+                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame, cursorHash);
                         data = frame.Bytes;
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
@@ -479,6 +485,8 @@ public partial class MainWindow
                             _ = window.Dispatcher.InvokeAsync(() => AnnounceQuality(snapshot));
                         }
                         if (data.Length > 0) lastFrameBytes = data.Length;
+                        var cursorFrame = frame;
+                        _ = window.Dispatcher.InvokeAsync(() => ApplyRemoteCursor(cursorFrame));
                     }
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
@@ -1013,6 +1021,74 @@ public partial class MainWindow
         {
             frameSurface = null;
             window.ScreenImage.Source = null;
+            ClearRemoteCursor();
+        }
+
+        private void ApplyRemoteCursor(RemoteFrame frame)
+        {
+            if (!frame.LocalCursor)
+            {
+                ClearRemoteCursor();
+                return;
+            }
+            cursorVisible = frame.CursorVisible;
+            if (frame.CursorPng is { Length: > 8 } png && frame.CursorHash.Length > 0 && frame.CursorHash != cursorHash)
+            {
+                var image = new BitmapImage();
+                image.BeginInit();
+                image.CacheOption = BitmapCacheOption.OnLoad;
+                image.StreamSource = new MemoryStream(png);
+                image.EndInit();
+                image.Freeze();
+                cursorImage = image;
+                cursorHash = frame.CursorHash;
+            }
+            if (frame.CursorHash == cursorHash)
+            {
+                cursorHotX = frame.CursorHotX;
+                cursorHotY = frame.CursorHotY;
+            }
+            PlaceRemoteCursor();
+        }
+
+        private void PlaceRemoteCursor()
+        {
+            if (!cursorVisible || !inputEnabled || cursorImage == null || lastPointer == null || window.ScreenImage.Source is not BitmapSource picture)
+            {
+                window.RemoteCursor.Visibility = Visibility.Collapsed;
+                if (window.ScreenImage.Cursor == Cursors.None) window.ScreenImage.Cursor = Cursors.Arrow;
+                return;
+            }
+            var mark = CursorPlacement.Place(lastPointer.Value.X, lastPointer.Value.Y, cursorHotX, cursorHotY, cursorImage.PixelWidth, cursorImage.PixelHeight, picture.PixelWidth, picture.PixelHeight, window.ScreenImage.ActualWidth, window.ScreenImage.ActualHeight);
+            if (!mark.Shown || !inputEnabled)
+            {
+                window.RemoteCursor.Visibility = Visibility.Collapsed;
+                window.ScreenImage.Cursor = Cursors.Arrow;
+                return;
+            }
+            window.RemoteCursor.Source = cursorImage;
+            window.RemoteCursor.Width = mark.Width;
+            window.RemoteCursor.Height = mark.Height;
+            window.RemoteCursor.Margin = new Thickness(mark.Left, mark.Top, 0, 0);
+            window.RemoteCursor.Visibility = Visibility.Visible;
+            window.ScreenImage.Cursor = Cursors.None;
+        }
+
+        private void ClearRemoteCursor()
+        {
+            cursorImage = null;
+            cursorHash = null;
+            cursorVisible = false;
+            lastPointer = null;
+            window.RemoteCursor.Source = null;
+            window.RemoteCursor.Visibility = Visibility.Collapsed;
+            window.ScreenImage.Cursor = Cursors.Arrow;
+        }
+
+        public void PointerLeft(object sender, MouseEventArgs e)
+        {
+            lastPointer = null;
+            PlaceRemoteCursor();
         }
 
         private bool Position(MouseEventArgs e)
@@ -1034,6 +1110,8 @@ public partial class MainWindow
         {
             var stageY = e.GetPosition(window.Stage).Y;
             if (client != null && stageY <= 20) ShowSessionToolbar();
+            lastPointer = e.GetPosition(window.ScreenImage);
+            PlaceRemoteCursor();
             if (Environment.TickCount64 - lastMove < 16) return;
             lastMove = Environment.TickCount64;
             if (client != null && !UiText.RemotePointer(stageY, window.ScreenImage.IsMouseCaptured)) return;
@@ -1290,7 +1368,7 @@ public partial class MainWindow
             var controlling = RemoteInputFocused();
             window.Stage.BorderBrush = controlling ? (System.Windows.Media.Brush)window.FindResource("AccentBrush") : System.Windows.Media.Brushes.Transparent;
             window.Stage.BorderThickness = new Thickness(controlling ? 2 : 0);
-            window.ScreenImage.Cursor = Cursors.Arrow;
+            PlaceRemoteCursor();
             string? hint = null;
             if (client != null && !controlling)
                 hint = inputEnabled

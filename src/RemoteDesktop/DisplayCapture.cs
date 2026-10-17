@@ -190,7 +190,8 @@ internal sealed class DisplayCapture
         var x = (cursor.X - view.Left) / (double)Math.Max(1, view.Width - 1);
         var y = (cursor.Y - view.Top) / (double)Math.Max(1, view.Height - 1);
         LastTiming = timing;
-        return new CapturedFrame(bytes, timing, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), request.LocalCursor);
+        var shot = request.LocalCursor ? CursorGlyph.Capture() : default;
+        return new CapturedFrame(bytes, timing, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), request.LocalCursor, shot.Visible, shot.HotspotX, shot.HotspotY, shot.Hash ?? "", shot.Png);
     }
     private bool Unchanged(Bitmap bitmap)
     {

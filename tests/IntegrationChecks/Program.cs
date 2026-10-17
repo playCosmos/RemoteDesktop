@@ -119,6 +119,12 @@ Check(!UiText.RemotePointer(0, false) && !UiText.RemotePointer(20, false) && UiT
 Check(UiText.RemoteButtonRelease(true) && !UiText.RemoteButtonRelease(false) && !UiText.RemotePointer(8, false), "the toolbar does not release or scroll a remote button unless a drag is captured");
 Check(UiText.JpegFullColor(75) && UiText.JpegFullColor(55) && !UiText.JpegFullColor(40) && !UiText.JpegFullColor(25), "normal picture quality keeps full color");
 Check(UiText.CrispPicture(1) && UiText.CrispPicture(2.04) && !UiText.CrispPicture(0.67) && !UiText.CrispPicture(1.4), "a picture near its own size stays crisp");
+var overText = CursorPlacement.Place(40, 70, 2, 4, 16, 16, 200, 100, 200, 200);
+var outside = CursorPlacement.Place(40, 10, 2, 4, 16, 16, 200, 100, 200, 200);
+Check(overText.Shown && Math.Abs(overText.Left - 38) < 0.01 && Math.Abs(overText.Top - 66) < 0.01 && overText.Width == 16 && overText.Height == 16, "the remote cursor keeps its hotspot on the picture");
+Check(!outside.Shown, "the remote cursor hides in the empty margin");
+var shot = CursorGlyph.Capture();
+Check(!shot.Visible || (shot.Png != null && shot.Png.Length > 8 && shot.Png[0] == 0x89 && shot.Png[1] == 0x50 && shot.Hash.Length == 64 && shot.Width > 0 && shot.Height > 0), "a visible remote cursor is a png");
 using (var picture = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
 {
     using (var graphics = System.Drawing.Graphics.FromImage(picture)) graphics.Clear(System.Drawing.Color.FromArgb(255, 220, 16, 24));

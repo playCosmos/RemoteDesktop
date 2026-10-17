@@ -7,7 +7,8 @@
         <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
           <Grid>
             <TextBlock x:Name="StageHint" Text="화면을 받는 중…" Visibility="Collapsed" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+            <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" MouseLeave="PointerLeft" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
+            <Image x:Name="RemoteCursor" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Fill" IsHitTestVisible="False" Visibility="Collapsed" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
           </Grid>
         </Border>
         <Border x:Name="ConnectionControls" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="720" Margin="24" Style="{StaticResource Card}" Padding="18,16">

@@ -40,12 +40,26 @@ public sealed class InputBacklog
 public record RemoteDisplay(string Id, string Name, int Left, int Top, int Width, int Height, bool Primary)
 { public override string ToString() => Name + " · " + Width + "×" + Height; }
 public readonly record struct CaptureTiming(double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality);
-public readonly record struct CapturedFrame(byte[] Bytes, CaptureTiming Timing, double CursorX, double CursorY, bool LocalCursor);
+public readonly record struct CapturedFrame(byte[] Bytes, CaptureTiming Timing, double CursorX, double CursorY, bool LocalCursor, bool CursorVisible, int CursorHotX, int CursorHotY, string CursorHash, byte[]? CursorPng);
 
 public static class CursorPlacement
 {
     public static Point DrawPoint(int cursorX, int cursorY, Rectangle view, int hotspotX, int hotspotY)
         => new(cursorX - view.Left - hotspotX, cursorY - view.Top - hotspotY);
+
+    public readonly record struct PointerMark(double Left, double Top, double Width, double Height, bool Shown);
+
+    public static PointerMark Place(double pointerX, double pointerY, int hotX, int hotY, int cursorWidth, int cursorHeight, double imageWidth, double imageHeight, double boxWidth, double boxHeight)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0 || boxWidth <= 0 || boxHeight <= 0 || cursorWidth <= 0 || cursorHeight <= 0 || !double.IsFinite(pointerX) || !double.IsFinite(pointerY)) return new(0, 0, 0, 0, false);
+        var scale = Math.Min(boxWidth / imageWidth, boxHeight / imageHeight);
+        var drawnWidth = imageWidth * scale;
+        var drawnHeight = imageHeight * scale;
+        var offsetX = (boxWidth - drawnWidth) / 2;
+        var offsetY = (boxHeight - drawnHeight) / 2;
+        if (pointerX < offsetX || pointerY < offsetY || pointerX > offsetX + drawnWidth || pointerY > offsetY + drawnHeight) return new(0, 0, 0, 0, false);
+        return new(pointerX - hotX * scale, pointerY - hotY * scale, cursorWidth * scale, cursorHeight * scale, true);
+    }
 }
 
 public sealed class Desktop

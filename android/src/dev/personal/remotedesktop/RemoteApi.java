@@ -99,12 +99,20 @@ final class RemoteApi {
     void uploadClipboard(java.util.List<File> files, java.util.List<String> names, String origin, Progress progress) throws Exception {
         JSONArray metadata=new JSONArray(); long total=0;
         if(files.isEmpty() || files.size()>100)throw new IOException("파일 1~100개를 복사하세요.");
-        for(int i=0;i<files.size();i++) { long size=files.get(i).length(); if(size>1073741824L)throw new IOException("파일당 최대 1GiB입니다."); total+=size; metadata.put(new JSONObject().put("name",names.get(i)).put("size",size)); }
+        for(int i=0;i<files.size();i++) {
+            boolean directory=files.get(i).isDirectory(); long size=directory?0:files.get(i).length();
+            if(!directory && size>1073741824L)throw new IOException("파일당 최대 1GiB입니다.");
+            total+=size;
+            JSONObject item=new JSONObject().put("name",names.get(i)).put("size",size);
+            if(directory)item.put("directory",true);
+            metadata.put(item);
+        }
         if(total>4294967296L)throw new IOException("한 번에 최대 4GiB입니다.");
         JSONObject begin=new JSONObject(new String(request("clipboard/uploads","POST",new JSONObject().put("origin",origin).put("expectedRevision",clipboard().getString("id")).put("files",metadata)),"UTF-8"));
         String id=begin.getString("id"); boolean committed=false;
         try {
             for(int i=0;i<files.size();i++) {
+                if(files.get(i).isDirectory())continue;
                 if(cancelled)throw new IOException("전송 취소됨");
                 MessageDigest hash=MessageDigest.getInstance("SHA-256"); byte[] buffer=new byte[65536]; int n;
                 try(InputStream input=new FileInputStream(files.get(i))) { while((n=input.read(buffer))!=-1) { if(cancelled)throw new IOException("전송 취소됨"); hash.update(buffer,0,n); } }

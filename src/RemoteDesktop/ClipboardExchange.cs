@@ -25,7 +25,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         var current = await clipboard.Read(ct);
         if (owner == scope && current.Sequence == selected?.Sequence) return manifest;
         leaves = current.Paths.Length == 0 ? [] : ClipboardPaths.Collect(current.Paths);
-        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
+        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size, leaf.Directory)).ToArray();
         owner = scope; selected = current;
         ClipboardPaths.ValidateText(current.Text);
         manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, files.Length == 0 ? current.Text : ""); return manifest;
@@ -42,7 +42,14 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             if ((await ReadCore(scope, ct)).Id != request.ExpectedRevision) throw new ClipboardConflictException();
             if (pending.Count >= 4) throw new ArgumentException("클립보드 전송이 이미 진행 중입니다.");
             var id = Guid.NewGuid().ToString("N"); var directory = Path.Combine(cacheRoot, id); Directory.CreateDirectory(directory);
-            pending.Add(id, new(scope, request, directory)); return id;
+            var batch = new Pending(scope, request, directory);
+            for (var index = 0; index < request.Files.Length; index++)
+            {
+                if (!request.Files[index].Directory) continue;
+                ClipboardPaths.FileAt(directory, index, request.Files[index]);
+                batch.Complete[index] = true;
+            }
+            pending.Add(id, batch); return id;
         }
         finally { mutex.Release(); }
     }
@@ -70,7 +77,9 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         {
             var batch = Get(scope, id);
             if (index < 0 || index >= batch.Request.Files.Length || expectedHash.Length != 64 || !expectedHash.All(Uri.IsHexDigit)) throw new ArgumentException("Invalid clipboard file");
-            var file = batch.Request.Files[index]; var path = ClipboardPaths.FileAt(batch.Directory, index, file.Name);
+            var file = batch.Request.Files[index];
+            if (file.Directory) throw new ArgumentException("Invalid clipboard file");
+            var path = ClipboardPaths.FileAt(batch.Directory, index, file);
             batch.Complete[index] = false;
             try
             {
@@ -113,6 +122,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         {
             var current = await ReadCore(scope, ct);
             if (current.Id != id || index < 0 || index >= leaves.Length || index >= current.Files.Length) throw new ClipboardConflictException();
+            if (leaves[index].Directory || current.Files[index].Directory) throw new ClipboardConflictException();
             var source = leaves[index].Source;
             if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) throw new ClipboardConflictException();
             var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);

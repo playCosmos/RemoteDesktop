@@ -99,7 +99,7 @@ public sealed class RemoteClient : IDisposable
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {
         var leaves = ClipboardPaths.Collect(paths);
-        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
+        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size, leaf.Directory)).ToArray();
         using var begin = await http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload(origin, expectedRevision, files), ct);
         await EnsureClipboard(begin);
         var json = await begin.Content.ReadFromJsonAsync<JsonElement>(ct); var id = json.GetProperty("id").GetString()!;
@@ -108,6 +108,7 @@ public sealed class RemoteClient : IDisposable
         {
             for (var index = 0; index < leaves.Length; index++)
             {
+                if (leaves[index].Directory) continue;
                 var name = leaves[index].Name;
                 var size = leaves[index].Size;
                 await using var stream = new FileStream(leaves[index].Source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);

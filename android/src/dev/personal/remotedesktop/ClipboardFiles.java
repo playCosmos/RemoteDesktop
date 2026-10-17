@@ -126,7 +126,16 @@ final class ClipboardFiles {
             try {
                 ArrayList<File> files=new ArrayList<>(); ArrayList<String> names=new ArrayList<>(); long total=0;
                 for(int i=0;i<uris.size();i++) {
-                    String name=name(uris.get(i)); File target=new File(staging,Integer.toString(i)); files.add(target); names.add(name);
+                    boolean directoryEntry="1".equals(uris.get(i).getQueryParameter("directory"));
+                    File target=new File(staging,Integer.toString(i));
+                    if(directoryEntry) {
+                        java.util.List<String> parts=uris.get(i).getPathSegments();
+                        if(parts.size()<3)throw new IOException("지원하지 않는 파일 이름");
+                        String folderName=String.join("/", parts.subList(2, parts.size())); validateName(folderName);
+                        if(!target.mkdirs() && !target.isDirectory())throw new IOException("폴더를 만들지 못했습니다");
+                        files.add(target); names.add(folderName); continue;
+                    }
+                    String name=name(uris.get(i)); files.add(target); names.add(name);
                     try(InputStream in=activity.getContentResolver().openInputStream(uris.get(i)); OutputStream out=new FileOutputStream(target)) {
                         byte[] b=new byte[65536]; int n; long length=0;
                         while((n=in.read(b))!=-1) { if(api.cancelled)throw new IOException("전송 취소됨"); length+=n; total+=n; if(length>1073741824L || total>4294967296L)throw new IOException("파일당 1GiB, 전체 4GiB 제한"); out.write(b,0,n); }
@@ -151,7 +160,17 @@ final class ClipboardFiles {
                 if(files.length()==0 || files.length()>100)throw new IOException("원격 탐색기에서 파일이나 폴더를 먼저 복사하세요.");
                 ArrayList<Uri> uris=new ArrayList<>(); long total=0;
                 for(int i=0;i<files.length();i++) {
-                    String name=files.getJSONObject(i).getString("name"); validateName(name); long size=files.getJSONObject(i).getLong("size"); total+=size;
+                    String name=files.getJSONObject(i).getString("name"); validateName(name); long size=files.getJSONObject(i).getLong("size");
+                    if(files.getJSONObject(i).optBoolean("directory", false)) {
+                        if(size!=0)throw new IOException("클립보드 파일 크기 제한");
+                        File folder=new File(directory,Integer.toString(i)); File made=nestedFile(folder, name);
+                        if(!made.isDirectory() && !made.mkdirs())throw new IOException("폴더를 만들지 못했습니다");
+                        Uri.Builder builder=new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(directory.getName()).appendPath(Integer.toString(i));
+                        for(String part:name.split("/", -1))builder.appendPath(part);
+                        uris.add(builder.appendQueryParameter("directory","1").build());
+                        continue;
+                    }
+                    total+=size;
                     if(size<0 || size>1073741824L || total>4294967296L)throw new IOException("클립보드 파일 크기 제한");
                     File folder=new File(directory,Integer.toString(i)); folder.mkdirs(); File file=nestedFile(folder, name);
                     try(OutputStream out=new FileOutputStream(file)) { api.downloadClipboard(id,i,out,bytes -> progress(bytes)); }
@@ -185,8 +204,9 @@ final class ClipboardFiles {
                     if(stop.get()) { cancel=true; break; }
                     java.util.List<String> parts=uri.getPathSegments();
                     if(parts.size()<3)throw new IOException("지원하지 않는 파일 이름");
+                    boolean directoryEntry="1".equals(uri.getQueryParameter("directory"));
                     Uri dir=parent; String key="";
-                    for(int i=2;i<parts.size()-1;i++) {
+                    for(int i=2;i<(directoryEntry?parts.size():parts.size()-1);i++) {
                         if(stop.get()) { cancel=true; break; }
                         key=key+"/"+parts.get(i);
                         Uri next=dirs.get(key);
@@ -199,6 +219,7 @@ final class ClipboardFiles {
                         dir=next;
                     }
                     if(cancel) break;
+                    if(directoryEntry) continue;
                     Uri destination=DocumentsContract.createDocument(activity.getContentResolver(),dir,"application/octet-stream",parts.get(parts.size()-1));
                     if(destination==null)throw new IOException("파일 생성 실패");
                     created.add(destination);

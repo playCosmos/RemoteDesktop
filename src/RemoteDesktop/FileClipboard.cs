@@ -107,11 +107,11 @@ public sealed class WindowsFileClipboard : IFileClipboard
     }
 }
 
-public record ClipboardFile(string Name, long Size);
+public record ClipboardFile(string Name, long Size, bool Directory = false);
 public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "");
 public record ClipboardUpload(string Origin, string ExpectedRevision, ClipboardFile[] Files);
 public record ClipboardTextUpdate(string Origin, string ExpectedRevision, string Text);
-public readonly record struct ClipboardLeaf(string Source, string Name, long Size);
+public readonly record struct ClipboardLeaf(string Source, string Name, long Size, bool Directory = false);
 
 public static class ClipboardPaths
 {
@@ -125,7 +125,7 @@ public static class ClipboardPaths
         if (text is null || text.Length > MaxTextCharacters) throw new ArgumentException("클립보드 텍스트는 100만 자까지 지원합니다.");
     }
     public static ClipboardFile[] Accept(string[] paths)
-        => Collect(paths).Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
+        => Collect(paths).Select(leaf => new ClipboardFile(leaf.Name, leaf.Size, leaf.Directory)).ToArray();
 
     public static ClipboardLeaf[] Collect(string[] paths)
     {
@@ -149,7 +149,7 @@ public static class ClipboardPaths
             var top = UniqueFolder(Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), folderNames);
             var found = new List<ClipboardLeaf>();
             Walk(full, top, full, found, leaves.Count, 0);
-            if (found.Count == 0) throw new ArgumentException("빈 폴더는 복사할 수 없습니다.");
+            if (found.Count == 0) found.Add(new ClipboardLeaf(full, top, 0, true));
             found.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
             leaves.AddRange(found);
         }
@@ -168,6 +168,11 @@ public static class ClipboardPaths
         {
             if (file is null) throw new ArgumentException("Invalid clipboard file");
             Segments(file.Name);
+            if (file.Directory)
+            {
+                if (file.Size != 0) throw new ArgumentException("빈 폴더만 폴더로 복사할 수 있습니다.");
+                continue;
+            }
             if (file.Size < 0 || file.Size > RemoteHost.MaxFileBytes) throw new ArgumentException("파일당 최대 1GiB입니다.");
             total += file.Size;
         }
@@ -189,13 +194,17 @@ public static class ClipboardPaths
     }
 
     public static string FileAt(string directory, int index, string name)
+        => FileAt(directory, index, new ClipboardFile(name, 0));
+
+    public static string FileAt(string directory, int index, ClipboardFile file)
     {
-        var parts = Segments(name);
+        var parts = Segments(file.Name);
         var root = Path.GetFullPath(directory);
-        var current = parts.Length == 1 ? Path.Combine(root, "f", index.ToString()) : Path.Combine(root, "d");
-        for (var part = 0; part < parts.Length - 1; part++) current = Path.Combine(current, parts[part]);
+        var current = !file.Directory && parts.Length == 1 ? Path.Combine(root, "f", index.ToString()) : Path.Combine(root, "d");
+        var last = file.Directory ? parts.Length : parts.Length - 1;
+        for (var part = 0; part < last; part++) current = Path.Combine(current, parts[part]);
         Directory.CreateDirectory(current);
-        var full = Path.GetFullPath(Path.Combine(current, parts[^1]));
+        var full = file.Directory ? Path.GetFullPath(current) : Path.GetFullPath(Path.Combine(current, parts[^1]));
         var parent = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!full.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
         return full;
@@ -208,9 +217,9 @@ public static class ClipboardPaths
         var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < files.Length; index++)
         {
-            var stored = FileAt(directory, index, files[index].Name);
+            var stored = FileAt(directory, index, files[index]);
             var parts = Segments(files[index].Name);
-            if (parts.Length == 1) { paths.Add(stored); continue; }
+            if (!files[index].Directory && parts.Length == 1) { paths.Add(stored); continue; }
             var top = Path.GetFullPath(Path.Combine(Path.GetFullPath(directory), "d", parts[0]));
             if (folders.Add(top)) paths.Add(top);
         }
@@ -239,7 +248,12 @@ public static class ClipboardPaths
             if ((attributes & FileAttributes.ReparsePoint) != 0) throw new ArgumentException(PlainFiles());
             if ((attributes & FileAttributes.Directory) != 0)
             {
+                var before = into.Count;
                 Walk(entry, top, root, into, already, depth + 1);
+                if (into.Count != before) continue;
+                if (already + into.Count >= MaxFiles) throw new ArgumentException(TooMany());
+                var relativeDir = Path.GetRelativePath(root, entry).Replace((char)92, '/');
+                into.Add(new ClipboardLeaf(Path.GetFullPath(entry), top + "/" + relativeDir, 0, true));
                 continue;
             }
             if (already + into.Count >= MaxFiles) throw new ArgumentException(TooMany());

@@ -180,8 +180,22 @@ try
     Check(both.Any(file => file.Name == "folder/b.txt") && both.Any(file => file.Name == "folder (2)/c.txt"), "two folders with the same name stay separate");
     var emptyDir = Path.Combine(dropRoot, "empty");
     Directory.CreateDirectory(emptyDir);
-    try { ClipboardPaths.Accept([emptyDir]); Check(false, "an empty folder is rejected"); }
-    catch (ArgumentException ex) { Check(ex.Message == "빈 폴더는 복사할 수 없습니다.", "an empty folder is rejected"); }
+    var emptyFiles = ClipboardPaths.Accept([emptyDir]);
+    Check(emptyFiles.Length == 1 && emptyFiles[0].Directory && emptyFiles[0].Name == "empty" && emptyFiles[0].Size == 0, "an empty folder is copied");
+    var emptyPublished = ClipboardPaths.Publish(Path.Combine(dropRoot, "empty-stage"), emptyFiles);
+    Check(emptyPublished.Length == 1 && Directory.Exists(emptyPublished[0]) && Path.GetFileName(emptyPublished[0]) == "empty" && !Directory.EnumerateFileSystemEntries(emptyPublished[0]).Any(), "an empty folder is pasted as an empty folder");
+    var emptyAgain = ClipboardPaths.Accept(emptyPublished);
+    Check(emptyAgain.Length == 1 && emptyAgain[0].Directory && emptyAgain[0].Name == "empty", "a pasted empty folder copies again");
+    var withHole = Path.Combine(dropRoot, "with-hole");
+    Directory.CreateDirectory(Path.Combine(withHole, "keep"));
+    File.WriteAllText(Path.Combine(withHole, "keep", "a.txt"), "a");
+    Directory.CreateDirectory(Path.Combine(withHole, "keep", "blank"));
+    var hole = ClipboardPaths.Accept([withHole]);
+    Check(hole.Any(file => file.Name == "with-hole/keep/a.txt" && !file.Directory) && hole.Any(file => file.Name == "with-hole/keep/blank" && file.Directory && file.Size == 0), "an empty folder inside a copied folder is kept");
+    var holePublished = ClipboardPaths.Publish(Path.Combine(dropRoot, "hole-stage"), hole);
+    Check(holePublished.Length == 1 && Directory.Exists(Path.Combine(holePublished[0], "keep", "blank")), "a received folder keeps an empty subfolder");
+    try { ClipboardPaths.Validate([new ClipboardFile("empty", 1, true)]); Check(false, "a folder entry cannot carry bytes"); }
+    catch (ArgumentException ex) { Check(ex.Message == "빈 폴더만 폴더로 복사할 수 있습니다.", "a folder entry cannot carry bytes"); }
     try { ClipboardPaths.Validate([new ClipboardFile("folder/../../x.txt", 1)]); Check(false, "a folder path cannot escape"); }
     catch (ArgumentException ex) { Check(ex.Message == "지원하지 않는 파일 이름입니다.", "a folder path cannot escape"); }
     try { ClipboardPaths.FileAt(stage, 0, "../outside.txt"); Check(false, "a stored folder path cannot escape"); }
@@ -576,6 +590,16 @@ async Task ClipboardFiles()
     site.Clipboard.Set([]);
     using (var response = await site.Http.PostAsync("clipboard/uploads/" + staleBatch + "/commit", null)) Check(response.StatusCode == HttpStatusCode.Conflict && (await response.Content.ReadAsStringAsync()).Contains("다시 복사하세요"), "new host copy is not overwritten by an older transfer");
     using (var response = await site.Http.DeleteAsync("clipboard/uploads/" + staleBatch)) response.EnsureSuccessStatusCode();
+    var emptyRevision = (await site.Http.GetFromJsonAsync<ClipboardManifest>("clipboard"))!;
+    using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test-client", emptyRevision.Id, [new ClipboardFile("empty", 0, true)])))
+    {
+        Check(response.IsSuccessStatusCode, "an empty folder upload can start");
+        var emptyId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        using var committed = await site.Http.PostAsync("clipboard/uploads/" + emptyId + "/commit", null);
+        Check(committed.IsSuccessStatusCode, "an empty folder publishes without a file body");
+    }
+    var emptyPaths = (await site.Clipboard.Read(CancellationToken.None)).Paths;
+    Check(emptyPaths.Length == 1 && Directory.Exists(emptyPaths[0]) && !Directory.EnumerateFileSystemEntries(emptyPaths[0]).Any(), "the host clipboard receives an empty folder");
     site.Host.Disconnect();
     await Task.Delay(2100);
     using var client = new RemoteClient("localhost:" + site.Port, site.Pin);

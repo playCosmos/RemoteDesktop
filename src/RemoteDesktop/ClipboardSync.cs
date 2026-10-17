@@ -196,7 +196,8 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 var stored = new string[snapshot.Files.Length];
                 for (var index = 0; index < stored.Length; index++)
                 {
-                    var file = snapshot.Files[index]; stored[index] = ClipboardPaths.FileAt(directory, index, file.Name);
+                    var file = snapshot.Files[index]; stored[index] = ClipboardPaths.FileAt(directory, index, file);
+                    if (file.Directory) continue;
                     var reported = -1;
                     await remote.DownloadClipboard(snapshot.Id, index, stored[index], linked.Token, (sent, size) =>
                     {

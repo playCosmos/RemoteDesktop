@@ -449,6 +449,7 @@ public partial class MainWindow
                 inputBacklog.Reset();
                 lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
                 clipboardSync = new ClipboardSync(remote, new WindowsFileClipboard(), window.SessionStatus);
+                clipboardSync.TransferringChanged += ShowTransferCancel;
                 clipboardSync.AutoEnabled = window.ClipboardAutoMenu.IsChecked == true;
                 inputEnabled = true;
                 window.InputControlToggle.IsChecked = true;
@@ -850,6 +851,7 @@ public partial class MainWindow
             ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
             if (!enabled) window.DropHint.Visibility = Visibility.Collapsed;
+            if (!enabled) window.TransferCancel.Visibility = Visibility.Collapsed;
             if (!enabled) sessionNoticeTimer?.Stop();
             if (!enabled) settlingNotice = null;
             if (!enabled) secureNotice = null;
@@ -1636,7 +1638,7 @@ public partial class MainWindow
         public async void ClipboardReceive(object sender, RoutedEventArgs e)
         {
             if (clipboardSync is not { } sync || connection is null) return;
-            try { await sync.Pull(connection.Token); window.SessionStatus("상대 클립보드를 확인했습니다."); }
+            try { if (await sync.Pull(connection.Token, manual: true)) window.SessionStatus("상대 클립보드를 확인했습니다."); }
             catch (Exception ex) { window.SessionStatus("클립보드 받기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
         }
 
@@ -1668,6 +1670,13 @@ public partial class MainWindow
             try { await sync.PushFiles(paths, connection.Token); }
             catch (OperationCanceledException) { }
             catch (Exception ex) { window.SessionStatus("파일 보내기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
+        }
+
+        public void CancelTransfer(object sender, RoutedEventArgs e) => clipboardSync?.CancelTransfer();
+
+        private void ShowTransferCancel(bool busy)
+        {
+            window.Dispatcher.InvokeAsync(() => window.TransferCancel.Visibility = busy && client != null ? Visibility.Visible : Visibility.Collapsed);
         }
 
         private bool CanDropFiles(System.Windows.IDataObject data)
@@ -1734,6 +1743,7 @@ public partial class MainWindow
             window.InputControlToggle.ToolTip = UiText.InputReleaseTip();
             var alertLift = hint == null ? 16 : inputEnabled ? 76 : 58;
             window.SessionAlert.Margin = new Thickness(24, 16, 24, alertLift);
+            window.TransferCancel.Margin = new Thickness(0, 0, 0, alertLift + 48);
         }
 
         private string DescribeSession()

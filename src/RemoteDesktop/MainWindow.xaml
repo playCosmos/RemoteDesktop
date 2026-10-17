@@ -136,6 +136,7 @@
           </Grid>
         </Border>
         <Button x:Name="SessionReveal" Content="측정 중" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 조작 열기"/>
+        <Button x:Name="TransferCancel" Content="전송 취소" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,72" MinWidth="104" Click="CancelTransfer" Style="{StaticResource PrimaryButton}" ToolTip="진행 중인 파일 전송을 멈춥니다"/>
         <Border x:Name="SessionAlert" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" IsHitTestVisible="False">
           <TextBlock x:Name="SessionAlertText" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="52" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </Border>

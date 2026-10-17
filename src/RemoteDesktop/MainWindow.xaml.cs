@@ -243,6 +243,7 @@ public partial class MainWindow : Window
     private void InputControlChanged(object sender, RoutedEventArgs e) => clientSession.InputControlChanged(sender, e);
     private void ClipboardAutoChanged(object sender, RoutedEventArgs e) => clientSession.ClipboardAutoChanged(sender, e);
     private void ClipboardSend(object sender, RoutedEventArgs e) => clientSession.ClipboardSend(sender, e);
+    private void CancelTransfer(object sender, RoutedEventArgs e) => clientSession.CancelTransfer(sender, e);
     private void ClipboardReceive(object sender, RoutedEventArgs e) => clientSession.ClipboardReceive(sender, e);
     private void QualityMenuChanged(object sender, RoutedEventArgs e) => clientSession.QualityMenuChanged(sender, e);
     private void FrameRateMenuChanged(object sender, RoutedEventArgs e) => clientSession.FrameRateMenuChanged(sender, e);

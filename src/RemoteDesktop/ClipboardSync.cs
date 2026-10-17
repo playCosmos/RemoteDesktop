@@ -10,8 +10,16 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
     private uint observedLocal;
     private uint? uploadedLocal;
     private string remoteRevision = "";
+    private string declinedRevision = "";
+    private CancellationTokenSource? transfer;
     private volatile bool autoEnabled = true;
     public bool AutoEnabled { get => autoEnabled; set => autoEnabled = value; }
+    public bool Transferring { get; private set; }
+    public event Action<bool>? TransferringChanged;
+    public void CancelTransfer()
+    {
+        try { transfer?.Cancel(); } catch (ObjectDisposedException) { }
+    }
     public async Task Initialize(CancellationToken ct)
     {
         await mutex.WaitAsync(ct);
@@ -59,9 +67,22 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
             ClipboardPaths.Accept(selected.Paths);
             var snapshot = await remote.Clipboard(ct);
             ClipboardManifest result;
-            try { result = await remote.SendClipboard(selected.Paths, origin, snapshot.Id, ct, status); }
-            catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Conflict)
-            { observedLocal = selected.Sequence; throw; }
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            transfer = linked;
+            SetTransferring(true);
+            try
+            {
+                try { result = await remote.SendClipboard(selected.Paths, origin, snapshot.Id, linked.Token, status); }
+                catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Conflict)
+                { observedLocal = selected.Sequence; throw; }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    observedLocal = selected.Sequence;
+                    status(UiText.TransferCancelled());
+                    return false;
+                }
+            }
+            finally { FinishTransfer(linked); }
             observedLocal = selected.Sequence; uploadedLocal = selected.Sequence; remoteRevision = result.Id;
             status("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요."); return true;
         }
@@ -74,7 +95,20 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
         {
             ClipboardPaths.Accept(paths);
             var snapshot = await remote.Clipboard(ct);
-            var result = await remote.SendClipboard(paths, origin, snapshot.Id, ct, status);
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            transfer = linked;
+            SetTransferring(true);
+            ClipboardManifest result;
+            try
+            {
+                try { result = await remote.SendClipboard(paths, origin, snapshot.Id, linked.Token, status); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    status(UiText.TransferCancelled());
+                    return;
+                }
+            }
+            finally { FinishTransfer(linked); }
             remoteRevision = result.Id;
             status("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요.");
         }
@@ -104,31 +138,36 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
         }
         finally { mutex.Release(); }
     }
-    public async Task Pull(CancellationToken ct)
+    public async Task<bool> Pull(CancellationToken ct, bool manual = false)
     {
         await mutex.WaitAsync(ct);
         try
         {
             var snapshot = await remote.Clipboard(ct);
-            if (snapshot.Id == remoteRevision) return;
+            if (!manual && snapshot.Id == declinedRevision) return true;
+            if (manual) declinedRevision = "";
+            if (snapshot.Id == remoteRevision) return true;
             uploadedLocal = null;
-            if (snapshot.Origin == origin) { remoteRevision = snapshot.Id; return; }
+            if (snapshot.Origin == origin) { remoteRevision = snapshot.Id; return true; }
             if (snapshot.Files.Length == 0 && snapshot.Text.Length > 0)
             {
                 ClipboardPaths.ValidateText(snapshot.Text);
                 var beforeText = await local.Read(ct);
-                if (beforeText.Sequence != observedLocal) { remoteRevision = snapshot.Id; return; }
+                if (beforeText.Sequence != observedLocal) { remoteRevision = snapshot.Id; return true; }
                 var published = await local.Write([], snapshot.Text, "remote:" + snapshot.Id, beforeText.Sequence, ct);
                 remoteRevision = snapshot.Id;
                 if (published) { observedLocal = (await local.Read(ct)).Sequence; status("텍스트 클립보드 수신 완료"); }
                 else status("새로 복사한 로컬 클립보드를 유지했습니다.");
-                return;
+                return true;
             }
-            if (snapshot.Files.Length == 0) { remoteRevision = snapshot.Id; return; }
+            if (snapshot.Files.Length == 0) { remoteRevision = snapshot.Id; return true; }
             ClipboardPaths.Validate(snapshot.Files);
             var before = await local.Read(ct);
-            if (before.Sequence != observedLocal) { remoteRevision = snapshot.Id; return; }
+            if (before.Sequence != observedLocal) { remoteRevision = snapshot.Id; return true; }
             var directory = Path.Combine(cache, Guid.NewGuid().ToString("N")); var retained = false;
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            transfer = linked;
+            SetTransferring(true);
             try
             {
                 var paths = new string[snapshot.Files.Length];
@@ -136,7 +175,7 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 {
                     var file = snapshot.Files[index]; paths[index] = ClipboardPaths.FileAt(directory, index, file.Name);
                     var reported = -1;
-                    await remote.DownloadClipboard(snapshot.Id, index, paths[index], ct, (sent, size) =>
+                    await remote.DownloadClipboard(snapshot.Id, index, paths[index], linked.Token, (sent, size) =>
                     {
                         var percent = size <= 0 ? 100 : (int)Math.Clamp(sent * 100 / size, 0, 100);
                         if (!UiText.ShouldReportProgress(reported, percent)) return;
@@ -145,8 +184,8 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                     });
                     if (new FileInfo(paths[index]).Length != file.Size) throw new IOException("클립보드 파일 크기 불일치");
                 }
-                if ((await remote.Clipboard(ct)).Id != snapshot.Id) return;
-                retained = await local.Write(paths, "", "remote:" + snapshot.Id, before.Sequence, ct);
+                if ((await remote.Clipboard(linked.Token)).Id != snapshot.Id) return true;
+                retained = await local.Write(paths, "", "remote:" + snapshot.Id, before.Sequence, linked.Token);
                 remoteRevision = snapshot.Id;
                 if (retained) { observedLocal = (await local.Read(ct)).Sequence; status("클립보드 파일 수신 완료 · 이 PC의 탐색기에서 Ctrl+V로 붙여넣으세요."); }
                 else status("새로 복사한 로컬 파일을 유지했습니다.");
@@ -155,9 +194,34 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                     try { ClipboardPaths.DeleteRetired(cache, paths); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }
+                return true;
             }
-            finally { if (!retained) ClipboardPaths.DeleteBatch(cache, directory); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                declinedRevision = snapshot.Id;
+                status(UiText.TransferCancelled());
+                return false;
+            }
+            finally
+            {
+                FinishTransfer(linked);
+                if (!retained) ClipboardPaths.DeleteBatch(cache, directory);
+            }
         }
         finally { mutex.Release(); }
+    }
+
+    private void FinishTransfer(CancellationTokenSource linked)
+    {
+        if (ReferenceEquals(transfer, linked)) transfer = null;
+        linked.Dispose();
+        SetTransferring(false);
+    }
+
+    private void SetTransferring(bool value)
+    {
+        if (Transferring == value) return;
+        Transferring = value;
+        TransferringChanged?.Invoke(value);
     }
 }

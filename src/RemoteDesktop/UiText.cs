@@ -408,6 +408,7 @@ public static class UiText
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
         if (IsProblem(text) || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (text == TransferCancelled()) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 
@@ -539,6 +540,7 @@ public static class UiText
     public static string ConnectCancelLabel() => "취소";
     public static string HostStartLabel(bool starting) => starting ? ConnectCancelLabel() : "접속 대기 시작";
     public static string HostStartCancelled() => "접속 대기를 취소했습니다.";
+    public static string TransferCancelled() => "파일 전송을 취소했습니다.";
 
     public static string ConnectCancelled() => "접속을 취소했습니다.";
 

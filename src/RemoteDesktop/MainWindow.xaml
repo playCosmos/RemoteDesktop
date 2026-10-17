@@ -190,6 +190,13 @@
                       <TextBox x:Name="HostPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="HostPasswordVisibleChanged"/>
                       <ToggleButton x:Name="HostPasswordReveal" Style="{StaticResource RevealToggle}" Content="보기" ToolTip="비밀번호 보기" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Checked="HostPasswordRevealChanged" Unchecked="HostPasswordRevealChanged"/>
                     </Grid>
+                    <StackPanel x:Name="HostPasswordConfirmPanel" Visibility="Collapsed">
+                      <TextBlock Text="비밀번호 확인" Style="{StaticResource FieldLabel}"/>
+                      <Grid Margin="0,0,0,10">
+                        <PasswordBox x:Name="HostPasswordConfirm" Padding="10,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock"/>
+                        <TextBox x:Name="HostPasswordConfirmVisible" Visibility="Collapsed" Padding="10,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="HostPasswordConfirmVisibleChanged"/>
+                      </Grid>
+                    </StackPanel>
                     <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
                   </StackPanel>
                   <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>

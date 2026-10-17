@@ -205,7 +205,9 @@ public partial class MainWindow
             noticeTimer.Start();
         }
 
-        private void ClearNotice(object? sender, EventArgs e)
+        private void ClearNotice(object? sender, EventArgs e) => DismissNotice();
+
+        private void DismissNotice()
         {
             noticeTimer?.Stop();
             window.HostNoticeText.Text = "";
@@ -276,6 +278,7 @@ public partial class MainWindow
                 window.PasswordEditor.Visibility = changingPassword ? Visibility.Visible : Visibility.Collapsed;
                 window.ChangePasswordButton.Visibility = Visibility.Visible;
             }
+            window.HostPasswordConfirmPanel.Visibility = !settings.HasPassword || (settings.HasOpaqueIdentity && changingPassword) ? Visibility.Visible : Visibility.Collapsed;
             window.PasswordEditor.IsEnabled = host == null && !hostStarting;
             ClearHostPassword();
         }
@@ -287,6 +290,7 @@ public partial class MainWindow
             window.PasswordEditor.Visibility = Visibility.Visible;
             window.HostPasswordInstruction.Text = changingPassword ? "새 접속 비밀번호 (8자 이상)" : "현재 서버 비밀번호 (기존 비밀번호 유지)";
             window.SaveHostPasswordButton.Content = changingPassword ? "새 비밀번호 저장" : "보안 등록";
+            window.HostPasswordConfirmPanel.Visibility = changingPassword ? Visibility.Visible : Visibility.Collapsed;
             FocusHostPassword();
         }
 
@@ -294,13 +298,14 @@ public partial class MainWindow
         {
             if (host != null || hostStarting) { window.HostStatus("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
             var confirming = settings.HasPassword && !settings.HasOpaqueIdentity;
-            var setup = UiText.CheckHostSetup(window.HostPort.Text, CurrentHostPassword(), passwordRequired: true, confirming);
+            var setup = UiText.CheckHostSetup(window.HostPort.Text, CurrentHostPassword(), passwordRequired: true, confirming, CurrentHostPasswordConfirm(), matchRequired: !confirming);
             if (setup.Problem != null)
             {
                 window.HostNotice(setup.Problem, problem: true);
                 FocusHostSetup(setup.Field);
                 return;
             }
+            DismissNotice();
             try
             {
                 if (settings.HasPassword && !settings.HasOpaqueIdentity)
@@ -339,20 +344,27 @@ public partial class MainWindow
             {
                 suppressHostPasswordReveal = true;
                 window.HostPasswordVisible.Text = window.HostPassword.Password;
+                window.HostPasswordConfirmVisible.Text = window.HostPasswordConfirm.Password;
                 suppressHostPasswordReveal = false;
                 window.HostPassword.Visibility = Visibility.Collapsed;
                 window.HostPasswordVisible.Visibility = Visibility.Visible;
+                window.HostPasswordConfirm.Visibility = Visibility.Collapsed;
+                window.HostPasswordConfirmVisible.Visibility = Visibility.Visible;
                 window.HostPasswordVisible.CaretIndex = window.HostPasswordVisible.Text.Length;
                 if (window.HostPasswordVisible.IsEnabled) window.HostPasswordVisible.Focus();
             }
             else
             {
                 window.HostPassword.Password = window.HostPasswordVisible.Text;
+                window.HostPasswordConfirm.Password = window.HostPasswordConfirmVisible.Text;
                 suppressHostPasswordReveal = true;
                 window.HostPasswordVisible.Clear();
+                window.HostPasswordConfirmVisible.Clear();
                 suppressHostPasswordReveal = false;
                 window.HostPasswordVisible.Visibility = Visibility.Collapsed;
                 window.HostPassword.Visibility = Visibility.Visible;
+                window.HostPasswordConfirmVisible.Visibility = Visibility.Collapsed;
+                window.HostPasswordConfirm.Visibility = Visibility.Visible;
                 if (window.HostPassword.IsEnabled) window.HostPassword.Focus();
             }
         }
@@ -363,11 +375,24 @@ public partial class MainWindow
             window.HostPassword.Password = window.HostPasswordVisible.Text;
         }
 
+        public void HostPasswordConfirmVisibleChanged(object sender, TextChangedEventArgs e)
+        {
+            if (suppressHostPasswordReveal || window.HostPasswordReveal.IsChecked != true) return;
+            window.HostPasswordConfirm.Password = window.HostPasswordConfirmVisible.Text;
+        }
+
         private string CurrentHostPassword()
         {
             if (window.HostPasswordReveal.IsChecked == true)
                 window.HostPassword.Password = window.HostPasswordVisible.Text;
             return window.HostPassword.Password;
+        }
+
+        private string CurrentHostPasswordConfirm()
+        {
+            if (window.HostPasswordReveal.IsChecked == true)
+                window.HostPasswordConfirm.Password = window.HostPasswordConfirmVisible.Text;
+            return window.HostPasswordConfirm.Password;
         }
 
         private void FocusHostPassword()
@@ -379,7 +404,14 @@ public partial class MainWindow
         private void FocusHostSetup(string field)
         {
             if (field == "port") window.HostPort.Focus();
+            else if (field == "confirm") FocusHostPasswordConfirm();
             else FocusHostPassword();
+        }
+
+        private void FocusHostPasswordConfirm()
+        {
+            if (window.HostPasswordReveal.IsChecked == true) window.HostPasswordConfirmVisible.Focus();
+            else window.HostPasswordConfirm.Focus();
         }
 
         private void ClearHostPassword()
@@ -387,11 +419,15 @@ public partial class MainWindow
             suppressHostPasswordReveal = true;
             window.HostPassword.Clear();
             window.HostPasswordVisible.Clear();
+            window.HostPasswordConfirm.Clear();
+            window.HostPasswordConfirmVisible.Clear();
             window.HostPasswordReveal.IsChecked = false;
             window.HostPasswordReveal.Content = UiText.PasswordReveal(false);
             window.HostPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
             window.HostPasswordVisible.Visibility = Visibility.Collapsed;
             window.HostPassword.Visibility = Visibility.Visible;
+            window.HostPasswordConfirmVisible.Visibility = Visibility.Collapsed;
+            window.HostPasswordConfirm.Visibility = Visibility.Visible;
             suppressHostPasswordReveal = false;
         }
 
@@ -407,13 +443,15 @@ public partial class MainWindow
                 return;
             }
             var typedPassword = CurrentHostPassword();
-            var setup = UiText.CheckHostSetup(window.HostPort.Text, typedPassword, passwordRequired: !settings.HasPassword);
+            var confirmingExisting = settings.HasPassword && !settings.HasOpaqueIdentity;
+            var setup = UiText.CheckHostSetup(window.HostPort.Text, typedPassword, passwordRequired: !settings.HasPassword, confirmingExisting, CurrentHostPasswordConfirm(), matchRequired: !confirmingExisting && typedPassword.Length > 0);
             if (setup.Problem != null)
             {
                 window.HostNotice(setup.Problem, problem: true);
                 FocusHostSetup(setup.Field);
                 return;
             }
+            DismissNotice();
             settings.SmoothHost = window.SmoothHostToggle.IsChecked == true;
             hostStarting = true;
             SetHostState(HostUiState.Starting);

@@ -292,12 +292,14 @@ public static class UiText
 
     public readonly record struct HostSetupCheck(string? Problem, string Field);
 
-    public static HostSetupCheck CheckHostSetup(string? port, string? password, bool passwordRequired, bool confirmingExisting = false)
+    public static HostSetupCheck CheckHostSetup(string? port, string? password, bool passwordRequired, bool confirmingExisting = false, string? confirmation = null, bool matchRequired = false)
     {
         if (!int.TryParse(port?.Trim(), out var parsed) || parsed is < 1024 or > 65535) return new("포트 범위: 1024–65535", "port");
         if (string.IsNullOrEmpty(password))
             return passwordRequired ? new(confirmingExisting ? "현재 비밀번호를 입력하세요." : "비밀번호를 8~1024자 입력하세요.", "password") : new(null, "");
         if (password.Length > 1024 || (!confirmingExisting && password.Length < 8)) return new("비밀번호를 8~1024자 입력하세요.", "password");
+        if (matchRequired && !string.Equals(password, confirmation, StringComparison.Ordinal))
+            return new(string.IsNullOrEmpty(confirmation) ? "비밀번호를 한 번 더 입력하세요." : "비밀번호 확인이 일치하지 않습니다.", "confirm");
         return new(null, "");
     }
 

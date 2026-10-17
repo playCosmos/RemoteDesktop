@@ -145,6 +145,7 @@ public partial class MainWindow : Window
     private void HostPasswordKeyDown(object sender, KeyEventArgs e) => hostSession.HostPasswordKeyDown(sender, e);
     private void HostPasswordRevealChanged(object sender, RoutedEventArgs e) => hostSession.HostPasswordRevealChanged(sender, e);
     private void HostPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => hostSession.HostPasswordVisibleChanged(sender, e);
+    private void HostPasswordConfirmVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => hostSession.HostPasswordConfirmVisibleChanged(sender, e);
     private void StartHost(object sender, RoutedEventArgs e) => hostSession.StartHost(sender, e);
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
@@ -163,6 +164,7 @@ public partial class MainWindow : Window
         var caps = Keyboard.IsKeyToggled(Key.CapsLock);
         var clientFocused = ClientPassword.IsKeyboardFocused || ClientPasswordVisible.IsKeyboardFocused;
         var hostFocused = HostPassword.IsKeyboardFocused || HostPasswordVisible.IsKeyboardFocused;
+        hostFocused = hostFocused || HostPasswordConfirm.IsKeyboardFocused || HostPasswordConfirmVisible.IsKeyboardFocused;
         ClientCapsLock.Visibility = UiText.ShowCapsLock(clientFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
         HostCapsLock.Visibility = UiText.ShowCapsLock(hostFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
     }

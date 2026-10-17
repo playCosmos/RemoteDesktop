@@ -1646,6 +1646,12 @@ public partial class MainWindow
 
         public void FullscreenKey(object sender, KeyEventArgs e)
         {
+            if (e.Key == Key.Escape && UiText.EscapeLeavesFullscreen(fullscreen != null, RemoteInputFocused()))
+            {
+                e.Handled = true;
+                fullscreen?.Close();
+                return;
+            }
             if (e.Key == Key.F11 && (fullscreen != null || window.ClientTab.IsSelected))
             {
                 e.Handled = true;
@@ -1663,7 +1669,7 @@ public partial class MainWindow
             window.ConnectionControls.Visibility = Visibility.Collapsed;
             window.ClientPanel.Margin = new Thickness(0);
             window.Stage.CornerRadius = new CornerRadius(0);
-            var shell = new Window { Title = "Personal Remote Desktop · F11 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = window, Content = window.ClientPanel };
+            var shell = new Window { Title = "Personal Remote Desktop · F11 또는 Esc로 복귀", WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, Background = System.Windows.Media.Brushes.Black, Owner = window, Content = window.ClientPanel };
             shell.WindowStartupLocation = WindowStartupLocation.Manual;
             shell.Left = window.Left;
             shell.Top = window.Top;

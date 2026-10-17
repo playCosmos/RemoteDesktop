@@ -154,7 +154,7 @@
         <Border Style="{StaticResource Card}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="480" Padding="28,24">
           <StackPanel>
             <TextBlock Text="전체화면으로 보고 있습니다" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource InkBrush}" HorizontalAlignment="Center"/>
-            <TextBlock x:Name="FullscreenAwayText" Text="F11로 이 창에 되돌립니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" TextAlignment="Center" Margin="0,8,0,0"/>
+            <TextBlock x:Name="FullscreenAwayText" Text="F11 또는 Esc로 이 창에 되돌립니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}" TextAlignment="Center" Margin="0,8,0,0"/>
             <Button Content="이 창으로 되돌리기" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Margin="0,18,0,0" MinWidth="180" Click="ExitFullscreen"/>
           </StackPanel>
         </Border>

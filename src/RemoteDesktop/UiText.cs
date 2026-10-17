@@ -93,10 +93,12 @@ public static class UiText
     {
         var viewing = Blank(outbound);
         var hosting = Blank(inbound);
-        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨 · F11로 복귀";
-        if (viewing != null) return viewing + " — F11로 복귀";
-        return "Personal Remote Desktop · F11로 복귀";
+        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨 · F11 또는 Esc로 복귀";
+        if (viewing != null) return viewing + " — F11 또는 Esc로 복귀";
+        return "Personal Remote Desktop · F11 또는 Esc로 복귀";
     }
+
+    public static bool EscapeLeavesFullscreen(bool fullscreen, bool inputCaptured) => fullscreen && !inputCaptured;
 
     public static string? ClosePrompt(string? viewing, string? hosting)
     {
@@ -261,7 +263,7 @@ public static class UiText
     public static string FullscreenAway(string? address)
     {
         var target = Blank(address);
-        return target == null ? "F11로 이 창에 되돌립니다." : target + " 화면입니다. F11로 이 창에 되돌립니다.";
+        return target == null ? "F11 또는 Esc로 이 창에 되돌립니다." : target + " 화면입니다. F11 또는 Esc로 이 창에 되돌립니다.";
     }
 
     public static bool EdgeToEdge(bool connected, bool clientTabSelected, bool fullscreen) => connected && clientTabSelected && !fullscreen;

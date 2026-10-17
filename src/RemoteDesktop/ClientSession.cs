@@ -678,6 +678,7 @@ public partial class MainWindow
             }
             ShowSessionPreset();
             if (!enabled) window.SessionAlert.Visibility = Visibility.Collapsed;
+            if (!enabled) window.DropHint.Visibility = Visibility.Collapsed;
             if (!enabled) sessionNoticeTimer?.Stop();
             if (!enabled) settlingNotice = null;
             if (!enabled) { announcedDelivery = null; lastFrameQuality = 0; }
@@ -697,7 +698,7 @@ public partial class MainWindow
             }
             ScheduleSessionBaseline();
             if (problem) ShowSessionToolbar();
-            else SyncProblemAlert(window.SessionToolbar.Visibility == Visibility.Visible);
+            else SyncSessionNotice(window.SessionToolbar.Visibility == Visibility.Visible);
         }
 
         private void ScheduleSessionBaseline()
@@ -725,10 +726,15 @@ public partial class MainWindow
             window.SessionStatus(UiText.SessionBaseline(inputEnabled));
         }
 
-        private void SyncProblemAlert(bool toolbarOpen)
+        private void SyncSessionNotice(bool toolbarOpen)
         {
-            var problem = client != null && UiText.IsProblem(window.StatusText.Text);
-            window.SessionAlert.Visibility = problem && !toolbarOpen ? Visibility.Visible : Visibility.Collapsed;
+            var text = window.StatusText.Text;
+            var show = client != null && !toolbarOpen && UiText.SessionOnPicture(text);
+            window.SessionAlert.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (!show) return;
+            var problem = UiText.IsProblem(text);
+            window.SessionAlert.BorderBrush = (System.Windows.Media.Brush)window.FindResource(problem ? "DangerBrush" : "LineBrush");
+            window.SessionAlertText.Foreground = (System.Windows.Media.Brush)window.FindResource(problem ? "DangerBrush" : "InkBrush");
         }
 
         private void SetHealth(string text)
@@ -797,7 +803,7 @@ public partial class MainWindow
             if (client == null) return;
             window.SessionToolbar.Visibility = Visibility.Visible;
             window.SessionReveal.Visibility = Visibility.Collapsed;
-            SyncProblemAlert(true);
+            SyncSessionNotice(true);
             RestartToolbarTimer();
         }
 
@@ -821,7 +827,7 @@ public partial class MainWindow
             }
             window.SessionToolbar.Visibility = Visibility.Collapsed;
             window.SessionReveal.Visibility = Visibility.Visible;
-            SyncProblemAlert(false);
+            SyncSessionNotice(false);
         }
 
         public void RevealSessionToolbar(object sender, RoutedEventArgs e) => ShowSessionToolbar();
@@ -1320,16 +1326,29 @@ public partial class MainWindow
 
         public void FileDrag(object sender, DragEventArgs e)
         {
-            e.Effects = CanDropFiles(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            var files = client != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+            var allowed = CanDropFiles(e.Data);
+            e.Effects = allowed ? DragDropEffects.Copy : DragDropEffects.None;
             e.Handled = true;
+            window.DropHintText.Text = UiText.FileDropHint(inputEnabled);
+            window.DropHint.Visibility = files ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        public void FileDragLeave(object sender, DragEventArgs e)
+        {
+            var point = e.GetPosition(window.Stage);
+            if (point.X >= 0 && point.Y >= 0 && point.X < window.Stage.ActualWidth && point.Y < window.Stage.ActualHeight) return;
+            window.DropHint.Visibility = Visibility.Collapsed;
         }
 
         public async void FileDrop(object sender, DragEventArgs e)
         {
             e.Handled = true;
+            window.DropHint.Visibility = Visibility.Collapsed;
             if (client == null || connection is null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
-            if (!inputEnabled) { window.SessionStatus("입력 제어 꺼짐 · 화면 보기만 가능"); return; }
+            if (!inputEnabled) { window.SessionStatus(UiText.FileDropHint(false)); return; }
             if (clipboardSync is not { } sync || e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+            window.SessionStatus(UiText.FileDropStarted(paths.Length));
             try { await sync.PushFiles(paths, connection.Token); }
             catch (OperationCanceledException) { }
             catch (Exception ex) { window.SessionStatus("파일 보내기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }

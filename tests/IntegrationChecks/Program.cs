@@ -188,6 +188,10 @@ Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.")
 Check(UiText.SessionBaseline(true) == "연결됨" && UiText.SessionBaseline(false) == "화면만 보는 중", "a live session returns to connected, and view-only keeps its own label");
 Check(!UiText.SessionNoticeHolds("연결됨") && !UiText.SessionNoticeHolds("화면 품질: 고화질") && !UiText.SessionNoticeHolds("클립보드 파일 수신 완료"), "ordinary session notes settle back to the connection state");
 Check(UiText.SessionNoticeHolds("클립보드 보내기 실패: 다시 시도하세요.") && UiText.SessionNoticeHolds(UiText.ClipboardFileProgress("클립보드 수신", 0, 1, "메모.txt", 50, 200)), "failures and an unfinished file copy stay on screen");
+Check(UiText.FileDropHint(true) == "놓으면 상대 PC에서 붙여넣을 수 있습니다" && UiText.FileDropHint(false) == "입력 제어를 켜야 파일을 보낼 수 있습니다", "a file drag explains where the files will go");
+Check(UiText.FileDropStarted(1) == "파일을 상대 PC로 보내는 중" && UiText.FileDropStarted(3) == "3개 파일을 상대 PC로 보내는 중", "a dropped batch says how many files are leaving");
+Check(UiText.SessionOnPicture("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요.") && UiText.SessionOnPicture(UiText.ClipboardFileProgress("클립보드 전송", 0, 1, "메모.txt", 50, 200)) && UiText.SessionOnPicture(UiText.FileDropStarted(2)) && UiText.SessionOnPicture(UiText.FileDropHint(false)) && UiText.SessionOnPicture("파일 보내기 실패: 다시 시도하세요."), "a file transfer stays on the picture while the toolbar is hidden");
+Check(!UiText.SessionOnPicture("연결됨") && !UiText.SessionOnPicture("화면 품질: 고화질") && !UiText.SessionOnPicture("화면만 보는 중") && !UiText.SessionOnPicture(""), "ordinary session notes stay in the toolbar");
 Check(UiText.SessionReveal("03:12 · 15 fps · 40 ms", true) == "03:12 · 15 fps · 40 ms" && UiText.SessionReveal("03:12 · 15 fps · 40 ms", false) == "03:12 · 15 fps · 40 ms · 보기만", "the collapsed session control still says when input is off");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";

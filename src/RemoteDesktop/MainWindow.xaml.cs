@@ -151,6 +151,7 @@ public partial class MainWindow : Window
     private void Move(object sender, MouseEventArgs e) => clientSession.Move(sender, e);
     private void PointerLeft(object sender, MouseEventArgs e) => clientSession.PointerLeft(sender, e);
     private void FileDrag(object sender, DragEventArgs e) => clientSession.FileDrag(sender, e);
+    private void FileDragLeave(object sender, DragEventArgs e) => clientSession.FileDragLeave(sender, e);
     private void FileDrop(object sender, DragEventArgs e) => clientSession.FileDrop(sender, e);
     private void MouseDownRemote(object sender, MouseButtonEventArgs e) => clientSession.MouseDownRemote(sender, e);
     private void MouseUpRemote(object sender, MouseButtonEventArgs e) => clientSession.MouseUpRemote(sender, e);

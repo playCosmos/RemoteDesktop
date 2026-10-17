@@ -258,6 +258,19 @@ public static class UiText
         return text.Contains('%') && !text.Contains("완료", StringComparison.Ordinal);
     }
 
+    public static string FileDropHint(bool inputEnabled)
+        => inputEnabled ? "놓으면 상대 PC에서 붙여넣을 수 있습니다" : "입력 제어를 켜야 파일을 보낼 수 있습니다";
+
+    public static string FileDropStarted(int count)
+        => count <= 1 ? "파일을 상대 PC로 보내는 중" : count + "개 파일을 상대 PC로 보내는 중";
+
+    public static bool SessionOnPicture(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (IsProblem(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
+    }
+
     public static string SessionReveal(string health, bool inputEnabled)
         => inputEnabled || string.IsNullOrWhiteSpace(health) ? health : health.Trim() + " · 보기만";
 

@@ -4,11 +4,16 @@
       <Grid x:Name="ClientHost">
       <DockPanel x:Name="ClientPanel" Margin="12">
         <Grid>
-        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True" AllowDrop="True" DragOver="FileDrag" Drop="FileDrop">
+        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True" AllowDrop="True" DragOver="FileDrag" DragLeave="FileDragLeave" Drop="FileDrop">
           <Grid>
             <TextBlock x:Name="StageHint" Text="화면을 받는 중…" Visibility="Collapsed" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" MouseLeave="PointerLeft" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
             <Image x:Name="RemoteCursor" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Fill" IsHitTestVisible="False" Visibility="Collapsed" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+            <Border x:Name="DropHint" Visibility="Collapsed" IsHitTestVisible="False" Background="#B3101418" BorderBrush="{StaticResource AccentBrush}" BorderThickness="3">
+              <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" CornerRadius="12" Padding="18,14" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <TextBlock x:Name="DropHintText" Text="놓으면 상대 PC에서 붙여넣을 수 있습니다" Foreground="{StaticResource InkBrush}" FontSize="14" FontWeight="SemiBold" TextAlignment="Center"/>
+              </Border>
+            </Border>
           </Grid>
         </Border>
         <Border x:Name="ConnectionControls" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="720" Margin="24" Style="{StaticResource Card}" Padding="18,16">

@@ -212,7 +212,7 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <DockPanel Margin="0,0,0,8" LastChildFill="True">
-                      <Button DockPanel.Dock="Right" Content="복사" MinWidth="64" Margin="8,0,0,0" Click="CopyAddress" Tag="{Binding}" ToolTip="주소와 포트를 복사합니다"/>
+                      <Button DockPanel.Dock="Right" Content="복사" MinWidth="76" Margin="8,0,0,0" Click="CopyAddress" Tag="{Binding}" ToolTip="주소와 포트를 복사합니다"/>
                       <TextBox Text="{Binding Mode=OneWay}" IsReadOnly="True" IsReadOnlyCaretVisible="True" FontFamily="Cascadia Mono, Consolas"/>
                     </DockPanel>
                   </DataTemplate>
@@ -221,7 +221,7 @@
               <TextBlock Text="서버 지문" Style="{StaticResource FieldLabel}"/>
               <DockPanel Margin="0,0,0,10" LastChildFill="True">
                 <Button x:Name="ToggleFingerprintButton" DockPanel.Dock="Right" Content="지문 보기" Click="ToggleFingerprint" Margin="8,0,0,0" ToolTip="64자리 지문 전체를 표시합니다"/>
-                <Button Content="지문 복사" DockPanel.Dock="Right" Click="CopyFingerprint" ToolTip="지문 전체를 복사합니다"/>
+                <Button x:Name="FingerprintCopyButton" Content="지문 복사" DockPanel.Dock="Right" Click="CopyFingerprint" ToolTip="지문 전체를 복사합니다"/>
                 <TextBlock x:Name="FingerprintSummary" VerticalAlignment="Center" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis"/>
               </DockPanel>
               <TextBox x:Name="Fingerprint" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,16"/>

@@ -23,6 +23,9 @@ public partial class MainWindow
         private System.Windows.Threading.DispatcherTimer? sessionClock;
         private System.Windows.Threading.DispatcherTimer? addressRefresh;
         private bool addressWatch;
+        private System.Windows.Controls.Button? copiedButton;
+        private string copiedIdle = "";
+        private System.Windows.Threading.DispatcherTimer? copiedTimer;
         private HostUiState hostState = HostUiState.Stopped;
         private bool hostQuiet;
         public bool Closing { get; set; }
@@ -66,6 +69,7 @@ public partial class MainWindow
                 var endpoints = HostAddresses.Endpoints(port);
                 var previous = (window.AddressList.ItemsSource as System.Collections.Generic.IEnumerable<string>)?.ToArray() ?? [];
                 var changed = !HostAddresses.Same(previous, endpoints);
+                RestoreCopiedButton(null, EventArgs.Empty);
                 window.AddressList.ItemsSource = endpoints;
                 window.AddressEmpty.Visibility = endpoints.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
                 if (announce && changed) window.HostNotice(UiText.AddressesChanged());
@@ -101,6 +105,7 @@ public partial class MainWindow
             try
             {
                 System.Windows.Clipboard.SetText(endpoint);
+                if (sender is System.Windows.Controls.Button button) ShowCopied(button, "복사");
                 window.HostNotice(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
             }
             catch (Exception ex) { window.HostNotice("주소 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다."), problem: true); }
@@ -430,9 +435,30 @@ public partial class MainWindow
             try
             {
                 System.Windows.Clipboard.SetText(window.Fingerprint.Text);
+                ShowCopied(window.FingerprintCopyButton, "지문 복사");
                 window.HostNotice("서버 지문을 복사했습니다.");
             }
             catch (Exception ex) { window.HostNotice("지문 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다."), problem: true); }
+        }
+
+        private void ShowCopied(System.Windows.Controls.Button button, string idle)
+        {
+            if (copiedButton != null && !ReferenceEquals(copiedButton, button)) copiedButton.Content = copiedIdle;
+            copiedButton = button;
+            copiedIdle = idle;
+            button.Content = UiText.CopiedLabel(idle, true);
+            copiedTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.2) };
+            copiedTimer.Stop();
+            copiedTimer.Tick -= RestoreCopiedButton;
+            copiedTimer.Tick += RestoreCopiedButton;
+            copiedTimer.Start();
+        }
+
+        private void RestoreCopiedButton(object? sender, EventArgs e)
+        {
+            copiedTimer?.Stop();
+            if (copiedButton != null) copiedButton.Content = copiedIdle;
+            copiedButton = null;
         }
     }
 }

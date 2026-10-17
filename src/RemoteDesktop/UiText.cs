@@ -340,6 +340,8 @@ public static class UiText
 
     public static string PasswordRevealTip(bool shown) => shown ? "비밀번호 숨기기" : "비밀번호 보기";
 
+    public static string CopiedLabel(string idle, bool copied) => copied ? "복사됨" : idle;
+
     public static string CapsLockWarning() => "Caps Lock이 켜져 있습니다.";
 
     public static bool ShowCapsLock(bool passwordFocused, bool capsLock) => passwordFocused && capsLock;

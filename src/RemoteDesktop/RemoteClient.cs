@@ -22,9 +22,10 @@ public sealed class RemoteClient : IDisposable
                 CryptographicOperations.FixedTimeEquals(SHA256.HashData(certificate.RawData), Convert.FromHexString(pin))
         }) { BaseAddress = uri, Timeout = TimeSpan.FromMinutes(30) };
     }
-    public async Task Login(string password)
+    public async Task Login(string password, CancellationToken cancellationToken = default)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
         using var result = await http.PostAsJsonAsync("login", new { password }, timeout.Token);
         result.EnsureSuccessStatusCode();
         var json = await result.Content.ReadFromJsonAsync<JsonElement>(timeout.Token);
@@ -32,7 +33,12 @@ public sealed class RemoteClient : IDisposable
     }
     public async Task Input(InputEvent input, CancellationToken ct = default)
     { using var response = await http.PostAsJsonAsync("input", input, ct); response.EnsureSuccessStatusCode(); }
-    public Task<RemoteDisplay[]?> Displays() => http.GetFromJsonAsync<RemoteDisplay[]>("displays");
+    public async Task<RemoteDisplay[]?> Displays(CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        return await http.GetFromJsonAsync<RemoteDisplay[]>("displays", timeout.Token);
+    }
     public async Task<byte[]> Frame(CancellationToken ct, string? display = null, int quality = 55)
         => await Frame(ct, display, quality, 0, 0, 1, 1);
     public async Task<byte[]> Frame(CancellationToken ct, string? display, int quality, double viewX, double viewY, double viewWidth, double viewHeight)

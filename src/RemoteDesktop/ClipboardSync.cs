@@ -7,10 +7,16 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
     public static class ClipboardClear
     {
         public static bool PushEmpty(int paths, int textLength, bool ownWrite)
-            => paths == 0 && textLength == 0 && !ownWrite;
+            => PushEmpty(paths, textLength, ownWrite, 0);
+
+        public static bool PushEmpty(int paths, int textLength, bool ownWrite, int imageBytes)
+            => paths == 0 && textLength == 0 && imageBytes == 0 && !ownWrite;
 
         public static bool ApplyEmpty(int files, int textLength, bool ownOrigin, bool localChanged, bool localAlreadyEmpty)
-            => files == 0 && textLength == 0 && !ownOrigin && !localChanged && !localAlreadyEmpty;
+            => ApplyEmpty(files, textLength, ownOrigin, localChanged, localAlreadyEmpty, 0);
+
+        public static bool ApplyEmpty(int files, int textLength, bool ownOrigin, bool localChanged, bool localAlreadyEmpty, int imageBytes)
+            => files == 0 && textLength == 0 && imageBytes == 0 && !ownOrigin && !localChanged && !localAlreadyEmpty;
     }
 
     private readonly SemaphoreSlim mutex = new(1);
@@ -54,8 +60,15 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 var current = await local.Read(ct);
                 if (current.Sequence != observedLocal)
                 {
-                    if (current.Paths.Length > 0) await Push(ct);
-                    else if (current.Text.Length > 0 || ClipboardClear.PushEmpty(current.Paths.Length, current.Text.Length, current.Origin.Length > 0)) await PushText(ct);
+                    var picture = current.Image?.Length ?? 0;
+                    if (current.Origin == ClipboardPaths.ImageTooLarge)
+                    {
+                        status(UiText.ImageClipboardTooLarge());
+                        observedLocal = current.Sequence;
+                    }
+                    else if (current.Paths.Length > 0) await Push(ct);
+                    else if (picture > 0) await PushImage(ct);
+                    else if (current.Text.Length > 0 || ClipboardClear.PushEmpty(current.Paths.Length, current.Text.Length, current.Origin.Length > 0, picture)) await PushText(ct);
                     else observedLocal = current.Sequence;
                 }
                 await Pull(ct);
@@ -127,7 +140,8 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
     {
         var selected = await local.Read(ct);
         if (selected.Paths.Length > 0) return await Push(ct);
-        if (selected.Text.Length > 0 || ClipboardClear.PushEmpty(selected.Paths.Length, selected.Text.Length, selected.Origin.Length > 0)) return await PushText(ct);
+        if ((selected.Image?.Length ?? 0) > 0 && selected.Origin != ClipboardPaths.ImageTooLarge) return await PushImage(ct);
+        if (selected.Text.Length > 0 || ClipboardClear.PushEmpty(selected.Paths.Length, selected.Text.Length, selected.Origin.Length > 0, selected.Image?.Length ?? 0)) return await PushText(ct);
         return false;
     }
     public async Task<bool> PushText(CancellationToken ct)
@@ -137,7 +151,7 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
         {
             var selected = await local.Read(ct);
             var clearing = ClipboardClear.PushEmpty(selected.Paths.Length, selected.Text.Length, selected.Origin.Length > 0);
-            if (selected.Paths.Length != 0 || selected.Origin.Length > 0 || (selected.Text.Length == 0 && !clearing)) { observedLocal = selected.Sequence; return false; }
+            if (selected.Paths.Length != 0 || selected.Origin.Length > 0 || (selected.Image?.Length ?? 0) > 0 || (selected.Text.Length == 0 && !clearing)) { observedLocal = selected.Sequence; return false; }
             ClipboardPaths.ValidateText(selected.Text);
             if (uploadedLocal == selected.Sequence) return true;
             var snapshot = await remote.Clipboard(ct);
@@ -147,6 +161,32 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
             { observedLocal = selected.Sequence; throw; }
             observedLocal = selected.Sequence; uploadedLocal = selected.Sequence; remoteRevision = result.Id;
             status(clearing ? UiText.ClipboardCleared() : "텍스트 클립보드 동기화 완료"); return true;
+        }
+        finally { mutex.Release(); }
+    }
+    public async Task<bool> PushImage(CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            var selected = await local.Read(ct);
+            var image = selected.Image ?? [];
+            if (selected.Paths.Length != 0 || selected.Text.Length != 0 || selected.Origin.Length > 0 || image.Length == 0) { observedLocal = selected.Sequence; return false; }
+            try { ClipboardPaths.ValidateImage(image); }
+            catch (ArgumentException)
+            {
+                observedLocal = selected.Sequence;
+                status(UiText.ImageClipboardTooLarge());
+                return false;
+            }
+            if (uploadedLocal == selected.Sequence) return true;
+            var snapshot = await remote.Clipboard(ct);
+            ClipboardManifest result;
+            try { result = await remote.SendClipboardImage(image, origin, snapshot.Id, ct); }
+            catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Conflict)
+            { observedLocal = selected.Sequence; throw; }
+            observedLocal = selected.Sequence; uploadedLocal = selected.Sequence; remoteRevision = result.Id;
+            status(UiText.ImageClipboardReady()); return true;
         }
         finally { mutex.Release(); }
     }
@@ -172,11 +212,24 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
                 else status("새로 복사한 로컬 클립보드를 유지했습니다.");
                 return true;
             }
+            if (snapshot.Files.Length == 0 && snapshot.Text.Length == 0 && snapshot.Image > 0)
+            {
+                var beforeImage = await local.Read(ct);
+                if (beforeImage.Sequence != observedLocal) { remoteRevision = snapshot.Id; return true; }
+                var png = await remote.DownloadClipboardImage(snapshot.Id, ct);
+                ClipboardPaths.ValidateImage(png);
+                if (png.Length != snapshot.Image) throw new IOException("클립보드 이미지 크기 불일치");
+                var pictured = await local.Write([], "", "remote:" + snapshot.Id, beforeImage.Sequence, ct, png);
+                remoteRevision = snapshot.Id;
+                if (pictured) { observedLocal = (await local.Read(ct)).Sequence; status(UiText.ImageClipboardReceived()); }
+                else status("새로 복사한 로컬 클립보드를 유지했습니다.");
+                return true;
+            }
             if (snapshot.Files.Length == 0)
             {
                 var beforeClear = await local.Read(ct);
-                var alreadyEmpty = beforeClear.Paths.Length == 0 && beforeClear.Text.Length == 0;
-                if (!ClipboardClear.ApplyEmpty(snapshot.Files.Length, snapshot.Text.Length, snapshot.Origin == origin, beforeClear.Sequence != observedLocal, alreadyEmpty))
+                var alreadyEmpty = beforeClear.Paths.Length == 0 && beforeClear.Text.Length == 0 && (beforeClear.Image?.Length ?? 0) == 0;
+                if (!ClipboardClear.ApplyEmpty(snapshot.Files.Length, snapshot.Text.Length, snapshot.Origin == origin, beforeClear.Sequence != observedLocal, alreadyEmpty, snapshot.Image))
                 { remoteRevision = snapshot.Id; return true; }
                 var cleared = await local.Write([], "", "remote:" + snapshot.Id, beforeClear.Sequence, ct);
                 remoteRevision = snapshot.Id;

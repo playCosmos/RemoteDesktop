@@ -12,6 +12,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     private ClipboardSelection? selected;
     private ClipboardManifest manifest = new("", "", []);
     private ClipboardLeaf[] leaves = [];
+    private byte[] imageBytes = [];
     private readonly Dictionary<string, Pending> pending = [];
     private sealed class Pending(string owner, ClipboardUpload request, string directory)
     {
@@ -28,7 +29,15 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size, leaf.Directory)).ToArray();
         owner = scope; selected = current;
         ClipboardPaths.ValidateText(current.Text);
-        manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, files.Length == 0 ? current.Text : ""); return manifest;
+        var text = files.Length == 0 ? current.Text : "";
+        var image = files.Length == 0 && text.Length == 0 ? current.Image ?? [] : [];
+        if (image.Length > 0)
+        {
+            try { ClipboardPaths.ValidateImage(image); }
+            catch (ArgumentException) { image = []; }
+        }
+        imageBytes = image;
+        manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, text, image.Length); return manifest;
     }
     public async Task<ClipboardManifest> Read(string scope, CancellationToken ct)
     { await mutex.WaitAsync(ct); try { return await ReadCore(scope, ct); } finally { mutex.Release(); } }
@@ -52,6 +61,46 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             pending.Add(id, batch); return id;
         }
         finally { mutex.Release(); }
+    }
+    public async Task<ClipboardManifest> SetImage(string scope, Stream input, string origin, string expectedRevision, string expectedHash, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(origin) || origin.Length > 100) throw new ArgumentException("Invalid clipboard origin");
+        var png = await ReadImageBody(input, ct);
+        ClipboardPaths.ValidateImage(png);
+        if (expectedHash.Length != 64 || !expectedHash.All(Uri.IsHexDigit) || !Convert.ToHexString(SHA256.HashData(png)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("File hash mismatch");
+        await mutex.WaitAsync(ct);
+        try
+        {
+            if ((await ReadCore(scope, ct)).Id != expectedRevision) throw new ClipboardConflictException();
+            if (!await clipboard.Write([], "", origin, selected!.Sequence, ct, png)) throw new ClipboardConflictException();
+            selected = null;
+            var imageResult = await ReadCore(scope, ct);
+            await SweepCore(ct);
+            return imageResult;
+        }
+        finally { mutex.Release(); }
+    }
+    public async Task<byte[]> OpenImage(string scope, string id, CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            var current = await ReadCore(scope, ct);
+            if (current.Id != id || current.Image == 0 || imageBytes.Length != current.Image) throw new ClipboardConflictException();
+            return imageBytes;
+        }
+        finally { mutex.Release(); }
+    }
+    private static async Task<byte[]> ReadImageBody(Stream input, CancellationToken ct)
+    {
+        using var buffer = new MemoryStream();
+        var chunk = new byte[65536]; int n;
+        while ((n = await input.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + n > ClipboardPaths.MaxImageBytes) throw new ArgumentException("클립보드 이미지는 16MB 이하만 지원합니다.");
+            buffer.Write(chunk, 0, n);
+        }
+        return buffer.ToArray();
     }
     public async Task<ClipboardManifest> SetText(string scope, ClipboardTextUpdate request, CancellationToken ct)
     {

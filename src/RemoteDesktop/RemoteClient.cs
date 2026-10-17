@@ -96,6 +96,29 @@ public sealed class RemoteClient : IDisposable
         await EnsureClipboard(response);
         return await response.Content.ReadFromJsonAsync<ClipboardManifest>(ct) ?? throw new IOException("클립보드 응답 오류");
     }
+    public async Task<ClipboardManifest> SendClipboardImage(byte[] png, string origin, string expectedRevision, CancellationToken ct)
+    {
+        ClipboardPaths.ValidateImage(png);
+        using var content = new ByteArrayContent(png);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        using var request = new HttpRequestMessage(HttpMethod.Put, "clipboard/image") { Content = content };
+        request.Headers.Add("X-Content-SHA256", Convert.ToHexString(SHA256.HashData(png)));
+        request.Headers.Add("X-Clipboard-Origin", origin);
+        request.Headers.Add("X-Clipboard-Revision", expectedRevision);
+        using var response = await http.SendAsync(request, ct);
+        await EnsureClipboard(response);
+        return await response.Content.ReadFromJsonAsync<ClipboardManifest>(ct) ?? throw new IOException("클립보드 응답 오류");
+    }
+    public async Task<byte[]> DownloadClipboardImage(string id, CancellationToken ct)
+    {
+        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/image", ct);
+        await EnsureClipboard(response);
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var expected = response.Headers.GetValues("X-Content-SHA256").Single();
+        if (!string.Equals(expected, Convert.ToHexString(SHA256.HashData(bytes)), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
+        ClipboardPaths.ValidateImage(bytes);
+        return bytes;
+    }
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {
         var leaves = ClipboardPaths.Collect(paths);

@@ -58,7 +58,7 @@ final class ClipboardFiles {
         }
         if(snapshot.getString("id").equals(remoteTextRevision))return;
         JSONArray files=snapshot.getJSONArray("files"); String remoteText=snapshot.optString("text","");
-        if(origin.equals(snapshot.optString("origin","")) || files.length()!=0) { remoteTextRevision=snapshot.getString("id"); return; }
+        if(origin.equals(snapshot.optString("origin","")) || files.length()!=0 || snapshot.optLong("image",0)>0) { remoteTextRevision=snapshot.getString("id"); return; }
         if(remoteText.isEmpty()) {
             activity.runOnUiThread(() -> {
                 if(server.get()!=api || revision.get()!=now)return;

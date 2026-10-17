@@ -267,6 +267,13 @@ Check(UiText.FolderPasteCancelled() == "붙여넣기를 취소했습니다." && 
 Check(UiText.ClipboardCleared() == "클립보드를 지웠습니다." && !UiText.IsProblem(UiText.ClipboardCleared()) && UiText.SessionOnPicture(UiText.ClipboardCleared()), "clearing the clipboard stays quiet on the picture");
 Check(ClipboardSync.ClipboardClear.PushEmpty(0, 0, false) && !ClipboardSync.ClipboardClear.PushEmpty(1, 0, false) && !ClipboardSync.ClipboardClear.PushEmpty(0, 3, false) && !ClipboardSync.ClipboardClear.PushEmpty(0, 0, true), "an empty local clipboard is pushed only when this sync did not write it");
 Check(ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(1, 0, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 2, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, true, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, true, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, true), "an empty remote clipboard clears local text and files unless it is our own or already empty");
+var picturePng = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+var pictureSize = ClipboardPaths.PngSize(picturePng);
+Check(pictureSize.Width == 1 && pictureSize.Height == 1, "a clipboard picture decodes");
+try { ClipboardPaths.ValidateImage([1, 2, 3, 4, 5, 6, 7, 8]); Check(false, "a non-png picture is rejected"); }
+catch (ArgumentException ex) { Check(ex.Message == "클립보드 이미지는 PNG만 지원합니다.", "a non-png picture is rejected"); }
+Check(!ClipboardSync.ClipboardClear.PushEmpty(0, 0, false, picturePng.Length) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false, picturePng.Length), "a picture is not treated as an empty clipboard");
+Check(!UiText.IsProblem(UiText.ImageClipboardReady()) && !UiText.IsProblem(UiText.ImageClipboardReceived()) && !UiText.IsProblem(UiText.ImageClipboardTooLarge()) && UiText.SessionOnPicture(UiText.ImageClipboardReceived()) && UiText.SessionOnPicture(UiText.ImageClipboardTooLarge()), "a clipboard picture stays quiet on the picture");
 Check(UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("reset"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TimeoutException("slow"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TaskCanceledException())), "a dropped network or a timeout can reconnect");
 Check(!UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("busy", null, HttpStatusCode.Conflict))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("The SSL connection could not be established"))), "a rejected login, a busy host, or a certificate mismatch does not reconnect");
 Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(4) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(8) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
@@ -600,6 +607,16 @@ async Task ClipboardFiles()
     }
     var emptyPaths = (await site.Clipboard.Read(CancellationToken.None)).Paths;
     Check(emptyPaths.Length == 1 && Directory.Exists(emptyPaths[0]) && !Directory.EnumerateFileSystemEntries(emptyPaths[0]).Any(), "the host clipboard receives an empty folder");
+    var pictureRevision = (await site.Http.GetFromJsonAsync<ClipboardManifest>("clipboard"))!;
+    using (var badPicture = new HttpRequestMessage(HttpMethod.Put, "clipboard/image") { Content = new ByteArrayContent(picturePng) })
+    {
+        badPicture.Headers.Add("X-Content-SHA256", new string('0', 64));
+        badPicture.Headers.Add("X-Clipboard-Origin", "test-client");
+        badPicture.Headers.Add("X-Clipboard-Revision", pictureRevision.Id);
+        using var badResponse = await site.Http.SendAsync(badPicture);
+        Check(badResponse.StatusCode == HttpStatusCode.BadRequest, "clipboard picture rejects a bad hash");
+    }
+    Check((await site.Http.GetFromJsonAsync<ClipboardManifest>("clipboard"))!.Id == pictureRevision.Id, "a bad picture hash leaves the clipboard unchanged");
     site.Host.Disconnect();
     await Task.Delay(2100);
     using var client = new RemoteClient("localhost:" + site.Port, site.Pin);
@@ -666,13 +683,29 @@ async Task ClipboardFiles()
     localClipboard.Set([]);
     Check(await sync.PushText(CancellationToken.None), "an empty local clipboard clears the remote clipboard");
     var clearedHost = await site.Clipboard.Read(CancellationToken.None);
-    Check(clearedHost.Paths.Length == 0 && clearedHost.Text.Length == 0, "the remote clipboard is empty after a local clear");
+    Check(clearedHost.Paths.Length == 0 && clearedHost.Text.Length == 0 && (clearedHost.Image?.Length ?? 0) == 0, "the remote clipboard is empty after a local clear");
     site.Clipboard.Set([], "다시 채운 텍스트");
     await sync.Pull(CancellationToken.None);
     site.Clipboard.Set([]);
     await sync.Pull(CancellationToken.None);
     var clearedLocal = await localClipboard.Read(CancellationToken.None);
-    Check(clearedLocal.Paths.Length == 0 && clearedLocal.Text.Length == 0, "an empty remote clipboard clears the local clipboard");
+    Check(clearedLocal.Paths.Length == 0 && clearedLocal.Text.Length == 0 && (clearedLocal.Image?.Length ?? 0) == 0, "an empty remote clipboard clears the local clipboard");
+    localClipboard.Set([], "", "", picturePng);
+    Check(await sync.PushImage(CancellationToken.None), "local picture copy pushes to remote clipboard");
+    var hostPicture = await site.Clipboard.Read(CancellationToken.None);
+    Check(hostPicture.Paths.Length == 0 && hostPicture.Text.Length == 0 && hostPicture.Image != null && hostPicture.Image.SequenceEqual(picturePng), "local-to-remote picture clipboard roundtrip");
+    var pictureSequence = hostPicture.Sequence;
+    await sync.Pull(CancellationToken.None);
+    Check((await site.Clipboard.Read(CancellationToken.None)).Sequence == pictureSequence, "picture clipboard origin suppresses echo");
+    site.Clipboard.Set([], "", "", picturePng);
+    await sync.Pull(CancellationToken.None);
+    var receivedPicture = await localClipboard.Read(CancellationToken.None);
+    Check(receivedPicture.Image != null && receivedPicture.Image.SequenceEqual(picturePng) && receivedPicture.Text.Length == 0 && receivedPicture.Paths.Length == 0, "remote-to-local picture clipboard roundtrip");
+    Check(!await sync.PushImage(CancellationToken.None), "received picture is not re-uploaded");
+    var pictureManifest = await client.Clipboard(CancellationToken.None);
+    Check(pictureManifest.Image == picturePng.Length && pictureManifest.Files.Length == 0 && pictureManifest.Text.Length == 0, "picture clipboard manifest reports only the picture");
+    try { await client.SendClipboardImage(picturePng, "test", remoteManifest.Id, CancellationToken.None); Check(false, "stale picture"); }
+    catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Conflict) { Check(true, "stale picture revision cannot overwrite newer clipboard"); }
 }
 
 async Task Capture()
@@ -776,15 +809,15 @@ sealed class TestFileClipboard : IFileClipboard
 {
     private ClipboardSelection value = new(1, "", []);
     public Action? BeforeWrite;
-    public void Set(string[] paths, string text = "", string origin = "") { lock (this) value = new(value.Sequence + 1, origin, paths, text); }
+    public void Set(string[] paths, string text = "", string origin = "", byte[]? image = null) { lock (this) value = new(value.Sequence + 1, origin, paths, text, image); }
     public Task<ClipboardSelection> Read(CancellationToken ct) { ct.ThrowIfCancellationRequested(); lock (this) return Task.FromResult(value); }
-    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct)
+    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null)
     {
         ct.ThrowIfCancellationRequested(); lock (this)
         {
             var callback = BeforeWrite; BeforeWrite = null; callback?.Invoke();
             if (value.Sequence != expectedSequence) return Task.FromResult(false);
-            value = new(value.Sequence + 1, origin, paths, text); return Task.FromResult(true);
+            value = new(value.Sequence + 1, origin, paths, text, image); return Task.FromResult(true);
         }
     }
 }

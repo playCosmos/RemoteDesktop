@@ -64,6 +64,22 @@ public sealed partial class RemoteHost
             var (scope, cancellation) = ClipboardContext(c);
             using (cancellation) return Results.Ok(await clipboard.SetText(scope, request, cancellation.Token));
         });
+        routes.MapPut("/v1/clipboard/image", async (HttpContext c) =>
+        {
+            var (scope, cancellation) = ClipboardContext(c);
+            using (cancellation) return Results.Ok(await clipboard.SetImage(scope, c.Request.Body, c.Request.Headers["X-Clipboard-Origin"].ToString(), c.Request.Headers["X-Clipboard-Revision"].ToString(), c.Request.Headers["X-Content-SHA256"].ToString(), cancellation.Token));
+        });
+        routes.MapGet("/v1/clipboard/{id}/image", async (string id, HttpContext c) =>
+        {
+            var (scope, cancellation) = ClipboardContext(c);
+            using (cancellation)
+            {
+                var bytes = await clipboard.OpenImage(scope, id, cancellation.Token);
+                c.Response.ContentType = "image/png"; c.Response.ContentLength = bytes.Length;
+                c.Response.Headers["X-Content-SHA256"] = Convert.ToHexString(SHA256.HashData(bytes));
+                await c.Response.Body.WriteAsync(bytes, cancellation.Token);
+            }
+        });
         routes.MapPut("/v1/clipboard/uploads/{id}/{index:int}", async (string id, int index, HttpContext c) =>
         {
             var (scope, cancellation) = ClipboardContext(c);

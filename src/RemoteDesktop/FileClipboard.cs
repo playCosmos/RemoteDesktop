@@ -6,11 +6,11 @@ using System.Windows.Threading;
 
 namespace RemoteDesktop;
 
-public record ClipboardSelection(uint Sequence, string Origin, string[] Paths, string Text = "");
+public record ClipboardSelection(uint Sequence, string Origin, string[] Paths, string Text = "", byte[]? Image = null);
 public interface IFileClipboard
 {
     Task<ClipboardSelection> Read(CancellationToken ct);
-    Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct);
+    Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null);
 }
 
 public sealed class WindowsFileClipboard : IFileClipboard
@@ -39,13 +39,22 @@ public sealed class WindowsFileClipboard : IFileClipboard
         var paths = data?.GetDataPresent(DataFormats.FileDrop) == true ? (string[]?)data.GetData(DataFormats.FileDrop) ?? [] : [];
         var text = paths.Length == 0 ? ReadText(data) : "";
         var origin = data?.GetDataPresent(Marker) == true ? DecodeText(data.GetData(Marker), unicode: true) : "";
+        byte[] image = [];
+        if (paths.Length == 0 && text.Length == 0 && HasImage(data))
+        {
+            image = ReadImage(data);
+            if (image.Length > ClipboardPaths.MaxImageBytes || image.Length == 0) return new ClipboardSelection(sequence, ClipboardPaths.ImageTooLarge, []);
+        }
         if (sequence != Sequence) throw new ExternalException("클립보드가 변경되었습니다.");
-        return new ClipboardSelection(sequence, origin, paths, text);
+        return new ClipboardSelection(sequence, origin, paths, text, image);
     }, ct);
-    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct) => OnClipboard(() =>
+    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null) => OnClipboard(() =>
     {
         if (Sequence != expectedSequence) return false;
         var data = new DataObject();
+        System.Drawing.Bitmap? bitmap = null;
+        try
+        {
         if (paths.Length > 0)
         {
             var list = new StringCollection(); list.AddRange(paths);
@@ -53,11 +62,59 @@ public sealed class WindowsFileClipboard : IFileClipboard
             // Always copy, even if the source was cut. Never delete a source file remotely.
             data.SetData("Preferred DropEffect", new MemoryStream(BitConverter.GetBytes(1)));
         }
+        else if (image is { Length: > 0 })
+        {
+            ClipboardPaths.ValidateImage(image);
+            bitmap = new System.Drawing.Bitmap(new MemoryStream(image, writable: false));
+            data.SetData(DataFormats.Bitmap, bitmap);
+            data.SetData("PNG", new MemoryStream(image, writable: false));
+        }
         else data.SetData(DataFormats.UnicodeText, text);
         data.SetData(Marker, origin);
         Clipboard.SetDataObject(data, true); return true;
+        }
+        finally { bitmap?.Dispose(); }
     }, ct);
     [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
+
+    private static bool HasImage(IDataObject? data)
+    {
+        try { return data != null && (data.GetDataPresent("PNG") || data.GetDataPresent(DataFormats.Bitmap) || data.GetDataPresent(DataFormats.Dib) || Clipboard.ContainsImage()); }
+        catch (ExternalException) { return false; }
+    }
+
+    private static byte[] ReadImage(IDataObject data)
+    {
+        if (data.GetDataPresent("PNG"))
+        {
+            var png = ReadBytes(data.GetData("PNG"));
+            if (png.Length >= 8) return png;
+        }
+        try
+        {
+            if (!Clipboard.ContainsImage()) return [];
+            var frame = Clipboard.GetImage();
+            if (frame == null) return [];
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(frame));
+            using var output = new MemoryStream();
+            encoder.Save(output);
+            return output.ToArray();
+        }
+        catch (Exception ex) when (ex is ExternalException or NotSupportedException or InvalidOperationException or ArgumentException or IOException or System.Runtime.InteropServices.COMException) { return []; }
+    }
+
+    private static byte[] ReadBytes(object? value)
+    {
+        switch (value)
+        {
+            case byte[] bytes: return bytes;
+            case MemoryStream stream: return stream.ToArray();
+            case Stream stream:
+                using (var copy = new MemoryStream()) { stream.CopyTo(copy); return copy.ToArray(); }
+            default: return [];
+        }
+    }
 
     public static string DecodeText(object? value, bool unicode)
     {
@@ -108,7 +165,7 @@ public sealed class WindowsFileClipboard : IFileClipboard
 }
 
 public record ClipboardFile(string Name, long Size, bool Directory = false);
-public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "");
+public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "", int Image = 0);
 public record ClipboardUpload(string Origin, string ExpectedRevision, ClipboardFile[] Files);
 public record ClipboardTextUpdate(string Origin, string ExpectedRevision, string Text);
 public readonly record struct ClipboardLeaf(string Source, string Name, long Size, bool Directory = false);
@@ -118,11 +175,25 @@ public static class ClipboardPaths
     public const int MaxFiles = 100;
     public const long MaxBatchBytes = 4L * 1024 * 1024 * 1024;
     public const int MaxTextCharacters = 1_000_000;
+    public const int MaxImageBytes = 16 * 1024 * 1024;
+    public const string ImageTooLarge = "image-too-large";
+    static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     const int MaxDepth = 32;
     const int MaxNameLength = 240;
     public static void ValidateText(string? text)
     {
         if (text is null || text.Length > MaxTextCharacters) throw new ArgumentException("클립보드 텍스트는 100만 자까지 지원합니다.");
+    }
+    public static void ValidateImage(byte[]? png)
+    {
+        if (png is null || png.Length == 0 || png.Length > MaxImageBytes || png.Length < PngSignature.Length || !png.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
+            throw new ArgumentException(png is { Length: > MaxImageBytes } ? "클립보드 이미지는 16MB 이하만 지원합니다." : "클립보드 이미지는 PNG만 지원합니다.");
+    }
+    public static (int Width, int Height) PngSize(byte[] png)
+    {
+        ValidateImage(png);
+        using var bitmap = new System.Drawing.Bitmap(new MemoryStream(png, writable: false));
+        return (bitmap.Width, bitmap.Height);
     }
     public static ClipboardFile[] Accept(string[] paths)
         => Collect(paths).Select(leaf => new ClipboardFile(leaf.Name, leaf.Size, leaf.Directory)).ToArray();

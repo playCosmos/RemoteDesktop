@@ -81,10 +81,12 @@ final class RemoteApi {
         final byte[] bytes;
         final String codec;
         final double transferMs;
-        Picture(byte[] bytes, String codec, double transferMs) {
+        final String secure;
+        Picture(byte[] bytes, String codec, double transferMs, String secure) {
             this.bytes = bytes;
             this.codec = codec == null || codec.trim().isEmpty() ? "jpeg" : codec.trim();
             this.transferMs = transferMs;
+            this.secure = SecureNotice.state(secure);
         }
     }
     Picture frame(String path) throws Exception {
@@ -93,6 +95,7 @@ final class RemoteApi {
         try {
             check(c);
             String codec = c.getHeaderField("X-Codec");
+            String secure = c.getHeaderField("X-Secure-Desktop");
             double capture = headerMillis(c.getHeaderField("X-Capture-Ms"));
             double encode = headerMillis(c.getHeaderField("X-Encode-Ms"));
             double wait = headerMillis(c.getHeaderField("X-Wait-Ms"));
@@ -105,7 +108,7 @@ final class RemoteApi {
                 byte[] bytes = out.toByteArray();
                 double spent = System.currentTimeMillis() - started;
                 double transfer = bytes.length == 0 ? -1 : Math.max(0, spent - capture - encode - wait);
-                return new Picture(bytes, codec, transfer);
+                return new Picture(bytes, codec, transfer, secure);
             }
         } finally { c.disconnect(); }
     }

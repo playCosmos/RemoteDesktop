@@ -628,6 +628,9 @@ public static class UiText
         _ => null
     };
 
+    public static bool ShowSecureDesktop(bool toolbarOpen, string? notice)
+        => !toolbarOpen && !string.IsNullOrEmpty(notice);
+
     public static string SecureAttentionSent() => "Ctrl+Alt+Del을 보냈습니다.";
 
     public static string SecureAttentionUnavailable() => "Ctrl+Alt+Del은 모든 사용자 설치에서만 보낼 수 있습니다.";

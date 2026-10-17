@@ -112,7 +112,7 @@ Android의 파일 관리 앱마다 클립보드 지원 방식이 달라 Windows 
 - Windows 화면 클릭 후 키 입력을 서버로 직접 전달합니다. 한/영 키 또는 한/영 버튼을 사용할 수 있으며 서버에 한국어 IME가 설치되어 있어야 합니다.
 - 원격 화면에 포커스가 있으면 Alt+Tab, Alt+F4, Win 조합, Ctrl+Esc, Ctrl+Shift+Esc, Print Screen을 원격 PC에 우선 전달합니다. Ctrl+Alt+Del은 Windows가 가로채므로 키보드로 전달하지 않습니다. 조작 메뉴의 Ctrl+Alt+Del로 보내고, 모든 사용자 설치가 아니면 안내만 표시됩니다.
 - Android는 기본 키보드로 한글을 조합하고 확정된 문자열을 전송 버튼 없이 전달합니다. 조합 중 문자열은 화면 위 상태 표시에 남아 있고, 확정되면 곧 사라집니다.
-- Windows 원격 세션은 기본적으로 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. 모든 사용자 설치의 Windows 서비스가 켜져 있으면 UAC 보안 화면도 상대 PC에 보이고, 그 화면으로 조작이 전달됩니다. Ctrl+Alt+Del은 그 서비스가 켜져 있을 때 조작 메뉴에서 보낼 수 있습니다. [Microsoft SendSAS 문서](https://learn.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas)
+- Windows 원격 세션은 기본적으로 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. 모든 사용자 설치의 Windows 서비스가 켜져 있으면 UAC 보안 화면도 상대 PC에 보이고, 그 화면으로 조작이 전달됩니다. Android도 보안 화면이 보이거나, 설치가 없어 그 화면이 보이지 않으면 화면 아래에 안내를 남겨 둡니다. 조작 바가 열려 있는 동안에는 그 안내를 숨깁니다. Ctrl+Alt+Del은 그 서비스가 켜져 있을 때 조작 메뉴에서 보낼 수 있습니다. [Microsoft SendSAS 문서](https://learn.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas)
 
 ## 세션 툴바
 

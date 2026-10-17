@@ -87,6 +87,8 @@ public final class MainActivity extends Activity {
     private volatile String activeCodec="H.264";
     private TextView health;
     private int receivedFrames;
+    private TextView secureBanner;
+    private volatile String secureState = "off";
     private long healthWindow=SystemClock.elapsedRealtime();
     private long lastFrameMillis;
     private long nextFrameAt;
@@ -141,6 +143,23 @@ public final class MainActivity extends Activity {
         status.setBackground(rounded(Color.argb(170,22,26,34), dp(12)));
         status.setVisibility(View.GONE);
         root.addView(status, new FrameLayout.LayoutParams(-2,-2, Gravity.TOP | Gravity.START));
+
+        secureBanner=new TextView(this);
+        secureBanner.setTextColor(Color.rgb(32,36,44));
+        secureBanner.setTextSize(12);
+        secureBanner.setMaxLines(3);
+        secureBanner.setMaxWidth(dp(520));
+        secureBanner.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        secureBanner.setGravity(Gravity.CENTER);
+        secureBanner.setPadding(dp(12),dp(8),dp(12),dp(8));
+        secureBanner.setBackground(rounded(Color.argb(236,255,255,255), dp(8)));
+        secureBanner.setElevation(dp(6));
+        secureBanner.setClickable(false);
+        secureBanner.setFocusable(false);
+        secureBanner.setVisibility(View.GONE);
+        FrameLayout.LayoutParams secureStart=new FrameLayout.LayoutParams(-2,-2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        secureStart.leftMargin=dp(16); secureStart.rightMargin=dp(16); secureStart.bottomMargin=dp(64);
+        root.addView(secureBanner, secureStart);
 
         connectionPanel=new LinearLayout(this);
         connectionPanel.setOrientation(LinearLayout.VERTICAL);
@@ -303,7 +322,7 @@ public final class MainActivity extends Activity {
         return drawable;
     }
     private void applyChromeInsets() {
-        if(root==null || health==null || menuButton==null || chin==null || connectionScroll==null || status==null || screen==null) return;
+        if(root==null || health==null || menuButton==null || chin==null || connectionScroll==null || status==null || screen==null || secureBanner==null) return;
         int side=dp(12);
         int lower=Math.max(safeBottom, imeBottom);
         int targetWidth=-1;
@@ -311,7 +330,10 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams screenLp=(FrameLayout.LayoutParams)screen.getLayoutParams();
         FrameLayout.LayoutParams chinLp=(FrameLayout.LayoutParams)chin.getLayoutParams();
         FrameLayout.LayoutParams connectionLp=(FrameLayout.LayoutParams)connectionScroll.getLayoutParams();
-        if(screenLp.bottomMargin==imeBottom && chinLp.bottomMargin==lower+dp(8) && chinLp.leftMargin==safeLeft+dp(8) && connectionLp.width==targetWidth && connectionLp.topMargin==safeTop+dp(12)) return;
+        FrameLayout.LayoutParams secureLp=(FrameLayout.LayoutParams)secureBanner.getLayoutParams();
+        int secureBottom=lower+dp(64);
+        int secureSide=safeLeft+dp(16);
+        if(screenLp.bottomMargin==imeBottom && chinLp.bottomMargin==lower+dp(8) && chinLp.leftMargin==safeLeft+dp(8) && connectionLp.width==targetWidth && connectionLp.topMargin==safeTop+dp(12) && secureLp.bottomMargin==secureBottom && secureLp.leftMargin==secureSide) return;
         FrameLayout.LayoutParams healthLp=(FrameLayout.LayoutParams)health.getLayoutParams();
         healthLp.leftMargin=safeLeft+side; healthLp.topMargin=safeTop+dp(8); healthLp.rightMargin=safeRight+side;
         health.setLayoutParams(healthLp);
@@ -330,6 +352,13 @@ public final class MainActivity extends Activity {
         menuButton.setLayoutParams(handleLp);
         screenLp.bottomMargin=imeBottom;
         screen.setLayoutParams(screenLp);
+        secureLp.gravity=Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        secureLp.leftMargin=secureSide;
+        secureLp.rightMargin=safeRight+dp(16);
+        secureLp.bottomMargin=secureBottom;
+        int secureWidth=root.getWidth()-secureSide-(safeRight+dp(16));
+        if(secureWidth>0) secureBanner.setMaxWidth(Math.min(dp(520), secureWidth));
+        secureBanner.setLayoutParams(secureLp);
     }
     private void applySessionChrome(boolean enabled) {
         WindowInsetsController controller=getWindow().getInsetsController();
@@ -361,6 +390,7 @@ public final class MainActivity extends Activity {
             menuButton.setVisibility(showHandle ? View.VISIBLE : View.GONE);
             if(showHandle) { menuButton.setAlpha(0f); menuButton.animate().alpha(1f).setDuration(120).start(); }
         }
+        syncSecureBanner();
     }
     private void bumpChrome() {
         if(!controlsOpen || remote==null) return;
@@ -522,6 +552,7 @@ public final class MainActivity extends Activity {
             pacedQuality=frameQuality;
             paceSlow=0;
             paceFast=0;
+            secureState="off";
         }
         closePicture();
         if(api!=null) { api.cancelled=true; if(!control.isShutdown()) control.execute(api::logout); }
@@ -530,6 +561,7 @@ public final class MainActivity extends Activity {
             applySessionChrome(false);
             setControlsOpen(false);
             health.setVisibility(View.GONE);
+            if(secureBanner!=null) secureBanner.setVisibility(View.GONE);
             screen.resetInput();
             screen.setImageDrawable(null);
             bitmap=null;
@@ -788,7 +820,9 @@ public final class MainActivity extends Activity {
         String nl=String.valueOf((char)10);
         int asked=Math.max(25,Math.min(pacedQuality,frameQuality));
         String paced=asked==frameQuality?"요청과 같음":Integer.toString(asked);
-        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"전송 화질: "+paced+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
+        String secureShown=SecureNotice.text(secureState);
+        if(secureShown==null) secureShown="일반 화면";
+        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"전송 화질: "+paced+nl+"화면: "+secureShown+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
     }
     private void updateHealth() {
         long now=SystemClock.elapsedRealtime(); if(now-healthWindow<1000)return;
@@ -851,6 +885,7 @@ public final class MainActivity extends Activity {
         String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+frameRate+"&view="+view+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
         RemoteApi.Picture picture=api.frame(path);
         lastTransferMs=picture.transferMs;
+        noteSecure(api, epoch, picture.secure);
         if(picture.bytes.length==0) return havePicture?new PolledFrame(null,true):null;
         if(video && "h264".equalsIgnoreCase(picture.codec)) {
             Bitmap decoded;
@@ -902,6 +937,25 @@ public final class MainActivity extends Activity {
         synchronized(pictureGate) {
             if(h264Picture!=null) { h264Picture.close(); h264Picture=null; }
         }
+    }
+    private void noteSecure(RemoteApi api, int epoch, String header) {
+        String next=SecureNotice.state(header);
+        synchronized(sessionGate) {
+            if(generation.get()!=epoch || remote!=api) return;
+            if(next.equals(secureState)) return;
+            secureState=next;
+        }
+        runOnUiThread(() -> { if(generation.get()!=epoch || remote!=api) return; syncSecureBanner(); });
+    }
+    private void syncSecureBanner() {
+        if(secureBanner==null) return;
+        String message=SecureNotice.text(secureState);
+        if(remote==null || !SecureNotice.visible(controlsOpen, message)) {
+            secureBanner.setVisibility(View.GONE);
+            return;
+        }
+        secureBanner.setText(message);
+        secureBanner.setVisibility(View.VISIBLE);
     }
     private String[] qualityLabels() {
         if(preferH264 && "H.264".equals(activeCodec)) return new String[]{"저대역폭 · 30","균형 · 55","고화질 · 75"};

@@ -968,7 +968,7 @@ public partial class MainWindow
             if (!string.IsNullOrEmpty(secureNotice))
             {
                 window.SessionAlertText.Text = secureNotice;
-                var showSecure = client != null && !toolbarOpen;
+                var showSecure = client != null && UiText.ShowSecureDesktop(toolbarOpen, secureNotice);
                 window.SessionAlert.Visibility = showSecure ? Visibility.Visible : Visibility.Collapsed;
                 if (!showSecure) return;
                 window.SessionAlert.BorderBrush = (System.Windows.Media.Brush)window.FindResource("LineBrush");

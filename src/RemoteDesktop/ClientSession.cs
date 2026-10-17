@@ -250,14 +250,20 @@ public partial class MainWindow
                 }
                 reconnectAttempt++;
                 var wait = UiText.ReconnectDelay(reconnectAttempt);
-                var notice = UiText.Reconnecting(reconnectAttempt, UiText.MaxAutomaticReconnects, (int)wait.TotalSeconds);
-                window.ClientNotice(notice);
-                ShowStage(notice);
-                SetHealth(UiText.ReconnectHold());
+                var seconds = Math.Max(1, (int)wait.TotalSeconds);
                 window.ConnectButton.IsEnabled = false;
                 window.ConnectButton.Content = "다시 연결 중…";
                 SetConnectFormEnabled(false);
-                await Task.Delay(wait);
+                SetHealth(UiText.ReconnectHold());
+                for (var left = seconds; left >= 1; left--)
+                {
+                    if (suppressReconnect || resumeEpoch != epoch || sessionPassword == null || client != null || connecting) return;
+                    var notice = UiText.Reconnecting(reconnectAttempt, UiText.MaxAutomaticReconnects, left);
+                    window.ClientNotice(notice);
+                    ShowStage(notice);
+                    window.SessionStatus(notice);
+                    await Task.Delay(TimeSpan.FromSeconds(1));
+                }
                 if (suppressReconnect || resumeEpoch != epoch || sessionPassword == null || client != null || connecting) return;
                 if (await ConnectCore(sessionPassword, announceFailure: false)) return;
                 failure = connectFailure ?? failure;
@@ -582,6 +588,7 @@ public partial class MainWindow
             inputBacklog.Reset();
             if (!retrying) ClearFrame();
             ShowStage(retrying ? UiText.ReconnectHold() : null);
+            if (retrying) window.SessionStatus(UiText.ReconnectHold());
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
             if (!retrying) selectedDisplay = null;
             SetSessionControlsEnabled(false);
@@ -956,7 +963,7 @@ public partial class MainWindow
         private void ShowStage(string? hint)
         {
             window.StageHint.Text = hint ?? "";
-            window.StageHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+            window.StageHintCard.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
         }
 
         private void ShowSessionPreset()

@@ -113,6 +113,7 @@ Check(!UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("deni
 Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(4) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(8) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
 Check(UiText.Reconnecting(1, 3, (int)UiText.ReconnectDelay(1).TotalSeconds) == "연결이 끊겼습니다. 2초 후 다시 연결합니다. (1/3)", "reconnect tells how long the next try waits");
 Check(UiText.ReconnectHold() == "다시 연결하는 중…", "a dropped picture stays up while the next try is waiting");
+Check(UiText.ReconnectNotice(UiText.Reconnecting(2, 3, 4)) && UiText.ReconnectNotice(UiText.ReconnectHold()) && !UiText.ReconnectNotice("연결됨") && UiText.SessionNoticeHolds(UiText.Reconnecting(1, 3, 1)) && UiText.SessionOnPicture(UiText.Reconnecting(1, 3, 1)), "a reconnect countdown stays on screen instead of looking connected");
 Check(UiText.CanResume(UiText.DropKind.Network) && UiText.CanResume(UiText.DropKind.Occupied) && !UiText.CanResume(UiText.DropKind.Rejected) && !UiText.CanResume(UiText.DropKind.Certificate), "a dropped session keeps trying while its old login is still reserved");
 Check(!UiText.ReplaceQuietSession(TimeSpan.FromSeconds(4.9)) && UiText.ReplaceQuietSession(TimeSpan.FromSeconds(5)), "a live session stays reserved and a quiet one can be replaced");
 Check(!RemoteClient.SendJpeg(true, true) && RemoteClient.SendJpeg(false, true) && RemoteClient.SendJpeg(true, false), "an unchanged frame is not sent again after the viewer has it");

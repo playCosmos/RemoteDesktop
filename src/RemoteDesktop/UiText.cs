@@ -280,7 +280,7 @@ public static class UiText
 
     public static bool SessionNoticeHolds(string? text)
     {
-        if (string.IsNullOrWhiteSpace(text) || IsProblem(text)) return true;
+        if (string.IsNullOrWhiteSpace(text) || IsProblem(text) || ReconnectNotice(text)) return true;
         return text.Contains('%') && !text.Contains("완료", StringComparison.Ordinal);
     }
 
@@ -299,7 +299,7 @@ public static class UiText
     public static bool SessionOnPicture(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        if (IsProblem(text) || InboundArrival(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (IsProblem(text) || InboundArrival(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 
@@ -367,6 +367,9 @@ public static class UiText
         => "연결이 끊겼습니다. " + seconds + "초 후 다시 연결합니다. (" + attempt + "/" + maximum + ")";
 
     public static string ReconnectHold() => "다시 연결하는 중…";
+
+    public static bool ReconnectNotice(string? text)
+        => text == ReconnectHold() || (text != null && text.Contains("초 후 다시 연결합니다.", StringComparison.Ordinal));
 
     public static string PasswordReveal(bool shown) => shown ? "숨김" : "보기";
 

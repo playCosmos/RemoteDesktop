@@ -104,6 +104,7 @@ Check(UiText.RemoteFailure("클립보드가 변경되었거나 전송이 만료�
 Check(UiText.Explain(new HttpRequestException(UiText.RemoteFailure("File hash mismatch")!, null, HttpStatusCode.BadRequest), "fallback") == "클립보드 파일이 맞지 않습니다. 다시 복사하세요.", "a server hash mismatch stays in Korean");
 Check(UiText.Explain(new InvalidOperationException("DXGI interface is unavailable."), "fallback") == "화면 캡처를 시작하지 못했습니다.", "capture startup failures stay in Korean");
 Check(!UiText.OfferMonitorChoice(2) && UiText.OfferMonitorChoice(3), "one monitor does not add a display picker");
+Check(UiText.SwitchingDisplay("모니터 2") == "모니터 2 화면으로 바꾸는 중…" && UiText.SwitchingDisplay("  ") == "다른 모니터로 바꾸는 중…" && UiText.SwitchingDisplay(null) == "다른 모니터로 바꾸는 중…", "switching monitors names the screen that is coming next");
 Check(UiText.ConnectionFailure(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized), false) == "비밀번호가 올바르지 않습니다.", "a rejected login says the password is wrong");
 Check(UiText.ConnectionFailure(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized), true) == "서버에서 연결을 끊었습니다. 다시 접속하세요.", "a dropped session is not described as a bad password");
 Check(UiText.ConnectionFailure(new TaskCanceledException(), true) == "서버 응답이 끊어졌습니다. 다시 접속하세요.", "a stalled session says the connection dropped");

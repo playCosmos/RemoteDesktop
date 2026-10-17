@@ -1590,7 +1590,13 @@ public partial class MainWindow
             if (display.Id == selectedDisplay) return;
             Queue(new("release"));
             ClearFrame();
-            ShowStage(client == null ? null : "화면을 받는 중…");
+            if (client == null) ShowStage(null);
+            else
+            {
+                var notice = UiText.SwitchingDisplay(display.Name);
+                ShowStage(notice);
+                window.SessionStatus(notice);
+            }
             renderedDisplay = null;
             selectedDisplay = display.Id;
             lastConnection.Display = display.Id;

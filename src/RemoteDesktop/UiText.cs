@@ -374,6 +374,12 @@ public static class UiText
 
     public static bool OfferMonitorChoice(int listedDisplays) => listedDisplays > 2;
 
+    public static string SwitchingDisplay(string? name)
+    {
+        var label = Blank(name);
+        return label == null ? "다른 모니터로 바꾸는 중…" : label + " 화면으로 바꾸는 중…";
+    }
+
     public static string ConnectionFailure(Exception exception, bool duringSession)
     {
         for (var current = exception; current != null; current = current.InnerException)

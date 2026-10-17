@@ -29,7 +29,13 @@ public final class ClipboardProvider extends ContentProvider {
     @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
         if(!"r".equals(mode))throw new FileNotFoundException("Read-only clipboard"); return ParcelFileDescriptor.open(resolve(uri),ParcelFileDescriptor.MODE_READ_ONLY);
     }
-    @Override public String getType(Uri uri) { return "application/octet-stream"; }
+    @Override public String getType(Uri uri) {
+        try {
+            String name=resolve(uri).getName();
+            if(name.length()>4 && name.regionMatches(true,name.length()-4,".png",0,4)) return "image/png";
+        } catch(FileNotFoundException ignored) {}
+        return "application/octet-stream";
+    }
     @Override public Cursor query(Uri uri,String[] projection,String selection,String[] args,String order) {
         try {
             File file=resolve(uri); String[] columns=projection==null?new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE}:projection;

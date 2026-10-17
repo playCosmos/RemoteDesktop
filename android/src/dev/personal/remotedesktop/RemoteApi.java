@@ -127,8 +127,9 @@ final class RemoteApi {
             request("clipboard/uploads/"+id+"/commit","POST",new JSONObject()); committed=true;
         } finally { if(!committed)try { request("clipboard/uploads/"+id,"DELETE",null); } catch(Exception ignored) {} }
     }
-    void downloadClipboard(String id,int index,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/"+index,out,progress); }
-    private void downloadPath(String path, OutputStream out, Progress progress) throws Exception {
+    void downloadClipboard(String id,int index,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/"+index,out,1024L*1024*1024,progress); }
+    void downloadClipboardImage(String id,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/image",out,16L*1024*1024,progress); }
+    private void downloadPath(String path, OutputStream out, long maxBytes, Progress progress) throws Exception {
         HttpsURLConnection c = open(path, "GET");
         try {
             check(c); long total = 0; MessageDigest hash = MessageDigest.getInstance("SHA-256");
@@ -136,7 +137,7 @@ final class RemoteApi {
                 byte[] buffer = new byte[65536]; int n;
                 while ((n = in.read(buffer)) != -1) {
                     if (cancelled) throw new IOException("전송 취소됨");
-                    total += n; if (total > 1024L*1024*1024) throw new IOException("최대 파일 크기 초과");
+                    total += n; if (total > maxBytes) throw new IOException(maxBytes <= 16L*1024*1024 ? "클립보드 이미지는 16MB 이하만 지원합니다." : "최대 파일 크기 초과");
                     hash.update(buffer,0,n); out.write(buffer,0,n); progress.update(total);
                 }
             }

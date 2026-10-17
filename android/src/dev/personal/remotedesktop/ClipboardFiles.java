@@ -58,7 +58,9 @@ final class ClipboardFiles {
         }
         if(snapshot.getString("id").equals(remoteTextRevision))return;
         JSONArray files=snapshot.getJSONArray("files"); String remoteText=snapshot.optString("text","");
-        if(origin.equals(snapshot.optString("origin","")) || files.length()!=0 || snapshot.optLong("image",0)>0) { remoteTextRevision=snapshot.getString("id"); return; }
+        if(origin.equals(snapshot.optString("origin","")) || files.length()!=0) { remoteTextRevision=snapshot.getString("id"); return; }
+        long image=snapshot.optLong("image",0);
+        if(image>0 && remoteText.isEmpty()) { acceptImage(api,snapshot,now,image); return; }
         if(remoteText.isEmpty()) {
             activity.runOnUiThread(() -> {
                 if(server.get()!=api || revision.get()!=now)return;
@@ -74,6 +76,27 @@ final class ClipboardFiles {
             clipboard.setPrimaryClip(ClipData.newPlainText(TEXT_MARKER+snapshot.optString("id",""),remoteText));
             observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("텍스트 클립보드 수신 완료");
         });
+    }
+    private void acceptImage(RemoteApi api, JSONObject snapshot, int now, long image) {
+        if(image>16L*1024*1024) { remoteTextRevision=snapshot.optString("id",""); status.accept("클립보드 이미지는 16MB 이하만 지원합니다."); return; }
+        String name=UUID.randomUUID().toString();
+        downloading.add(name);
+        File batch=new File(new File(activity.getFilesDir(),"clipboard"),name);
+        try {
+            File folder=new File(batch,"0");
+            if(!folder.isDirectory() && !folder.mkdirs())throw new IOException("폴더를 만들지 못했습니다");
+            File file=new File(folder,"picture.png");
+            try(OutputStream out=new FileOutputStream(file)) { api.downloadClipboardImage(snapshot.getString("id"),out,bytes -> progress(bytes)); }
+            if(file.length()!=image)throw new IOException("클립보드 이미지 크기 불일치");
+            try(InputStream in=new FileInputStream(file)) { byte[] sig=new byte[8]; if(in.read(sig)!=8 || (sig[0] & 0xFF)!=0x89 || sig[1]!=0x50 || sig[2]!=0x4E || sig[3]!=0x47)throw new IOException("클립보드 이미지는 PNG만 지원합니다."); }
+            Uri uri=new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(name).appendPath("0").appendPath("picture.png").build();
+            activity.runOnUiThread(() -> {
+                downloading.remove(name);
+                if(server.get()!=api || revision.get()!=now) { remove(batch); return; }
+                clipboard.setPrimaryClip(ClipData.newUri(activity.getContentResolver(),"Remote Desktop picture",uri));
+                observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("이미지 클립보드 수신 완료");
+            });
+        } catch(Exception e) { downloading.remove(name); remove(batch); status.accept("클립보드: "+e.getMessage()); }
     }
     void accept(Intent intent) {
         if(!Intent.ACTION_SEND.equals(intent.getAction()) && !Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))return;

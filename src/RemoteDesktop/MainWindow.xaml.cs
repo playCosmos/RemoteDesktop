@@ -12,6 +12,9 @@ public partial class MainWindow : Window
     private readonly ClientSession clientSession;
     private readonly string productTitle;
     private string? attentionPeer;
+    private System.Windows.Forms.NotifyIcon? tray;
+    private System.Drawing.Icon? trayIcon;
+    private bool trayExplained;
 
     public MainWindow()
     {
@@ -44,14 +47,31 @@ public partial class MainWindow : Window
         };
         Loaded += async (_, _) =>
         {
+            EnsureTray();
             await hostSession.StartIfConfigured();
             clientSession.FocusConnectField();
         };
+        System.Windows.Application.Current.SessionEnding += (_, _) => AppLifetime.NoteSystemExit();
         Closing += (_, e) =>
         {
-            if (!ConfirmClose()) { e.Cancel = true; return; }
+            var decision = WindowClose.Decide(AppLifetime.ExitRequested, AppLifetime.ForceExit, UiText.ClosePrompt(clientSession.RemoteEndpoint, hostSession.ConnectedPeer) != null);
+            if (decision == WindowClose.Result.Hide)
+            {
+                e.Cancel = true;
+                Hide();
+                EnsureTray();
+                NoteTray();
+                return;
+            }
+            if (decision == WindowClose.Result.Ask && !ConfirmClose())
+            {
+                e.Cancel = true;
+                AppLifetime.Stay();
+                return;
+            }
             clientSession.SaveWindowPlacement();
             hostSession.Closing = true;
+            ReleaseTray();
         };
         Activated += (_, _) => StopAttention();
         Closed += async (_, _) =>
@@ -70,6 +90,62 @@ public partial class MainWindow : Window
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
+        NoteTray();
+    }
+
+    private void EnsureTray()
+    {
+        if (tray != null) return;
+        System.Drawing.Icon icon;
+        try
+        {
+            trayIcon = string.IsNullOrWhiteSpace(Environment.ProcessPath) ? null : System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath);
+            icon = trayIcon ?? System.Drawing.SystemIcons.Application;
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.IO.IOException or System.ComponentModel.Win32Exception)
+        {
+            icon = System.Drawing.SystemIcons.Application;
+        }
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+        var open = new System.Windows.Forms.ToolStripMenuItem(UiText.TrayOpen());
+        open.Click += (_, _) => BringToFront();
+        var exit = new System.Windows.Forms.ToolStripMenuItem(UiText.TrayExit());
+        exit.Click += (_, _) => AppLifetime.RequestExit();
+        menu.Items.Add(open);
+        menu.Items.Add(exit);
+        tray = new System.Windows.Forms.NotifyIcon
+        {
+            Icon = icon,
+            Visible = true,
+            Text = UiText.TrayTip(false),
+            ContextMenuStrip = menu
+        };
+        tray.MouseClick += (_, e) =>
+        {
+            if (e.Button == System.Windows.Forms.MouseButtons.Left) BringToFront();
+        };
+    }
+
+    internal void NoteTray()
+    {
+        if (tray == null) return;
+        var tip = UiText.TrayTip(hostSession.Listening);
+        tray.Text = tip.Length > 63 ? tip[..63] : tip;
+        if (trayExplained || IsVisible) return;
+        trayExplained = true;
+        tray.ShowBalloonTip(2500, productTitle, UiText.TrayHidden(hostSession.Listening), System.Windows.Forms.ToolTipIcon.Info);
+    }
+
+    private void ReleaseTray()
+    {
+        if (tray != null)
+        {
+            tray.Visible = false;
+            tray.Dispose();
+            tray = null;
+        }
+        trayIcon?.Dispose();
+        trayIcon = null;
     }
 
     private bool ConfirmClose()

@@ -96,7 +96,7 @@ public static class AppInstaller
     public static void Relaunch(string executable)
     {
         Process.Start(new ProcessStartInfo(executable, AppCommand.WaitUi) { UseShellExecute = true });
-        System.Windows.Application.Current?.Shutdown();
+        AppLifetime.RequestExit(force: true);
     }
 
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";

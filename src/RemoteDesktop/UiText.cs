@@ -105,10 +105,15 @@ public static class UiText
         var remote = Blank(viewing);
         var guest = Blank(hosting);
         if (remote == null && guest == null) return null;
-        if (remote != null && guest != null) return remote + " 화면을 보고 있고, " + guest + " 이 PC를 보고 있습니다. 창을 닫고 둘 다 끊을까요?";
-        if (guest != null) return guest + " 이 PC를 보고 있습니다. 창을 닫고 연결을 끊을까요?";
-        return remote + " 화면을 보고 있습니다. 창을 닫고 연결을 끊을까요?";
+        if (remote != null && guest != null) return remote + " 화면을 보고 있고, " + guest + " 이 PC를 보고 있습니다. 종료하고 둘 다 끊을까요?";
+        if (guest != null) return guest + " 이 PC를 보고 있습니다. 종료하고 연결을 끊을까요?";
+        return remote + " 화면을 보고 있습니다. 종료하고 연결을 끊을까요?";
     }
+
+    public static string TrayTip(bool listening) => listening ? "Personal Remote Desktop · 접속 대기 중" : "Personal Remote Desktop";
+    public static string TrayHidden(bool listening) => listening ? "접속 대기는 계속됩니다. 아이콘을 누르면 창이 다시 열립니다." : "아이콘을 누르면 창이 다시 열립니다.";
+    public static string TrayOpen() => "창 열기";
+    public static string TrayExit() => "종료";
 
     public static string HostTabLabel(string? inbound)
     {

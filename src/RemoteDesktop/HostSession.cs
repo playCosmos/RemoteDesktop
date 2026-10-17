@@ -35,6 +35,7 @@ public partial class MainWindow
         public bool Closing { get; set; }
         public bool HasClient => host?.HasSession == true;
         public string? ConnectedPeer => host?.SessionPeer;
+        public bool Listening => hostState == HostUiState.Listening;
 
         public HostSession(MainWindow window) => this.window = window;
 
@@ -152,6 +153,7 @@ public partial class MainWindow
         private void SetHostState(HostUiState state)
         {
             hostState = state;
+            window.NoteTray();
             window.StartButton.Content = state switch
             {
                 HostUiState.Starting => UiText.HostStartLabel(true),
@@ -732,14 +734,14 @@ public partial class MainWindow
                     if (elevated == null) throw new InvalidOperationException("제거 권한 창을 열지 못했습니다.");
                     await Task.Run(() => elevated.WaitForExit());
                     if (elevated.ExitCode != 0) throw new InvalidOperationException("설치 제거가 끝나지 않았습니다.");
-                    System.Windows.Application.Current?.Shutdown();
+                    AppLifetime.RequestExit(force: true);
                     return;
                 }
                 AppInstaller.ClearUserAutostart();
                 var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
                 if (File.Exists(shortcut)) File.Delete(shortcut);
                 AppInstaller.DeleteAfterExit(AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
-                System.Windows.Application.Current?.Shutdown();
+                AppLifetime.RequestExit(force: true);
             }
             catch (Exception ex)
             {

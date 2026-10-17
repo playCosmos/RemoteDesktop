@@ -85,7 +85,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
         await app.StartAsync();
         try { await clipboard.Sweep(CancellationToken.None); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
-        timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(); } }, null, 1000, 1000);
+        timer = new Timer(_ => { lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(UiText.SessionEndKind.TimedOut); } }, null, 1000, 1000);
         listenPort = port;
         Status?.Invoke(UiText.Listening(port));
     }
@@ -168,15 +168,18 @@ public sealed partial class RemoteHost : IAsyncDisposable
             return (token!, CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, session.Token));
         }
     }
-    public void Disconnect()
+    public void Disconnect(UiText.SessionEndKind reason = UiText.SessionEndKind.Left)
     {
         lock (gate)
         {
             if (disposeState == 2) return;
+            var peer = sessionPeer;
+            var hadSession = token != null;
             var oldToken = token; token = null; sessionPeer = null; sessionStarted = null; session.Cancel();
             if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
             try { desktop.Release(); } catch (InvalidOperationException) { }
-            Status?.Invoke(UiText.Listening(listenPort));
+            if (disposeState != 0) return;
+            Status?.Invoke(hadSession ? UiText.SessionEnded(peer, reason, listenPort) : UiText.Listening(listenPort));
         }
     }
     public async ValueTask DisposeAsync()

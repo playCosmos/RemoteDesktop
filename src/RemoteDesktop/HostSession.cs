@@ -420,15 +420,16 @@ public partial class MainWindow
         public async void StopHost(object sender, RoutedEventArgs e)
         {
             if (hostStarting) { window.HostStatus("서버를 시작하는 중입니다."); return; }
+            var peer = ConnectedPeer;
             SetHostState(HostUiState.Stopping);
             window.HostStatus("접속 대기를 중지하는 중…");
             if (host != null) { await host.DisposeAsync(); host = null; }
             SetHostState(HostUiState.Stopped);
             UpdatePasswordState();
-            window.HostStatus("서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다.");
+            window.HostStatus(UiText.HostStopped(peer));
         }
 
-        public void Kick(object sender, RoutedEventArgs e) => host?.Disconnect();
+        public void Kick(object sender, RoutedEventArgs e) => host?.Disconnect(UiText.SessionEndKind.Kicked);
 
         public void CopyFingerprint(object sender, RoutedEventArgs e)
         {

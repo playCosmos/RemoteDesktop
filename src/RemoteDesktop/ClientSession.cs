@@ -718,9 +718,16 @@ public partial class MainWindow
             ShowSessionToolbar();
         }
 
+        public void AnnounceHostNotice(string? text)
+        {
+            if (client == null || !UiText.HostSessionEnded(text) || UiText.ReconnectNotice(window.StatusText.Text)) return;
+            window.SessionStatus(text!);
+            ShowSessionToolbar();
+        }
+
         private void DismissInboundArrival()
         {
-            if (client == null || !UiText.InboundArrival(window.StatusText.Text)) return;
+            if (client == null || !(UiText.InboundArrival(window.StatusText.Text) || UiText.HostSessionEnded(window.StatusText.Text))) return;
             sessionNoticeTimer?.Stop();
             settlingNotice = null;
             window.SessionStatus(UiText.SessionBaseline(inputEnabled));

@@ -86,8 +86,14 @@ public partial class MainWindow : Window
         SessionReveal.ToolTip = UiText.RevealTip(clientSession.ViewingLabel, inbound);
         if (departed) StopAttention();
         else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
-        if (UiText.AnnounceInbound(newlyConnected, UiText.HostPageVisible(ServerTab.IsSelected, clientSession.IsFullscreen)))
+        var hostPageVisible = UiText.HostPageVisible(ServerTab.IsSelected, clientSession.IsFullscreen);
+        if (UiText.AnnounceInbound(newlyConnected, hostPageVisible))
             clientSession.AnnounceInbound(inbound);
+        if (departed && !hostPageVisible && UiText.HostSessionEnded(ServerStatusText.Text))
+        {
+            if (clientSession.RemoteEndpoint != null) clientSession.AnnounceHostNotice(ServerStatusText.Text);
+            else ClientNotice(ServerStatusText.Text);
+        }
     }
 
     private void StartAttention()

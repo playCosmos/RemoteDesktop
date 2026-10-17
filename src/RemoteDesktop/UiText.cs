@@ -42,6 +42,35 @@ public static class UiText
 
     public static string Listening(int port) => port is > 0 and <= 65535 ? "접속 대기 중 · 포트 " + port : "접속 대기 중";
 
+    public enum SessionEndKind { Left, Kicked, TimedOut }
+
+    public static string SessionEnded(string? peer, SessionEndKind kind, int port)
+    {
+        var name = Blank(peer) ?? "상대 PC";
+        var why = kind switch
+        {
+            SessionEndKind.Kicked => name + " 연결을 끊었습니다.",
+            SessionEndKind.TimedOut => name + " 응답이 없어 연결을 끊었습니다.",
+            _ => name + " 연결이 종료되었습니다."
+        };
+        return why + " " + Listening(port);
+    }
+
+    public static string HostStopped(string? peer)
+    {
+        var name = Blank(peer);
+        return name == null ? "서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다." : name + " 연결을 끊고 서버를 중지했습니다.";
+    }
+
+    public static bool HostSessionEnded(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        return text.Contains(" 연결이 종료되었습니다.", StringComparison.Ordinal)
+            || text.Contains(" 연결을 끊었습니다. 접속 대기", StringComparison.Ordinal)
+            || text.Contains(" 응답이 없어 연결을 끊었습니다.", StringComparison.Ordinal)
+            || text.Contains(" 연결을 끊고 서버를 중지했습니다.", StringComparison.Ordinal);
+    }
+
     public static string PeerLabel(IPAddress? address)
     {
         if (address is null) return "";
@@ -288,7 +317,7 @@ public static class UiText
         => !string.IsNullOrWhiteSpace(text) && text.Contains("이 PC에 연결됨", StringComparison.Ordinal);
 
     public static TimeSpan SessionNoticeDuration(string? text)
-        => InboundArrival(text) ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(4.5);
+        => InboundArrival(text) || HostSessionEnded(text) ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(4.5);
 
     public static string FileDropHint(bool inputEnabled)
         => inputEnabled ? "놓으면 상대 PC에서 붙여넣을 수 있습니다" : "입력 제어를 켜야 파일을 보낼 수 있습니다";
@@ -299,7 +328,7 @@ public static class UiText
     public static bool SessionOnPicture(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        if (IsProblem(text) || InboundArrival(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (IsProblem(text) || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 

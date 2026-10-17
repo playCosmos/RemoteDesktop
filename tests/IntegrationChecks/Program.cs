@@ -125,6 +125,9 @@ Check(UiText.ClientConnected(null) == "클라이언트 연결됨", "a client wit
 Check(UiText.ClientConnected(IPAddress.Parse("::ffff:192.168.0.8")) == "클라이언트 연결됨 · 192.168.0.8", "a mapped client address is shown as IPv4");
 Check(UiText.ClientConnected(IPAddress.Parse("fe80::1%12")) == "클라이언트 연결됨 · fe80::1", "a link-local client address drops the zone id");
 Check(UiText.Listening(45831) == "접속 대기 중 · 포트 45831" && UiText.Listening(0) == "접속 대기 중", "listening status keeps the port");
+Check(UiText.SessionEnded("192.168.0.2", UiText.SessionEndKind.Left, 45831) == "192.168.0.2 연결이 종료되었습니다. 접속 대기 중 · 포트 45831" && UiText.SessionEnded("192.168.0.2", UiText.SessionEndKind.Kicked, 45831) == "192.168.0.2 연결을 끊었습니다. 접속 대기 중 · 포트 45831" && UiText.SessionEnded(" ", UiText.SessionEndKind.TimedOut, 45831) == "상대 PC 응답이 없어 연결을 끊었습니다. 접속 대기 중 · 포트 45831", "the host says whether a client left, was disconnected, or stopped answering");
+Check(UiText.HostStopped(null) == "서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다." && UiText.HostStopped("192.168.0.2") == "192.168.0.2 연결을 끊고 서버를 중지했습니다.", "stopping the server names the client that was dropped");
+Check(UiText.HostSessionEnded(UiText.SessionEnded("10.0.0.8", UiText.SessionEndKind.Left, 1)) && UiText.SessionOnPicture(UiText.HostStopped("10.0.0.8")) && UiText.SessionNoticeDuration(UiText.SessionEnded("10.0.0.8", UiText.SessionEndKind.Kicked, 1)) == TimeSpan.FromSeconds(12) && !UiText.HostSessionEnded("서버에서 연결을 끊었습니다. 다시 접속하세요."), "a client leaving this pc stays on the remote picture");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", null, null) == "Personal Remote Desktop 0.9.59", "an idle window keeps the product title");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 — 192.168.0.2 연결됨", "both sessions name the remote pc and the inbound client");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", null) == "10.0.0.8:45831 — Personal Remote Desktop 0.9.59", "an open remote session names the window");
@@ -329,7 +332,8 @@ async Task Session()
     site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", replacedToken);
     using (var response = await site.Http.GetAsync("ping")) Check(response.IsSuccessStatusCode, "the replacement login can use the host");
     site.Host.Disconnect();
-    Check(hostNotices[^1] == "접속 대기 중 · 포트 " + site.Port, "a departed client returns the host to listening");
+    var left = hostNotices[^1];
+    Check(left == UiText.SessionEnded("127.0.0.1", UiText.SessionEndKind.Left, site.Port) || left == UiText.SessionEnded("::1", UiText.SessionEndKind.Left, site.Port), "a departed client returns the host to listening and says who left");
     Check(site.Host.SessionPeer == null, "host forgets the client after it leaves");
     Check(site.Host.SessionStartedUtc == null, "host forgets the connection time after the client leaves");
     using (var response = await site.Http.GetAsync("ping")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "host disconnect revokes token");

@@ -77,6 +77,29 @@ final class RemoteApi {
             }
         } finally { c.disconnect(); }
     }
+    static final class Picture {
+        final byte[] bytes;
+        final String codec;
+        Picture(byte[] bytes, String codec) {
+            this.bytes = bytes;
+            this.codec = codec == null || codec.trim().isEmpty() ? "jpeg" : codec.trim();
+        }
+    }
+    Picture frame(String path) throws Exception {
+        HttpsURLConnection c = open(path, "GET", 15000);
+        try {
+            check(c);
+            String codec = c.getHeaderField("X-Codec");
+            try (InputStream in = c.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[65536]; int n;
+                while ((n = in.read(buffer)) != -1) {
+                    if (out.size() + n > 32 * 1024 * 1024) throw new IOException("응답 크기 초과");
+                    out.write(buffer, 0, n);
+                }
+                return new Picture(out.toByteArray(), codec);
+            }
+        } finally { c.disconnect(); }
+    }
     void login(String password) throws Exception {
         JSONObject reply = new JSONObject(new String(request("login", "POST", new JSONObject().put("password",password)), "UTF-8"));
         if (reply.getInt("protocol") != 1) throw new IOException("프로토콜 버전 불일치");

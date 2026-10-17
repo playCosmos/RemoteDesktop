@@ -69,6 +69,14 @@ public final class MainActivity extends Activity {
     private boolean inputEnabled=true;
     private int frameQuality=55;
     private int frameRate=15;
+    private final Object pictureGate=new Object();
+    private H264Picture h264Picture;
+    private volatile RemoteApi picturedSession;
+    private volatile boolean preferH264=true;
+    private volatile boolean havePicture;
+    private volatile boolean needKey=true;
+    private volatile int h264Failures;
+    private volatile String activeCodec="H.264";
     private TextView health;
     private int receivedFrames;
     private long healthWindow=SystemClock.elapsedRealtime();
@@ -220,14 +228,14 @@ public final class MainActivity extends Activity {
                 clipboardFiles.syncText();
                 final String display=selectedDisplay;
                 long started=SystemClock.elapsedRealtime();
-                String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",viewX,viewY,viewWidth,viewHeight);
-                byte[] bytes=api.request("frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+frameQuality+"&view="+view,"GET",null);
-                Bitmap next=BitmapFactory.decodeByteArray(bytes,0,bytes.length);
-                if(next==null) throw new IOException("화면 디코딩 실패");
+                PolledFrame polled=pollFrame(api, display);
+                if(polled==null) return;
                 lastFrameMillis=SystemClock.elapsedRealtime()-started;
                 receivedFrames++;
                 foregroundFailures=0;
                 updateHealth();
+                if(polled.keep) return;
+                Bitmap next=polled.bitmap;
                 runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) { bitmap=next; renderedDisplay=display; screen.setImageBitmap(next); } else next.recycle(); });
             } catch(Exception e) { try { if(api!=null && remote==api) noteSessionFailure(api, e); } catch(Exception ignored) {} }
         },0,10,TimeUnit.MILLISECONDS);
@@ -484,7 +492,14 @@ public final class MainActivity extends Activity {
             reconnectNeeded=false;
             backgroundUncertain=false;
             foregroundFailures=0;
+            havePicture=false;
+            needKey=true;
+            h264Failures=0;
+            preferH264=true;
+            activeCodec="H.264";
+            picturedSession=null;
         }
+        closePicture();
         if(api!=null) { api.cancelled=true; if(!control.isShutdown()) control.execute(api::logout); }
         runOnUiThread(() -> {
             connectionScroll.setVisibility(View.VISIBLE);
@@ -733,26 +748,26 @@ public final class MainActivity extends Activity {
         controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; if(remote!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
     }
     private void chooseQuality() {
-        String[] labels={"저대역폭 · JPEG 30","균형 · JPEG 55","고화질 · JPEG 75"}; int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
-        new AlertDialog.Builder(this).setTitle("화면 품질").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameQuality=values[which]; preferences.edit().putInt("frameQuality",frameQuality).apply(); dialog.dismiss(); info("화면 품질: "+labels[which]); }).setNegativeButton("취소",null).show();
+        String[] labels=qualityLabels(); int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
+        new AlertDialog.Builder(this).setTitle("화면 품질").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameQuality=values[which]; needKey=true; preferences.edit().putInt("frameQuality",frameQuality).apply(); dialog.dismiss(); info("화면 품질: "+qualityLabels()[which]); }).setNegativeButton("취소",null).show();
     }
-    private void lowBandwidth() { frameQuality=25; frameRate=5; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info("저대역폭 모드: JPEG 25 · 5 FPS"); }
+    private void lowBandwidth() { frameQuality=25; frameRate=5; needKey=true; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info(preferH264 && "H.264".equals(activeCodec)?"저대역폭 모드: 품질 25 · 5 FPS":"저대역폭 모드: JPEG 25 · 5 FPS"); }
     private static float clamp(float value,float min,float max) { return Math.max(min,Math.min(max,value)); }
     private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; nextFrameAt=0; info("확대 초기화"); }
     private void chooseFrameRate() {
         String[] labels={"5 FPS · 저전력","10 FPS · 절약","15 FPS · 균형","30 FPS · 최대"}; int[] values={5,10,15,30}; int selected=frameRate==5?0:frameRate==10?1:frameRate==30?3:2;
-        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; nextFrameAt=0; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
+        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; nextFrameAt=0; needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
     }
     private static int validFrameRate(int rate) { return rate==5 || rate==10 || rate==15 || rate==30 ? rate : 15; }
     private void showSessionInfo() {
         String resolution=bitmap==null?"수신 전":bitmap.getWidth()+"×"+bitmap.getHeight();
         String nl=String.valueOf((char)10);
-        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"JPEG 품질: "+frameQuality+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
+        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
     }
     private void updateHealth() {
         long now=SystemClock.elapsedRealtime(); if(now-healthWindow<1000)return;
         final float fps=receivedFrames*1000f/(now-healthWindow); receivedFrames=0; healthWindow=now;
-        runOnUiThread(() -> { if(remote==null || !resumed || reconnectNeeded) return; health.setVisibility(View.VISIBLE); health.setText(String.format("%.0f fps · %d ms",fps,lastFrameMillis)); });
+        runOnUiThread(() -> { if(remote==null || !resumed || reconnectNeeded) return; health.setVisibility(View.VISIBLE); health.setText(String.format(java.util.Locale.US,"%.0f fps · %d ms · %s",fps,lastFrameMillis,activeCodec)); });
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
@@ -771,11 +786,79 @@ public final class MainActivity extends Activity {
             String[] names=new String[list.length()],ids=new String[list.length()];
             for(int i=0;i<list.length();i++) { JSONObject d=list.getJSONObject(i); ids[i]=d.getString("id"); names[i]=d.getString("name")+" · "+d.getInt("width")+"×"+d.getInt("height"); }
             runOnUiThread(() -> { if(remote!=api)return; new AlertDialog.Builder(this).setTitle("모니터 선택").setItems(names,(dialog,index) -> {
-                if(remote!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); selectedDisplay=ids[index]; preferences.edit().putString("display",selectedDisplay).apply();
+                if(remote!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); selectedDisplay=ids[index]; havePicture=false; needKey=true; preferences.edit().putString("display",selectedDisplay).apply();
             }).setNegativeButton("닫기",null).show(); });
         } catch(Exception e) { report(e); } });
     }
     @Override public void onBackPressed() { if(controlsOpen) setControlsOpen(false); else super.onBackPressed(); }
     @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(remote!=null) applySessionChrome(true); }
     @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); control.shutdown(); super.onDestroy(); }
+    private PolledFrame pollFrame(RemoteApi api, String display) throws Exception {
+        final int epoch=generation.get();
+        if(picturedSession!=api) { picturedSession=api; needKey=true; }
+        String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",viewX,viewY,viewWidth,viewHeight);
+        boolean video=preferH264;
+        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+frameQuality+"&fps="+frameRate+"&view="+view+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
+        RemoteApi.Picture picture=api.frame(path);
+        if(picture.bytes.length==0) return havePicture?new PolledFrame(null,true):null;
+        if(video && "h264".equalsIgnoreCase(picture.codec)) {
+            Bitmap decoded;
+            H264Picture decoder=null;
+            try {
+                synchronized(pictureGate) {
+                    if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) return null;
+                    if(h264Picture==null) h264Picture=new H264Picture();
+                    decoder=h264Picture;
+                    decoded=decoder.decode(picture.bytes);
+                }
+                synchronized(sessionGate) {
+                    if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { decoded.recycle(); return null; }
+                    h264Failures=0;
+                    activeCodec="H.264";
+                    needKey=false;
+                    havePicture=true;
+                }
+                return new PolledFrame(decoded,false);
+            } catch(Exception error) {
+                boolean current;
+                synchronized(sessionGate) {
+                    current=generation.get()==epoch && remote==api;
+                    if(!current) return null;
+                    needKey=true;
+                    if(++h264Failures>=8) {
+                        preferH264=false;
+                        activeCodec="JPEG";
+                        info("H.264를 사용할 수 없어 JPEG로 표시합니다.");
+                    }
+                }
+                synchronized(pictureGate) {
+                    if(decoder!=null && h264Picture==decoder) { decoder.close(); h264Picture=null; }
+                }
+                return null;
+            }
+        }
+        Bitmap jpeg=BitmapFactory.decodeByteArray(picture.bytes,0,picture.bytes.length);
+        if(jpeg==null) throw new IOException("화면 디코딩 실패");
+        synchronized(sessionGate) {
+            if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { jpeg.recycle(); return null; }
+            activeCodec="JPEG";
+            needKey=false;
+            havePicture=true;
+        }
+        return new PolledFrame(jpeg,false);
+    }
+    private void closePicture() {
+        synchronized(pictureGate) {
+            if(h264Picture!=null) { h264Picture.close(); h264Picture=null; }
+        }
+    }
+    private String[] qualityLabels() {
+        if(preferH264 && "H.264".equals(activeCodec)) return new String[]{"저대역폭 · 30","균형 · 55","고화질 · 75"};
+        return new String[]{"저대역폭 · JPEG 30","균형 · JPEG 55","고화질 · JPEG 75"};
+    }
+    private static final class PolledFrame {
+        final Bitmap bitmap;
+        final boolean keep;
+        PolledFrame(Bitmap bitmap, boolean keep) { this.bitmap=bitmap; this.keep=keep; }
+    }
 }

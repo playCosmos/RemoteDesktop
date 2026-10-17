@@ -13,6 +13,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     private ClipboardManifest manifest = new("", "", []);
     private ClipboardLeaf[] leaves = [];
     private byte[] imageBytes = [];
+    private string htmlText = "";
     private readonly Dictionary<string, Pending> pending = [];
     private sealed class Pending(string owner, ClipboardUpload request, string directory)
     {
@@ -30,6 +31,14 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         owner = scope; selected = current;
         ClipboardPaths.ValidateText(current.Text);
         var text = files.Length == 0 ? current.Text : "";
+        var html = files.Length == 0 ? current.Html ?? "" : "";
+        if (html.Length > ClipboardPaths.MaxHtmlCharacters) html = "";
+        if (text.Length == 0 && html.Length > 0)
+        {
+            text = ClipboardHtml.Plain(html);
+            if (text.Length > ClipboardPaths.MaxTextCharacters) text = text[..ClipboardPaths.MaxTextCharacters];
+        }
+        if (text.Length == 0) html = "";
         var image = files.Length == 0 && text.Length == 0 ? current.Image ?? [] : [];
         if (image.Length > 0)
         {
@@ -37,7 +46,8 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             catch (ArgumentException) { image = []; }
         }
         imageBytes = image;
-        manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, text, image.Length); return manifest;
+        htmlText = html;
+        manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, text, image.Length, html.Length); return manifest;
     }
     public async Task<ClipboardManifest> Read(string scope, CancellationToken ct)
     { await mutex.WaitAsync(ct); try { return await ReadCore(scope, ct); } finally { mutex.Release(); } }
@@ -91,6 +101,17 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         }
         finally { mutex.Release(); }
     }
+    public async Task<string> OpenHtml(string scope, string id, CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            var current = await ReadCore(scope, ct);
+            if (current.Id != id || current.Html == 0 || htmlText.Length != current.Html) throw new ClipboardConflictException();
+            return htmlText;
+        }
+        finally { mutex.Release(); }
+    }
     private static async Task<byte[]> ReadImageBody(Stream input, CancellationToken ct)
     {
         using var buffer = new MemoryStream();
@@ -104,13 +125,21 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     }
     public async Task<ClipboardManifest> SetText(string scope, ClipboardTextUpdate request, CancellationToken ct)
     {
-        ClipboardPaths.ValidateText(request.Text);
+        var html = request.Html ?? "";
+        ClipboardPaths.ValidateHtml(html);
+        var text = request.Text ?? "";
+        if (text.Length == 0 && html.Length > 0)
+        {
+            text = ClipboardHtml.Plain(html);
+            if (text.Length > ClipboardPaths.MaxTextCharacters) text = text[..ClipboardPaths.MaxTextCharacters];
+        }
+        ClipboardPaths.ValidateText(text);
         if (string.IsNullOrEmpty(request.Origin) || request.Origin.Length > 100) throw new ArgumentException("Invalid clipboard origin");
         await mutex.WaitAsync(ct);
         try
         {
             if ((await ReadCore(scope, ct)).Id != request.ExpectedRevision) throw new ClipboardConflictException();
-            if (!await clipboard.Write([], request.Text, request.Origin, selected!.Sequence, ct)) throw new ClipboardConflictException();
+            if (!await clipboard.Write([], text, request.Origin, selected!.Sequence, ct, null, html)) throw new ClipboardConflictException();
             selected = null;
             var textResult = await ReadCore(scope, ct);
             await SweepCore(ct);

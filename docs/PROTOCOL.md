@@ -24,8 +24,9 @@ Authenticated requests renew the session. Fifteen seconds without one revokes th
 | GET `/v1/displays` | — | `[{id,name,left,top,width,height,primary}]` |
 | GET `/v1/frame?display={id}&quality={25..90}&view=x,y,w,h&fps={5|10|15|30}&cursor=local&codec=h264&key=1` | Optional display ID, JPEG quality, normalized viewport, client frame target, local cursor drawing, and an optional H.264 request | JPEG for the selected viewport, or Annex B H.264 when `codec=h264` and the encoder is available. Omitted display selects primary, quality defaults to 55, viewport defaults to the full display, and fps defaults to 15. `cursor=local` asks the host not to burn the cursor into the picture. `key=1` asks for an IDR. Clients that omit `codec` receive JPEG. |
 | POST `/v1/input` | Input JSON | 200 |
-| GET `/v1/clipboard` | — | `{id,origin,files:[{name,size}],text}` |
-| PUT `/v1/clipboard/text` | `{origin,expectedRevision,text}` | New clipboard manifest |
+| GET `/v1/clipboard` | — | `{id,origin,files:[{name,size}],text,html}` where `html` is the fragment length |
+| PUT `/v1/clipboard/text` | `{origin,expectedRevision,text,html}` | New clipboard manifest. `html` is optional |
+| GET `/v1/clipboard/{id}/html` | — | UTF-8 HTML fragment and `X-Content-SHA256` |
 | POST `/v1/clipboard/uploads` | `{origin,expectedRevision,files:[{name,size}]}` | `{id}` |
 | PUT `/v1/clipboard/uploads/{id}/{index}` | Raw bytes and required `X-Content-SHA256` | 200 after size/hash verification |
 | POST `/v1/clipboard/uploads/{id}/commit` | Empty | New clipboard manifest |
@@ -36,7 +37,7 @@ There is no shared-folder filesystem API. File transfer uses only the clipboard 
 
 Clipboard batches permit 1–100 ordinary files, at most 1GiB each and 4GiB total. Duplicate basenames get separate staging directories. Folders/links are unsupported. Snapshot changes or incomplete commits return 409. An expected clipboard revision prevents an older upload from replacing a newer copy. On the client, the local clipboard sequence is checked before publishing downloaded files. Origin markers suppress transfer loops. Clipboard publication always requests copy semantics; source files are never deleted.
 
-Plain Unicode text uses the same session-scoped clipboard manifest and revision check. It is limited to 1,000,000 UTF-16 characters. Publishing text replaces the file-drop payload; publishing a file batch replaces text. An empty text update clears that clipboard. Origin markers suppress echoes, and local sequence checks preserve a newer local copy if it changes during a remote update. HTML/RTF, images, and other clipboard formats are intentionally omitted in this version.
+Plain Unicode text uses the same session-scoped clipboard manifest and revision check. It is limited to 1,000,000 UTF-16 characters. The same update may include an HTML fragment of at most 1,000,000 characters. The manifest field `html` is that length, not the body. `GET /v1/clipboard/{id}/html` returns the fragment as UTF-8 with `X-Content-SHA256`. Windows writes that fragment as CF_HTML beside the plain text. Android keeps the plain words. Publishing text replaces the file-drop payload; publishing a file batch replaces text. An empty text update clears that clipboard. HTML without text is stored with plain words derived from the fragment. Pictures remain a separate PNG clipboard. RTF stays omitted.
 
 Unfinished batches are cancelled on session revocation. Completed cache files stay while the OS clipboard still points at them. Older batches are removed when a newer clipboard replaces them, and again when a host or client session starts. Authentication is required on every clipboard route. Android uses read-only content URIs with per-recipient grants; Windows uses CF_HDROP on a dedicated STA dispatcher. [Windows clipboard documentation](https://learn.microsoft.com/en-us/windows/win32/dataxchg/using-the-clipboard), [Android copy/paste documentation](https://developer.android.com/develop/ui/views/touch-and-input/copy-paste).
 

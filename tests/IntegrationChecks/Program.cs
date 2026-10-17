@@ -274,6 +274,12 @@ try { ClipboardPaths.ValidateImage([1, 2, 3, 4, 5, 6, 7, 8]); Check(false, "a no
 catch (ArgumentException ex) { Check(ex.Message == "클립보드 이미지는 PNG만 지원합니다.", "a non-png picture is rejected"); }
 Check(!ClipboardSync.ClipboardClear.PushEmpty(0, 0, false, picturePng.Length) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false, picturePng.Length), "a picture is not treated as an empty clipboard");
 Check(!UiText.IsProblem(UiText.ImageClipboardReady()) && !UiText.IsProblem(UiText.ImageClipboardReceived()) && !UiText.IsProblem(UiText.ImageClipboardTooLarge()) && UiText.SessionOnPicture(UiText.ImageClipboardReceived()) && UiText.SessionOnPicture(UiText.ImageClipboardTooLarge()), "a clipboard picture stays quiet on the picture");
+var formatted = "<p>안녕 <b>서식</b></p><script>alert(1)</script>";
+Check(ClipboardHtml.Plain(formatted) == "안녕 서식" && ClipboardHtml.Plain("<p>첫 줄</p><p>둘째 &amp; 줄</p>") == "첫 줄\n둘째 & 줄", "formatted clipboard text keeps words and drops scripts");
+var described = ClipboardHtml.Describe("<b>한글</b>");
+Check(ClipboardHtml.Fragment(described) == "<b>한글</b>", "html clipboard bytes round-trip the fragment");
+Check(!ClipboardSync.ClipboardClear.PushEmpty(0, 0, false, 0, formatted.Length) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false, 0, formatted.Length), "formatted text is not treated as an empty clipboard");
+Check(!UiText.IsProblem(UiText.HtmlClipboardReady()) && !UiText.IsProblem(UiText.HtmlClipboardReceived()) && !UiText.IsProblem(UiText.HtmlClipboardTooLarge()) && UiText.SessionOnPicture(UiText.HtmlClipboardReceived()), "formatted clipboard text stays quiet on the picture");
 Check(UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("reset"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TimeoutException("slow"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TaskCanceledException())), "a dropped network or a timeout can reconnect");
 Check(!UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("busy", null, HttpStatusCode.Conflict))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("The SSL connection could not be established"))), "a rejected login, a busy host, or a certificate mismatch does not reconnect");
 Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(4) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(8) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
@@ -680,16 +686,39 @@ async Task ClipboardFiles()
     var longText = new string('가', 40_000);
     await client.SendClipboardText(longText, "test", (await client.Clipboard(CancellationToken.None)).Id, CancellationToken.None);
     Check((await site.Clipboard.Read(CancellationToken.None)).Text == longText, "text beyond control-message limit reaches clipboard");
+    var html = "<p>안녕 <b>서식</b></p>";
+    await client.SendClipboardText("안녕 서식", "test", (await client.Clipboard(CancellationToken.None)).Id, CancellationToken.None, html);
+    var formattedHost = await site.Clipboard.Read(CancellationToken.None);
+    Check(formattedHost.Text == "안녕 서식" && formattedHost.Html == html, "formatted text reaches the host clipboard");
+    var formattedManifest = await client.Clipboard(CancellationToken.None);
+    Check(formattedManifest.Html == html.Length && formattedManifest.Text == "안녕 서식" && formattedManifest.Image == 0 && formattedManifest.Files.Length == 0, "the clipboard manifest reports formatted text");
+    Check(await client.DownloadClipboardHtml(formattedManifest.Id, CancellationToken.None) == html, "formatted text can be downloaded");
+    localClipboard.Set([], "로컬 서식", "", null, "<i>로컬 서식</i>");
+    Check(await sync.PushText(CancellationToken.None), "local formatted text pushes to the remote clipboard");
+    var pushedFormat = await site.Clipboard.Read(CancellationToken.None);
+    Check(pushedFormat.Text == "로컬 서식" && pushedFormat.Html == "<i>로컬 서식</i>", "local formatted text keeps its html");
+    await sync.Pull(CancellationToken.None);
+    Check((await site.Clipboard.Read(CancellationToken.None)).Sequence == pushedFormat.Sequence, "formatted text origin suppresses echo");
+    site.Clipboard.Set([], "원격 서식", "", null, "<b>원격 서식</b>");
+    await sync.Pull(CancellationToken.None);
+    var receivedFormat = await localClipboard.Read(CancellationToken.None);
+    Check(receivedFormat.Text == "원격 서식" && receivedFormat.Html == "<b>원격 서식</b>", "remote formatted text reaches the local clipboard");
+    Check(!await sync.PushText(CancellationToken.None), "received formatted text is not re-uploaded");
+    try { await client.SendClipboardText("a", "test", formattedManifest.Id, CancellationToken.None, new string('h', ClipboardPaths.MaxHtmlCharacters + 1)); Check(false, "oversized html"); }
+    catch (ArgumentException) { Check(true, "html clipboard size limit enforced before upload"); }
+    await client.SendClipboardText("", "test", (await client.Clipboard(CancellationToken.None)).Id, CancellationToken.None, "<p>태그 없는 글</p>");
+    var derived = await site.Clipboard.Read(CancellationToken.None);
+    Check(derived.Text == "태그 없는 글" && derived.Html == "<p>태그 없는 글</p>", "html without text keeps a plain copy");
     localClipboard.Set([]);
     Check(await sync.PushText(CancellationToken.None), "an empty local clipboard clears the remote clipboard");
     var clearedHost = await site.Clipboard.Read(CancellationToken.None);
-    Check(clearedHost.Paths.Length == 0 && clearedHost.Text.Length == 0 && (clearedHost.Image?.Length ?? 0) == 0, "the remote clipboard is empty after a local clear");
+    Check(clearedHost.Paths.Length == 0 && clearedHost.Text.Length == 0 && clearedHost.Html.Length == 0 && (clearedHost.Image?.Length ?? 0) == 0, "the remote clipboard is empty after a local clear");
     site.Clipboard.Set([], "다시 채운 텍스트");
     await sync.Pull(CancellationToken.None);
     site.Clipboard.Set([]);
     await sync.Pull(CancellationToken.None);
     var clearedLocal = await localClipboard.Read(CancellationToken.None);
-    Check(clearedLocal.Paths.Length == 0 && clearedLocal.Text.Length == 0 && (clearedLocal.Image?.Length ?? 0) == 0, "an empty remote clipboard clears the local clipboard");
+    Check(clearedLocal.Paths.Length == 0 && clearedLocal.Text.Length == 0 && clearedLocal.Html.Length == 0 && (clearedLocal.Image?.Length ?? 0) == 0, "an empty remote clipboard clears the local clipboard");
     localClipboard.Set([], "", "", picturePng);
     Check(await sync.PushImage(CancellationToken.None), "local picture copy pushes to remote clipboard");
     var hostPicture = await site.Clipboard.Read(CancellationToken.None);
@@ -809,15 +838,15 @@ sealed class TestFileClipboard : IFileClipboard
 {
     private ClipboardSelection value = new(1, "", []);
     public Action? BeforeWrite;
-    public void Set(string[] paths, string text = "", string origin = "", byte[]? image = null) { lock (this) value = new(value.Sequence + 1, origin, paths, text, image); }
+    public void Set(string[] paths, string text = "", string origin = "", byte[]? image = null, string html = "") { lock (this) value = new(value.Sequence + 1, origin, paths, text, image, html); }
     public Task<ClipboardSelection> Read(CancellationToken ct) { ct.ThrowIfCancellationRequested(); lock (this) return Task.FromResult(value); }
-    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null)
+    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null, string? html = null)
     {
         ct.ThrowIfCancellationRequested(); lock (this)
         {
             var callback = BeforeWrite; BeforeWrite = null; callback?.Invoke();
             if (value.Sequence != expectedSequence) return Task.FromResult(false);
-            value = new(value.Sequence + 1, origin, paths, text, image); return Task.FromResult(true);
+            value = new(value.Sequence + 1, origin, paths, text, image, html ?? ""); return Task.FromResult(true);
         }
     }
 }

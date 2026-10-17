@@ -60,7 +60,7 @@ public sealed partial class RemoteHost
         });
         routes.MapPut("/v1/clipboard/text", async (HttpContext c) =>
         {
-            var request = await ReadSmall<ClipboardTextUpdate>(c, 6_100_000) ?? throw new ArgumentException();
+            var request = await ReadSmall<ClipboardTextUpdate>(c, 12_500_000) ?? throw new ArgumentException();
             var (scope, cancellation) = ClipboardContext(c);
             using (cancellation) return Results.Ok(await clipboard.SetText(scope, request, cancellation.Token));
         });
@@ -76,6 +76,19 @@ public sealed partial class RemoteHost
             {
                 var bytes = await clipboard.OpenImage(scope, id, cancellation.Token);
                 c.Response.ContentType = "image/png"; c.Response.ContentLength = bytes.Length;
+                c.Response.Headers["X-Content-SHA256"] = Convert.ToHexString(SHA256.HashData(bytes));
+                await c.Response.Body.WriteAsync(bytes, cancellation.Token);
+            }
+        });
+        routes.MapGet("/v1/clipboard/{id}/html", async (string id, HttpContext c) =>
+        {
+            var (scope, cancellation) = ClipboardContext(c);
+            using (cancellation)
+            {
+                var html = await clipboard.OpenHtml(scope, id, cancellation.Token);
+                var bytes = System.Text.Encoding.UTF8.GetBytes(html);
+                c.Response.ContentType = "text/html; charset=utf-8";
+                c.Response.ContentLength = bytes.Length;
                 c.Response.Headers["X-Content-SHA256"] = Convert.ToHexString(SHA256.HashData(bytes));
                 await c.Response.Body.WriteAsync(bytes, cancellation.Token);
             }

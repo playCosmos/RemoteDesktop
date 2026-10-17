@@ -92,7 +92,14 @@ public sealed class RemoteClient : IDisposable
     public async Task<ClipboardManifest> SendClipboardText(string text, string origin, string expectedRevision, CancellationToken ct)
     {
         ClipboardPaths.ValidateText(text);
-        using var response = await http.PutAsJsonAsync("clipboard/text", new ClipboardTextUpdate(origin, expectedRevision, text), ct);
+        return await SendClipboardText(text, origin, expectedRevision, ct, "");
+    }
+    public async Task<ClipboardManifest> SendClipboardText(string text, string origin, string expectedRevision, CancellationToken ct, string? html)
+    {
+        var formatted = html ?? "";
+        ClipboardPaths.ValidateText(text);
+        ClipboardPaths.ValidateHtml(formatted);
+        using var response = await http.PutAsJsonAsync("clipboard/text", new ClipboardTextUpdate(origin, expectedRevision, text, formatted), ct);
         await EnsureClipboard(response);
         return await response.Content.ReadFromJsonAsync<ClipboardManifest>(ct) ?? throw new IOException("클립보드 응답 오류");
     }
@@ -118,6 +125,17 @@ public sealed class RemoteClient : IDisposable
         if (!string.Equals(expected, Convert.ToHexString(SHA256.HashData(bytes)), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
         ClipboardPaths.ValidateImage(bytes);
         return bytes;
+    }
+    public async Task<string> DownloadClipboardHtml(string id, CancellationToken ct)
+    {
+        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/html", ct);
+        await EnsureClipboard(response);
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var expected = response.Headers.GetValues("X-Content-SHA256").Single();
+        if (!string.Equals(expected, Convert.ToHexString(SHA256.HashData(bytes)), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
+        var html = System.Text.Encoding.UTF8.GetString(bytes);
+        ClipboardPaths.ValidateHtml(html);
+        return html;
     }
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {

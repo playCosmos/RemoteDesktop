@@ -6,11 +6,11 @@ using System.Windows.Threading;
 
 namespace RemoteDesktop;
 
-public record ClipboardSelection(uint Sequence, string Origin, string[] Paths, string Text = "", byte[]? Image = null);
+public record ClipboardSelection(uint Sequence, string Origin, string[] Paths, string Text = "", byte[]? Image = null, string Html = "");
 public interface IFileClipboard
 {
     Task<ClipboardSelection> Read(CancellationToken ct);
-    Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null);
+    Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null, string? html = null);
 }
 
 public sealed class WindowsFileClipboard : IFileClipboard
@@ -37,21 +37,39 @@ public sealed class WindowsFileClipboard : IFileClipboard
         var sequence = Sequence;
         var data = Clipboard.GetDataObject();
         var paths = data?.GetDataPresent(DataFormats.FileDrop) == true ? (string[]?)data.GetData(DataFormats.FileDrop) ?? [] : [];
-        var text = paths.Length == 0 ? ReadText(data) : "";
         var origin = data?.GetDataPresent(Marker) == true ? DecodeText(data.GetData(Marker), unicode: true) : "";
+        if (paths.Length > 0)
+        {
+            if (sequence != Sequence) throw new ExternalException("클립보드가 변경되었습니다.");
+            return new ClipboardSelection(sequence, origin, paths);
+        }
+        var text = ReadText(data);
+        var html = ReadHtml(data);
+        if (html.Length > ClipboardPaths.MaxHtmlCharacters)
+        {
+            if (text.Length == 0) return new ClipboardSelection(sequence, ClipboardPaths.HtmlTooLarge, []);
+            html = "";
+        }
+        if (text.Length == 0 && html.Length > 0)
+        {
+            text = ClipboardHtml.Plain(html);
+            if (text.Length > ClipboardPaths.MaxTextCharacters) text = text[..ClipboardPaths.MaxTextCharacters];
+        }
+        if (text.Length == 0) html = "";
         byte[] image = [];
-        if (paths.Length == 0 && text.Length == 0 && HasImage(data))
+        if (text.Length == 0 && html.Length == 0 && HasImage(data))
         {
             image = ReadImage(data);
             if (image.Length > ClipboardPaths.MaxImageBytes || image.Length == 0) return new ClipboardSelection(sequence, ClipboardPaths.ImageTooLarge, []);
         }
         if (sequence != Sequence) throw new ExternalException("클립보드가 변경되었습니다.");
-        return new ClipboardSelection(sequence, origin, paths, text, image);
+        return new ClipboardSelection(sequence, origin, paths, text, image, html);
     }, ct);
-    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null) => OnClipboard(() =>
+    public Task<bool> Write(string[] paths, string text, string origin, uint expectedSequence, CancellationToken ct, byte[]? image = null, string? html = null) => OnClipboard(() =>
     {
         if (Sequence != expectedSequence) return false;
         var data = new DataObject();
+        var formatted = html ?? "";
         System.Drawing.Bitmap? bitmap = null;
         try
         {
@@ -69,7 +87,15 @@ public sealed class WindowsFileClipboard : IFileClipboard
             data.SetData(DataFormats.Bitmap, bitmap);
             data.SetData("PNG", new MemoryStream(image, writable: false));
         }
-        else data.SetData(DataFormats.UnicodeText, text);
+        else
+        {
+            data.SetData(DataFormats.UnicodeText, text ?? "");
+            if (formatted.Length > 0)
+            {
+                ClipboardPaths.ValidateHtml(formatted);
+                data.SetData(DataFormats.Html, new MemoryStream(ClipboardHtml.Describe(formatted)));
+            }
+        }
         data.SetData(Marker, origin);
         Clipboard.SetDataObject(data, true); return true;
         }
@@ -162,12 +188,21 @@ public sealed class WindowsFileClipboard : IFileClipboard
         if (Clipboard.ContainsText()) return Clipboard.GetText();
         return "";
     }
+    private static string ReadHtml(IDataObject? data)
+    {
+        try
+        {
+            if (data?.GetDataPresent(DataFormats.Html) != true) return "";
+            return ClipboardHtml.Fragment(ClipboardHtml.Bytes(data.GetData(DataFormats.Html)));
+        }
+        catch (Exception ex) when (ex is ExternalException or InvalidOperationException or IOException or ArgumentException or NotSupportedException or OutOfMemoryException) { return ""; }
+    }
 }
 
 public record ClipboardFile(string Name, long Size, bool Directory = false);
-public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "", int Image = 0);
+public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "", int Image = 0, int Html = 0);
 public record ClipboardUpload(string Origin, string ExpectedRevision, ClipboardFile[] Files);
-public record ClipboardTextUpdate(string Origin, string ExpectedRevision, string Text);
+public record ClipboardTextUpdate(string Origin, string ExpectedRevision, string Text, string Html = "");
 public readonly record struct ClipboardLeaf(string Source, string Name, long Size, bool Directory = false);
 
 public static class ClipboardPaths
@@ -176,13 +211,19 @@ public static class ClipboardPaths
     public const long MaxBatchBytes = 4L * 1024 * 1024 * 1024;
     public const int MaxTextCharacters = 1_000_000;
     public const int MaxImageBytes = 16 * 1024 * 1024;
+    public const int MaxHtmlCharacters = 1_000_000;
     public const string ImageTooLarge = "image-too-large";
+    public const string HtmlTooLarge = "html-too-large";
     static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
     const int MaxDepth = 32;
     const int MaxNameLength = 240;
     public static void ValidateText(string? text)
     {
         if (text is null || text.Length > MaxTextCharacters) throw new ArgumentException("클립보드 텍스트는 100만 자까지 지원합니다.");
+    }
+    public static void ValidateHtml(string? html)
+    {
+        if (html is null || html.Length > MaxHtmlCharacters) throw new ArgumentException("서식 있는 텍스트는 100만 자까지 지원합니다.");
     }
     public static void ValidateImage(byte[]? png)
     {

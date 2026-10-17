@@ -417,6 +417,7 @@ public static class UiText
         if (text == SecureAttentionSent() || text == SecureAttentionUnavailable()) return true;
         if (text == ClipboardCleared()) return true;
         if (text == ImageClipboardReady() || text == ImageClipboardReceived() || text == ImageClipboardTooLarge()) return true;
+        if (text == HtmlClipboardReady() || text == HtmlClipboardReceived() || text == HtmlClipboardTooLarge()) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 
@@ -554,6 +555,9 @@ public static class UiText
     public static string ImageClipboardReady() => "이미지 클립보드 동기화 완료";
     public static string ImageClipboardReceived() => "이미지 클립보드 수신 완료";
     public static string ImageClipboardTooLarge() => "클립보드 이미지는 16MB 이하만 지원합니다.";
+    public static string HtmlClipboardReady() => "서식 있는 텍스트를 보냈습니다.";
+    public static string HtmlClipboardReceived() => "서식 있는 텍스트를 받았습니다.";
+    public static string HtmlClipboardTooLarge() => "서식 있는 텍스트는 100만 자까지만 복사됩니다.";
     public static string FirewallOpened(int port) => "방화벽에서 포트 " + port + " 수신을 허용했습니다.";
     public static string FirewallDeclined() => "방화벽 허용을 취소했습니다. 접속 대기는 계속됩니다.";
     public static string FirewallLeft() => "방화벽은 그대로입니다. 같은 네트워크에서 접속이 안 되면 이 포트를 허용해 주세요.";

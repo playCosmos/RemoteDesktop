@@ -537,6 +537,8 @@ public static class UiText
     public static string ReconnectHold() => "다시 연결하는 중…";
 
     public static string ConnectCancelLabel() => "취소";
+    public static string HostStartLabel(bool starting) => starting ? ConnectCancelLabel() : "접속 대기 시작";
+    public static string HostStartCancelled() => "접속 대기를 취소했습니다.";
 
     public static string ConnectCancelled() => "접속을 취소했습니다.";
 

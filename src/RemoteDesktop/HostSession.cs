@@ -20,6 +20,7 @@ public partial class MainWindow
         private readonly X509Certificate2 certificate = HostSettings.Certificate();
         private RemoteHost? host;
         private bool hostStarting;
+        private CancellationTokenSource? hostStart;
         private bool changingPassword;
         private bool suppressHostPasswordReveal;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
@@ -133,6 +134,7 @@ public partial class MainWindow
                 addressWatch = false;
             }
             addressRefresh?.Stop();
+            try { hostStart?.Cancel(); } catch (ObjectDisposedException) { }
             if (host != null) await host.DisposeAsync();
             certificate.Dispose();
         }
@@ -152,11 +154,11 @@ public partial class MainWindow
             hostState = state;
             window.StartButton.Content = state switch
             {
-                HostUiState.Starting => "접속 대기 시작 중…",
+                HostUiState.Starting => UiText.HostStartLabel(true),
                 HostUiState.Stopping => "접속 대기 중지 중…",
-                _ => "접속 대기 시작"
+                _ => UiText.HostStartLabel(false)
             };
-            window.StartButton.IsEnabled = state == HostUiState.Stopped;
+            window.StartButton.IsEnabled = state is HostUiState.Stopped or HostUiState.Starting;
             window.StopButton.IsEnabled = state == HostUiState.Listening;
             window.KickButton.IsEnabled = state == HostUiState.Listening && host?.HasSession == true;
             window.StartButton.Visibility = state is HostUiState.Stopped or HostUiState.Starting ? Visibility.Visible : Visibility.Collapsed;
@@ -471,7 +473,21 @@ public partial class MainWindow
             suppressHostPasswordReveal = false;
         }
 
-        public async void StartHost(object sender, RoutedEventArgs e) => await StartHostAsync(automatic: false);
+        public void StartHost(object sender, RoutedEventArgs e)
+        {
+            if (hostStarting)
+            {
+                CancelHostStart();
+                return;
+            }
+            _ = StartHostAsync(automatic: false);
+        }
+
+        private void CancelHostStart()
+        {
+            try { hostStart?.Cancel(); } catch (ObjectDisposedException) { }
+            window.HostStatus(UiText.HostStartCancelled());
+        }
 
         private async Task StartHostAsync(bool automatic)
         {
@@ -494,25 +510,53 @@ public partial class MainWindow
             MarkHostField("");
             DismissNotice();
             settings.SmoothHost = window.SmoothHostToggle.IsChecked == true;
+            hostStart?.Dispose();
+            var start = new CancellationTokenSource();
+            hostStart = start;
             hostStarting = true;
             SetHostState(HostUiState.Starting);
             try
             {
                 if (!int.TryParse(window.HostPort.Text, out var port) || port is < 1024 or > 65535) throw new ArgumentException("포트 범위: 1024–65535");
                 settings.Port = port;
-                if (typedPassword.Length > 0) settings.SetPassword(typedPassword);
-                if (!settings.HasPassword) throw new InvalidOperationException("비밀번호를 먼저 저장하세요.");
+                var password = typedPassword;
                 window.HostStatus("접속 대기를 시작하는 중…");
-                settings.Save();
+                await Task.Run(() =>
+                {
+                    start.Token.ThrowIfCancellationRequested();
+                    if (password.Length > 0) settings.SetPassword(password);
+                    start.Token.ThrowIfCancellationRequested();
+                    if (!settings.HasPassword) throw new InvalidOperationException("비밀번호를 먼저 저장하세요.");
+                    settings.Save();
+                }, start.Token);
                 host = new RemoteHost(settings);
                 host.Status += window.HostStatus;
                 await host.StartAsync(port, certificate);
-                if (Closing) { await host.DisposeAsync(); host = null; return; }
+                if (Closing || start.IsCancellationRequested)
+                {
+                    await host.DisposeAsync();
+                    host = null;
+                    if (!Closing)
+                    {
+                        SetHostState(HostUiState.Stopped);
+                        window.HostStatus(UiText.HostStartCancelled());
+                    }
+                    return;
+                }
                 UpdatePasswordState();
                 ShowListening(port);
                 window.HostStatus(!settings.HasOpaqueIdentity
                     ? "접속 대기 중 · 포트 " + port + ". 비밀번호만 접속은 현재 비밀번호를 한 번 더 저장하면 켜집니다."
                     : automatic ? "자동 접속 대기 중 · 포트 " + port : "접속 대기 중 · 포트 " + port);
+            }
+            catch (OperationCanceledException)
+            {
+                if (host != null) { await host.DisposeAsync(); host = null; }
+                if (!Closing)
+                {
+                    SetHostState(HostUiState.Stopped);
+                    window.HostStatus(UiText.HostStartCancelled());
+                }
             }
             catch (Exception ex)
             {
@@ -522,12 +566,17 @@ public partial class MainWindow
                 var field = UiText.HostFailureField(ex);
                 if (field.Length > 0) MarkHostField(field);
             }
-            finally { hostStarting = false; }
+            finally
+            {
+                hostStarting = false;
+                if (ReferenceEquals(hostStart, start)) hostStart = null;
+                start.Dispose();
+            }
         }
 
         public async void StopHost(object sender, RoutedEventArgs e)
         {
-            if (hostStarting) { window.HostStatus("서버를 시작하는 중입니다."); return; }
+            if (hostStarting) { CancelHostStart(); return; }
             var peer = ConnectedPeer;
             SetHostState(HostUiState.Stopping);
             window.HostStatus("접속 대기를 중지하는 중…");

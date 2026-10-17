@@ -21,6 +21,7 @@ final class ClipboardFiles {
     private final AtomicInteger revision=new AtomicInteger();
     private final AtomicBoolean busy=new AtomicBoolean();
     private final AtomicBoolean textSyncing=new AtomicBoolean();
+    private final AtomicBoolean stop=new AtomicBoolean();
     private final String origin=UUID.randomUUID().toString();
     private final ClipboardManager.OnPrimaryClipChangedListener listener=() -> revision.incrementAndGet();
     private ArrayList<Uri> pending=new ArrayList<>();
@@ -75,8 +76,13 @@ final class ClipboardFiles {
     }
     void menu() {
         new AlertDialog.Builder(activity).setTitle("파일 클립보드").setItems(new String[]{"복사한 파일 → 원격에 붙여넣기","원격에서 복사한 파일 가져오기","복사한 파일 → 이 기기 폴더에 붙여넣기","전송 취소"},(d,index) -> {
-            if(index==0)pasteRemote(); else if(index==1)copyRemote(); else if(index==2)activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),7); else { RemoteApi api=server.get(); if(api!=null)api.cancelled=true; }
+            if(index==0)pasteRemote(); else if(index==1)copyRemote(); else if(index==2)activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE),7); else requestStop();
         }).show();
+    }
+    private void requestStop() {
+        stop.set(true);
+        RemoteApi api=server.get();
+        if(api!=null)api.cancelled=true;
     }
     private String name(Uri uri) throws IOException {
         try(Cursor c=activity.getContentResolver().query(uri,null,null,null,null)) {
@@ -92,6 +98,7 @@ final class ClipboardFiles {
     }
     private void work(RemoteApi api,Runnable task) {
         if(!busy.compareAndSet(false,true)) { status.accept("클립보드 전송 중입니다."); return; }
+        stop.set(false);
         if(api!=null)api.cancelled=false;
         worker.execute(() -> { try { task.run(); } finally { busy.set(false); } });
     }
@@ -147,34 +154,59 @@ final class ClipboardFiles {
         });
     }
     void pasteFolder(Uri tree) {
+        RemoteApi api=server.get();
         ArrayList<Uri> uris=copied(); if(uris.isEmpty()) { status.accept("클립보드에 파일이 없습니다."); return; }
-        work(null,() -> {
+        work(api,() -> {
+            ArrayList<Uri> created=new ArrayList<>();
+            boolean cancel=false;
             try {
+                status.accept("폴더에 붙여넣는 중");
                 Uri parent=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
                 java.util.HashMap<String,Uri> dirs=new java.util.HashMap<>();
                 dirs.put("", parent);
+                long written=0;
                 for(Uri uri:uris) {
+                    if(stop.get()) { cancel=true; break; }
                     java.util.List<String> parts=uri.getPathSegments();
                     if(parts.size()<3)throw new IOException("지원하지 않는 파일 이름");
                     Uri dir=parent; String key="";
                     for(int i=2;i<parts.size()-1;i++) {
+                        if(stop.get()) { cancel=true; break; }
                         key=key+"/"+parts.get(i);
                         Uri next=dirs.get(key);
                         if(next==null) {
                             next=DocumentsContract.createDocument(activity.getContentResolver(),dir,DocumentsContract.Document.MIME_TYPE_DIR,parts.get(i));
                             if(next==null)throw new IOException("폴더를 만들지 못했습니다");
+                            created.add(next);
                             dirs.put(key, next);
                         }
                         dir=next;
                     }
+                    if(cancel) break;
                     Uri destination=DocumentsContract.createDocument(activity.getContentResolver(),dir,"application/octet-stream",parts.get(parts.size()-1));
                     if(destination==null)throw new IOException("파일 생성 실패");
-                    try(InputStream in=activity.getContentResolver().openInputStream(uri); OutputStream out=activity.getContentResolver().openOutputStream(destination,"w")) { byte[] b=new byte[65536]; int n; while((n=in.read(b))!=-1)out.write(b,0,n); }
-                    catch(Exception e) { DocumentsContract.deleteDocument(activity.getContentResolver(),destination); throw e; }
+                    created.add(destination);
+                    try(InputStream in=activity.getContentResolver().openInputStream(uri); OutputStream out=activity.getContentResolver().openOutputStream(destination,"w")) {
+                        if(in==null || out==null)throw new IOException("파일을 열지 못했습니다");
+                        byte[] b=new byte[65536]; int n;
+                        while((n=in.read(b))!=-1) {
+                            if(stop.get()) { cancel=true; break; }
+                            out.write(b,0,n); written+=n; progress(written);
+                        }
+                    }
+                    catch(Exception e) { DocumentsContract.deleteDocument(activity.getContentResolver(),destination); created.remove(destination); throw e; }
+                    if(cancel) break;
                 }
+                if(cancel) { rollback(created); status.accept("붙여넣기를 취소했습니다."); return; }
                 status.accept("클립보드 파일 붙여넣기 완료");
             } catch(Exception e) { status.accept("붙여넣기: "+e.getMessage()); }
         });
+    }
+    private void rollback(List<Uri> created) {
+        for(int i=created.size()-1;i>=0;i--) {
+            try { DocumentsContract.deleteDocument(activity.getContentResolver(),created.get(i)); }
+            catch(Exception ignored) {}
+        }
     }
     private long lastProgress;
     private void progress(long bytes) { long now=android.os.SystemClock.elapsedRealtime(); if(now-lastProgress>250) { lastProgress=now; status.accept(String.format("클립보드 전송: %.1f MB",bytes/1048576.0)); } }

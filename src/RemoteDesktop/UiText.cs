@@ -110,6 +110,14 @@ public static class UiText
         return remote + " 화면을 보고 있습니다. 종료하고 연결을 끊을까요?";
     }
 
+    public static bool AskBeforeRemoteBack(bool controlsOpen, bool connected) => !controlsOpen && connected;
+
+    public static string DisconnectPrompt(string? address)
+    {
+        var remote = Blank(address);
+        return remote == null ? "원격 화면을 보고 있습니다. 연결을 끊을까요?" : remote + " 화면을 보고 있습니다. 연결을 끊을까요?";
+    }
+
     public static string TrayTip(bool listening) => listening ? "Personal Remote Desktop · 접속 대기 중" : "Personal Remote Desktop";
     public static string TrayHidden(bool listening) => listening ? "접속 대기는 계속됩니다. 아이콘을 누르면 창이 다시 열립니다." : "아이콘을 누르면 창이 다시 열립니다.";
     public static string TrayOpen() => "창 열기";

@@ -3,6 +3,7 @@ package dev.personal.remotedesktop;
 import android.app.*;
 import android.os.*;
 import android.content.*;
+import android.window.OnBackInvokedDispatcher;
 import android.content.res.Configuration;
 import android.graphics.*;
 import android.graphics.drawable.GradientDrawable;
@@ -55,6 +56,8 @@ public final class MainActivity extends Activity {
     private android.content.SharedPreferences preferences;
     private Button touchModeButton;
     private boolean controlsOpen;
+    private AlertDialog leaveDialog;
+    private long lastBackAt;
     private int chromeGeneration;
     private int safeLeft, safeTop, safeRight, safeBottom, imeBottom;
     private int touchMode;
@@ -220,6 +223,7 @@ public final class MainActivity extends Activity {
         root.post(this::applyChromeInsets);
         showPreviousCrash(RemoteDesktopApplication.previousCrashFile());
         setControlsOpen(false);
+        registerBack();
         clipboardFiles=new ClipboardFiles(this,() -> remote,this::info,transfers);
         clipboardFiles.accept(getIntent());
         frames.scheduleWithFixedDelay(() -> {
@@ -812,7 +816,30 @@ public final class MainActivity extends Activity {
             }).setNegativeButton("닫기",null).show(); });
         } catch(Exception e) { report(e); } });
     }
-    @Override public void onBackPressed() { if(controlsOpen) setControlsOpen(false); else super.onBackPressed(); }
+    private void registerBack() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        getOnBackInvokedDispatcher().registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
+    }
+    @Override public void onBackPressed() { handleBack(); }
+    private void handleBack() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastBackAt < 100) return;
+        lastBackAt = now;
+        if (leaveDialog != null && leaveDialog.isShowing()) { leaveDialog.dismiss(); return; }
+        if (controlsOpen) { setControlsOpen(false); return; }
+        if (SessionBack.ask(false, remote != null)) { confirmDisconnect(); return; }
+        finish();
+    }
+    private void confirmDisconnect() {
+        if (isFinishing()) return;
+        String shown = address == null ? "" : address.getText().toString();
+        leaveDialog = new AlertDialog.Builder(this)
+            .setMessage(SessionBack.prompt(shown))
+            .setPositiveButton("연결 끊기", (dialog, which) -> { disconnect(); info("연결 종료됨"); })
+            .setNegativeButton("계속", null)
+            .create();
+        leaveDialog.show();
+    }
     @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(remote!=null) applySessionChrome(true); }
     @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); control.shutdown(); super.onDestroy(); }
     private PolledFrame pollFrame(RemoteApi api, String display) throws Exception {

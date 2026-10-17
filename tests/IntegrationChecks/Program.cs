@@ -216,6 +216,7 @@ Check(UiText.QualityShift("고화질", null, "고화질") == null && UiText.Qual
 Check(UiText.QualityRestored("균형") == "여유가 생겨 화질을 균형으로 되돌렸습니다." && UiText.QualityRestored("저대역폭") == "여유가 생겨 화질을 저대역폭으로 되돌렸습니다.", "restored quality uses the right Korean particle");
 Check(UiText.RevealTip(null, null) == "세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", null) == "연결된 지 03:12 · 세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", "192.168.0.2") == "연결된 지 03:12 · 이 PC에 192.168.0.2 연결됨", "the hidden toolbar button explains the session");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
+Check(UiText.IsProblem("접속 대기 실패: 이 포트는 이미 사용 중입니다.") && UiText.IsProblem("모니터 목록을 가져오지 못했습니다.") && UiText.IsProblem("끊김 줄이기 설정을 저장하지 못했습니다.") && UiText.SessionOnPicture("모니터 목록을 가져오지 못했습니다."), "a failed host or a failed monitor list stays visible");
 Check(UiText.SessionBaseline(true) == "연결됨" && UiText.SessionBaseline(false) == "화면만 보는 중", "a live session returns to connected, and view-only keeps its own label");
 Check(!UiText.SessionNoticeHolds("연결됨") && !UiText.SessionNoticeHolds("화면 품질: 고화질") && !UiText.SessionNoticeHolds("클립보드 파일 수신 완료"), "ordinary session notes settle back to the connection state");
 Check(UiText.SessionNoticeHolds("클립보드 보내기 실패: 다시 시도하세요.") && UiText.SessionNoticeHolds(UiText.ClipboardFileProgress("클립보드 수신", 0, 1, "메모.txt", 50, 200)), "failures and an unfinished file copy stay on screen");

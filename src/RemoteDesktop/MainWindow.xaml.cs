@@ -67,6 +67,9 @@ public partial class MainWindow : Window
     private void HostStatus(string text) => Dispatcher.InvokeAsync(() =>
     {
         ServerStatusText.Text = text;
+        ServerStatusText.Foreground = UiText.IsProblem(text)
+            ? (System.Windows.Media.Brush)FindResource("DangerBrush")
+            : (System.Windows.Media.Brush)FindResource("InkBrush");
         KickButton.IsEnabled = hostSession.HasClient && StopButton.IsEnabled;
         KickButton.Visibility = KickButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         hostSession.SyncConnectedClock();

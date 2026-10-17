@@ -338,7 +338,8 @@ public static class UiText
         return text.Contains("실패", StringComparison.Ordinal)
             || text.Contains("오류", StringComparison.Ordinal)
             || text.Contains("중단", StringComparison.Ordinal)
-            || text.Contains("초과", StringComparison.Ordinal);
+            || text.Contains("초과", StringComparison.Ordinal)
+            || text.Contains("못했습니다", StringComparison.Ordinal);
     }
 
     public static string SessionBaseline(bool inputEnabled) => inputEnabled ? "연결됨" : "화면만 보는 중";

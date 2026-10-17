@@ -52,6 +52,8 @@ final class ClipboardFiles {
             sawTextSequence=true;
             observedTextSequence=now;
             boolean own=label.startsWith(TEXT_MARKER);
+            Uri picture=text.isEmpty()?localPicture(local,description):null;
+            if(picture!=null) { if(!ownPicture(description,picture)) publishLocalImage(api,snapshot,picture); return; }
             if(!own && text.length()<=1000000 && copied().isEmpty() && (!text.isEmpty() || !first)) {
                 JSONObject published=api.setClipboardText(text,origin,snapshot.getString("id")); remoteTextRevision=published.getString("id"); status.accept(text.isEmpty()?"클립보드를 지웠습니다.":"텍스트 클립보드 동기화 완료"); return;
             }
@@ -76,6 +78,43 @@ final class ClipboardFiles {
             clipboard.setPrimaryClip(ClipData.newPlainText(TEXT_MARKER+snapshot.optString("id",""),remoteText));
             observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("텍스트 클립보드 수신 완료");
         });
+    }
+    private Uri localPicture(ClipData local, ClipDescription description) {
+        if(local==null || description==null || local.getItemCount()!=1 || !description.hasMimeType("image/*")) return null;
+        Uri uri=local.getItemAt(0).getUri();
+        return uri!=null && "content".equals(uri.getScheme()) ? uri : null;
+    }
+    private boolean ownPicture(ClipDescription description, Uri uri) {
+        CharSequence label=description.getLabel();
+        return (label!=null && "Remote Desktop picture".contentEquals(label)) || ClipboardProvider.AUTHORITY.equals(uri.getAuthority());
+    }
+    private void publishLocalImage(RemoteApi api, JSONObject snapshot, Uri uri) {
+        try {
+            byte[] png=pngBytes(uri);
+            JSONObject published=api.setClipboardImage(png,origin,snapshot.getString("id"));
+            remoteTextRevision=published.getString("id");
+            status.accept("이미지 클립보드 동기화 완료");
+        } catch(Exception e) { status.accept("클립보드: "+e.getMessage()); }
+    }
+    private byte[] pngBytes(Uri uri) throws Exception {
+        byte[] bytes;
+        try(InputStream in=activity.getContentResolver().openInputStream(uri)) {
+            if(in==null)throw new IOException("클립보드 이미지를 열지 못했습니다");
+            ByteArrayOutputStream raw=new ByteArrayOutputStream(); byte[] buffer=new byte[65536]; int n;
+            while((n=in.read(buffer))!=-1) { if(raw.size()+n>16*1024*1024)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다."); raw.write(buffer,0,n); }
+            bytes=raw.toByteArray();
+        }
+        if(bytes.length>=8 && (bytes[0] & 0xFF)==0x89 && bytes[1]==0x50 && bytes[2]==0x4E && bytes[3]==0x47) return bytes;
+        android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
+        android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);
+        if(bounds.outWidth<=0 || bounds.outHeight<=0 || (long)bounds.outWidth*bounds.outHeight>4096L*4096L)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다.");
+        android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length);
+        if(bitmap==null)throw new IOException("클립보드 이미지는 PNG만 지원합니다.");
+        try {
+            ByteArrayOutputStream png=new ByteArrayOutputStream();
+            if(!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,png) || png.size()>16*1024*1024)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다.");
+            return png.toByteArray();
+        } finally { bitmap.recycle(); }
     }
     private void acceptImage(RemoteApi api, JSONObject snapshot, int now, long image) {
         if(image>16L*1024*1024) { remoteTextRevision=snapshot.optString("id",""); status.accept("클립보드 이미지는 16MB 이하만 지원합니다."); return; }

@@ -96,6 +96,21 @@ final class RemoteApi {
         if(text==null || text.length()>1000000)throw new IOException("클립보드 텍스트는 100만 자까지 지원합니다.");
         return new JSONObject(new String(request("clipboard/text","PUT",new JSONObject().put("text",text).put("origin",origin).put("expectedRevision",expectedRevision)),"UTF-8"));
     }
+    JSONObject setClipboardImage(byte[] png,String origin,String expectedRevision) throws Exception {
+        if(png==null || png.length==0 || png.length>16*1024*1024)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다.");
+        HttpsURLConnection c=open("clipboard/image","PUT",60000);
+        try {
+            c.setDoOutput(true); c.setFixedLengthStreamingMode(png.length); c.setRequestProperty("Content-Type","image/png");
+            c.setRequestProperty("X-Content-SHA256",hex(MessageDigest.getInstance("SHA-256").digest(png)));
+            c.setRequestProperty("X-Clipboard-Origin",origin); c.setRequestProperty("X-Clipboard-Revision",expectedRevision);
+            try(OutputStream out=c.getOutputStream()) { out.write(png); }
+            check(c);
+            try(InputStream in=c.getInputStream(); ByteArrayOutputStream body=new ByteArrayOutputStream()) {
+                byte[] buffer=new byte[8192]; int n; while((n=in.read(buffer))!=-1) body.write(buffer,0,n);
+                return new JSONObject(new String(body.toByteArray(),"UTF-8"));
+            }
+        } finally { c.disconnect(); }
+    }
     void uploadClipboard(java.util.List<File> files, java.util.List<String> names, String origin, Progress progress) throws Exception {
         JSONArray metadata=new JSONArray(); long total=0;
         if(files.isEmpty() || files.size()>100)throw new IOException("파일 1~100개를 복사하세요.");

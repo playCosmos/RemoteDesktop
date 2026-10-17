@@ -225,6 +225,8 @@ public static class UiText
 
     public static bool RemotePointer(double stageY, bool captured) => captured || stageY > 20;
 
+    public static bool RemoteButtonRelease(bool captured) => captured;
+
     public static string HostPresence(bool clientConnected, bool serverLive, bool quiet = false)
         => clientConnected ? (quiet ? "DangerBrush" : "LiveBrush") : serverLive ? "AccentBrush" : "MutedBrush";
 

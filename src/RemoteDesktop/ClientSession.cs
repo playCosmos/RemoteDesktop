@@ -1042,6 +1042,11 @@ public partial class MainWindow
 
         public void MouseUpRemote(object sender, MouseButtonEventArgs e)
         {
+            if (!UiText.RemoteButtonRelease(window.ScreenImage.IsMouseCaptured))
+            {
+                e.Handled = true;
+                return;
+            }
             Position(e);
             Queue(new("button", Code: Button(e.ChangedButton)));
             window.ScreenImage.ReleaseMouseCapture();
@@ -1049,7 +1054,17 @@ public partial class MainWindow
         }
 
         private static int Button(MouseButton button) => button == MouseButton.Right ? 1 : button == MouseButton.Middle ? 2 : 0;
-        public void Wheel(object sender, MouseWheelEventArgs e) { Queue(new("wheel", Code: e.Delta)); e.Handled = true; }
+
+        public void Wheel(object sender, MouseWheelEventArgs e)
+        {
+            if (client != null && !UiText.RemotePointer(e.GetPosition(window.Stage).Y, window.ScreenImage.IsMouseCaptured))
+            {
+                e.Handled = true;
+                return;
+            }
+            Queue(new("wheel", Code: e.Delta));
+            e.Handled = true;
+        }
 
         public void KeyDownRemote(object sender, KeyEventArgs e)
         {

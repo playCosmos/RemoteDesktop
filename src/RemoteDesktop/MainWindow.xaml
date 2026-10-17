@@ -40,12 +40,12 @@
             <TextBlock Grid.Row="0" Grid.Column="0" Text="주소" Style="{StaticResource FieldLabel}"/>
             <TextBlock Grid.Row="0" Grid.Column="2" Text="포트" Style="{StaticResource FieldLabel}"/>
             <TextBlock Grid.Row="0" Grid.Column="4" Text="비밀번호" Style="{StaticResource FieldLabel}"/>
-            <TextBox x:Name="Address" Grid.Row="1" Grid.Column="0" Text="127.0.0.1" VerticalAlignment="Top" PreviewKeyDown="ClientPasswordKeyDown"/>
-            <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" VerticalAlignment="Top" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <TextBox x:Name="Address" Grid.Row="1" Grid.Column="0" Text="127.0.0.1" VerticalAlignment="Top" PreviewKeyDown="ClientPasswordKeyDown" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
+            <TextBox x:Name="ClientPort" Grid.Row="1" Grid.Column="2" Text="45831" VerticalAlignment="Top" PreviewKeyDown="ClientPasswordKeyDown" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
             <StackPanel Grid.Row="1" Grid.Column="4" VerticalAlignment="Top">
             <Grid>
-              <PasswordBox x:Name="ClientPassword" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock"/>
-              <TextBox x:Name="ClientPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="ClientPasswordVisibleChanged"/>
+              <PasswordBox x:Name="ClientPassword" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock"/>
+              <TextBox x:Name="ClientPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="ClientPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="ClientPasswordVisibleChanged"/>
               <ToggleButton x:Name="ClientPasswordReveal" Style="{StaticResource RevealToggle}" Content="보기" ToolTip="비밀번호 보기" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Checked="ClientPasswordRevealChanged" Unchecked="ClientPasswordRevealChanged"/>
             </Grid>
             <TextBlock x:Name="ClientCapsLock" Text="Caps Lock이 켜져 있습니다." Visibility="Collapsed" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" Margin="2,4,0,0"/>
@@ -56,7 +56,7 @@
               <Button x:Name="EditPinButton" DockPanel.Dock="Right" Content="지문 입력" Click="EditPin" ToolTip="서버 지문을 직접 입력합니다"/>
               <TextBlock x:Name="PinSummary" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
-            <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" Visibility="Collapsed" PreviewKeyDown="ClientPasswordKeyDown"/>
+            <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" Visibility="Collapsed" PreviewKeyDown="ClientPasswordKeyDown" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
             <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             <StackPanel x:Name="RecentPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,10,0,0" Visibility="Collapsed">
               <TextBlock Text="최근 연결" Style="{StaticResource FieldLabel}"/>
@@ -184,14 +184,14 @@
                     <TextBlock x:Name="HostPasswordInstruction" Text="접속 비밀번호 (8자 이상, 한 번 저장하면 계속 사용)" Style="{StaticResource FieldLabel}"/>
                     <TextBlock x:Name="HostCapsLock" Text="Caps Lock이 켜져 있습니다." Visibility="Collapsed" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,-2,0,8"/>
                     <Grid Margin="0,0,0,10">
-                      <PasswordBox x:Name="HostPassword" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock"/>
-                      <TextBox x:Name="HostPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="HostPasswordVisibleChanged"/>
+                      <PasswordBox x:Name="HostPassword" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock"/>
+                      <TextBox x:Name="HostPasswordVisible" Visibility="Collapsed" Padding="10,6,48,6" PreviewKeyDown="HostPasswordKeyDown" PreviewKeyUp="RefreshCapsLock" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="RefreshCapsLock" LostKeyboardFocus="RefreshCapsLock" TextChanged="HostPasswordVisibleChanged"/>
                       <ToggleButton x:Name="HostPasswordReveal" Style="{StaticResource RevealToggle}" Content="보기" ToolTip="비밀번호 보기" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0" Checked="HostPasswordRevealChanged" Unchecked="HostPasswordRevealChanged"/>
                     </Grid>
                     <Button x:Name="SaveHostPasswordButton" Content="비밀번호 저장" Style="{StaticResource PrimaryButton}" Click="SaveHostPassword" HorizontalAlignment="Left" Margin="0,0,0,16"/>
                   </StackPanel>
                   <TextBlock Text="포트" Style="{StaticResource FieldLabel}"/>
-                  <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+                  <TextBox x:Name="HostPort" Text="45831" Width="140" HorizontalAlignment="Left" Margin="0,0,0,14" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
                   <CheckBox x:Name="SmoothHostToggle" Content="끊김 줄이기" IsChecked="True" Margin="0,0,0,16" Checked="SmoothHostChanged" Unchecked="SmoothHostChanged" ToolTip="화면이 거의 그대로일 때 이전 프레임을 다시 사용해 끊김을 줄입니다."/>
                 </StackPanel>
                 <WrapPanel>
@@ -213,7 +213,7 @@
                   <DataTemplate>
                     <DockPanel Margin="0,0,0,8" LastChildFill="True">
                       <Button DockPanel.Dock="Right" Content="복사" MinWidth="76" Margin="8,0,0,0" Click="CopyAddress" Tag="{Binding}" ToolTip="주소와 포트를 복사합니다"/>
-                      <TextBox Text="{Binding Mode=OneWay}" IsReadOnly="True" IsReadOnlyCaretVisible="True" FontFamily="Cascadia Mono, Consolas"/>
+                      <TextBox Text="{Binding Mode=OneWay}" IsReadOnly="True" IsReadOnlyCaretVisible="True" FontFamily="Cascadia Mono, Consolas" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
                     </DockPanel>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -224,7 +224,7 @@
                 <Button x:Name="FingerprintCopyButton" Content="지문 복사" DockPanel.Dock="Right" Click="CopyFingerprint" ToolTip="지문 전체를 복사합니다"/>
                 <TextBlock x:Name="FingerprintSummary" VerticalAlignment="Center" FontFamily="Cascadia Mono, Consolas" FontSize="12" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis"/>
               </DockPanel>
-              <TextBox x:Name="Fingerprint" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,16"/>
+              <TextBox x:Name="Fingerprint" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,0,0,16" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
               <TextBlock Text="같은 LAN 또는 VPN에서 사용합니다. 탐색기에서 복사한 파일과 텍스트는 연결된 동안 상대 클립보드로 전달됩니다." Style="{StaticResource BodyText}" Foreground="{StaticResource MutedBrush}"/>
             </StackPanel>
           </Border>

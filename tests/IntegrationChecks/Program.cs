@@ -143,6 +143,7 @@ Check(UiText.InputBacklog() == "입력이 밀려 눌린 키와 버튼을 놓습�
 Check(UiText.PasswordReveal(false) == "보기" && UiText.PasswordReveal(true) == "숨김" && UiText.PasswordRevealTip(false) == "비밀번호 보기" && UiText.PasswordRevealTip(true) == "비밀번호 숨기기", "a password can be shown before it is saved");
 Check(UiText.CapsLockWarning() == "Caps Lock이 켜져 있습니다." && !UiText.ShowCapsLock(false, true) && !UiText.ShowCapsLock(true, false) && UiText.ShowCapsLock(true, true), "caps lock is warned only while typing a password");
 Check(UiText.CopiedLabel("복사", false) == "복사" && UiText.CopiedLabel("복사", true) == "복사됨" && UiText.CopiedLabel("지문 복사", true) == "복사됨" && UiText.CopiedLabel("지문 복사", false) == "지문 복사", "a copy button shows which value was copied");
+Check(!UiText.SelectEntireValue(true) && UiText.SelectEntireValue(false), "the first click selects an address or password, and the next click edits it");
 Check(UiText.CaptureSystemShortcut(0x12, true, false, false, false, false, false) && UiText.CaptureSystemShortcut(0x5B, true, false, false, false, false, false), "alt and the windows key go to the remote pc");
 Check(UiText.CaptureSystemShortcut(0x73, true, true, false, true, false, false) && UiText.CaptureSystemShortcut(0x09, true, true, false, true, false, false), "alt+f4 and alt+tab stay on the remote pc");
 Check(UiText.CaptureSystemShortcut(0x45, true, false, false, false, true, false), "win+e does not open the local explorer");

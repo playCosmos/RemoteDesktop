@@ -346,6 +346,8 @@ public static class UiText
 
     public static bool ShowCapsLock(bool passwordFocused, bool capsLock) => passwordFocused && capsLock;
 
+    public static bool SelectEntireValue(bool alreadyFocused) => !alreadyFocused;
+
     public static string? RemoteFailure(string? body)
     {
         if (string.IsNullOrWhiteSpace(body)) return null;

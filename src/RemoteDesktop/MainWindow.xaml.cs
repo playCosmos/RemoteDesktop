@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
 
@@ -140,7 +141,11 @@ public partial class MainWindow : Window
     private void ToggleFingerprint(object sender, RoutedEventArgs e) => hostSession.ToggleFingerprint(sender, e);
     private void CopyAddress(object sender, RoutedEventArgs e) => hostSession.CopyAddress(sender, e);
 
-    private void RefreshCapsLock(object sender, RoutedEventArgs e) => RefreshCapsLock();
+    private void RefreshCapsLock(object sender, RoutedEventArgs e)
+    {
+        if (e.RoutedEvent == Keyboard.GotKeyboardFocusEvent) SelectFocusedValue(sender);
+        RefreshCapsLock();
+    }
 
     private void RefreshCapsLock()
     {
@@ -149,6 +154,37 @@ public partial class MainWindow : Window
         var hostFocused = HostPassword.IsKeyboardFocused || HostPasswordVisible.IsKeyboardFocused;
         ClientCapsLock.Visibility = UiText.ShowCapsLock(clientFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
         HostCapsLock.Visibility = UiText.ShowCapsLock(hostFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void SelectWholeValue(object sender, MouseButtonEventArgs e)
+    {
+        if (!UiText.SelectEntireValue(ValueAlreadyFocused(sender))) return;
+        SelectFocusedValue(sender);
+        e.Handled = true;
+    }
+
+    private void SelectWholeValueOnFocus(object sender, KeyboardFocusChangedEventArgs e) => SelectFocusedValue(sender);
+
+    private static bool ValueAlreadyFocused(object sender) => sender switch
+    {
+        TextBox box => box.IsKeyboardFocusWithin,
+        PasswordBox password => password.IsKeyboardFocusWithin,
+        _ => true
+    };
+
+    private static void SelectFocusedValue(object sender)
+    {
+        switch (sender)
+        {
+            case TextBox box:
+                box.Focus();
+                box.SelectAll();
+                break;
+            case PasswordBox password:
+                password.Focus();
+                password.SelectAll();
+                break;
+        }
     }
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);

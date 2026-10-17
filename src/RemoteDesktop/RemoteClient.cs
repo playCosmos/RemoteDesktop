@@ -81,13 +81,14 @@ public sealed class RemoteClient : IDisposable
     {
         ClipboardPaths.ValidateText(text);
         using var response = await http.PutAsJsonAsync("clipboard/text", new ClipboardTextUpdate(origin, expectedRevision, text), ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureClipboard(response);
         return await response.Content.ReadFromJsonAsync<ClipboardManifest>(ct) ?? throw new IOException("클립보드 응답 오류");
     }
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {
         var files = ClipboardPaths.Accept(paths);
-        using var begin = await http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload(origin, expectedRevision, files), ct); begin.EnsureSuccessStatusCode();
+        using var begin = await http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload(origin, expectedRevision, files), ct);
+        await EnsureClipboard(begin);
         var json = await begin.Content.ReadFromJsonAsync<JsonElement>(ct); var id = json.GetProperty("id").GetString()!;
         var committed = false;
         try
@@ -115,9 +116,11 @@ public sealed class RemoteClient : IDisposable
                 content.Headers.ContentLength = stream.Length;
                 using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = content };
                 request.Headers.Add("X-Content-SHA256", hash);
-                using var response = await http.SendAsync(request, ct); response.EnsureSuccessStatusCode();
+                using var response = await http.SendAsync(request, ct);
+                await EnsureClipboard(response);
             }
-            using var commit = await http.PostAsync($"clipboard/uploads/{id}/commit", null, ct); commit.EnsureSuccessStatusCode();
+            using var commit = await http.PostAsync($"clipboard/uploads/{id}/commit", null, ct);
+            await EnsureClipboard(commit);
             var result = await commit.Content.ReadFromJsonAsync<ClipboardManifest>(ct) ?? throw new IOException("클립보드 응답 오류"); committed = true; return result;
         }
         finally
@@ -132,7 +135,7 @@ public sealed class RemoteClient : IDisposable
         try
         {
             using var response = await http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
+            await EnsureClipboard(response);
             var expectedSize = response.Content.Headers.ContentLength ?? 0;
             var reported = -1;
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -160,6 +163,17 @@ public sealed class RemoteClient : IDisposable
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     public void Dispose() => http.Dispose();
+
+    private static async Task EnsureClipboard(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var body = "";
+        try { body = await response.Content.ReadAsStringAsync(); }
+        catch (Exception) { }
+        var detail = UiText.RemoteFailure(body);
+        if (detail != null) throw new HttpRequestException(detail, null, response.StatusCode);
+        response.EnsureSuccessStatusCode();
+    }
 
     private static void ReportClipboard(Action<string>? progress, string action, int index, int count, string name, long sent, long size, ProgressMark reported)
     {

@@ -72,9 +72,9 @@ public sealed partial class RemoteHost : IAsyncDisposable
                 await next(context);
             }
             catch (OperationCanceledException) { if (!context.Response.HasStarted) context.Response.StatusCode = 408; }
-            catch (ClipboardConflictException) { if (!context.Response.HasStarted) context.Response.StatusCode = 409; }
+            catch (ClipboardConflictException e) { await WriteClientError(context, 409, e.Message); }
             catch (Exception e) when (e is ArgumentException or System.Text.Json.JsonException or BadHttpRequestException)
-            { if (!context.Response.HasStarted) context.Response.StatusCode = 400; }
+            { await WriteClientError(context, 400, e.Message); }
             catch (Exception) { if (!context.Response.HasStarted) context.Response.StatusCode = 500; }
         });
         serverFingerprint = Convert.ToHexString(SHA256.HashData(certificate.RawData));
@@ -90,6 +90,15 @@ public sealed partial class RemoteHost : IAsyncDisposable
         Status?.Invoke(UiText.Listening(port));
     }
     private static bool IsPublicAuthenticationPath(PathString path) => path == "/v1/login" || path == "/v1/pake/start" || path == "/v1/pake/finish";
+    private static async Task WriteClientError(HttpContext context, int status, string? message)
+    {
+        if (context.Response.HasStarted) return;
+        context.Response.StatusCode = status;
+        var text = message?.Trim() ?? "";
+        if (text.Length == 0 || text.Length > 300 || text.IndexOfAny(new[] { '\n', '\r' }) >= 0) return;
+        context.Response.ContentType = "text/plain; charset=utf-8";
+        await context.Response.WriteAsync(text);
+    }
     private async Task<IResult> StartOpaqueLogin(HttpContext context)
     {
         if (!settings.HasOpaqueIdentity) return Results.Conflict(new { error = "Windows secure enrollment required" });

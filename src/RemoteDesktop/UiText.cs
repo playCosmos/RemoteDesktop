@@ -340,6 +340,18 @@ public static class UiText
 
     public static string PasswordRevealTip(bool shown) => shown ? "비밀번호 숨기기" : "비밀번호 보기";
 
+    public static string? RemoteFailure(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var text = body.Trim();
+        if (text.Length > 240) text = text[..240];
+        if (text.IndexOfAny(new[] { '\n', '\r', '<' }) >= 0) return null;
+        if (HasHangul(text)) return text;
+        if (text.Contains("Invalid clipboard", StringComparison.OrdinalIgnoreCase) || text.Contains("File hash mismatch", StringComparison.OrdinalIgnoreCase) || text.Contains("File size mismatch", StringComparison.OrdinalIgnoreCase))
+            return text;
+        return null;
+    }
+
     private static bool CertificateMismatch(HttpRequestException http)
     {
         var detail = http.InnerException?.Message ?? http.Message;

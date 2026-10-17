@@ -99,6 +99,9 @@ Check(UiText.Explain(new InvalidOperationException("Windows password-key enrollm
 Check(!UiText.Explain(new InvalidOperationException("Object reference not set to an instance of an object."), "연결을 다시 시도하세요.").Contains("Object reference"), "unknown English failures do not reach the UI");
 Check(UiText.Explain(new ArgumentException("Invalid clipboard origin"), "fallback") == "클립보드 전송을 확인하지 못했습니다. 다시 복사하세요.", "clipboard origin failures stay in Korean");
 Check(UiText.Explain(new ArgumentException("File hash mismatch"), "fallback") == "클립보드 파일이 맞지 않습니다. 다시 복사하세요.", "clipboard hash failures stay in Korean");
+Check(UiText.RemoteFailure(null) == null && UiText.RemoteFailure("  ") == null && UiText.RemoteFailure("Response status code does not indicate success: 409") == null, "a framework failure does not become the clipboard reason");
+Check(UiText.RemoteFailure("클립보드가 변경되었거나 전송이 만료되었습니다. 다시 복사하세요.") == "클립보드가 변경되었거나 전송이 만료되었습니다. 다시 복사하세요.", "a Korean clipboard conflict reaches the user");
+Check(UiText.Explain(new HttpRequestException(UiText.RemoteFailure("File hash mismatch")!, null, HttpStatusCode.BadRequest), "fallback") == "클립보드 파일이 맞지 않습니다. 다시 복사하세요.", "a server hash mismatch stays in Korean");
 Check(UiText.Explain(new InvalidOperationException("DXGI interface is unavailable."), "fallback") == "화면 캡처를 시작하지 못했습니다.", "capture startup failures stay in Korean");
 Check(!UiText.OfferMonitorChoice(2) && UiText.OfferMonitorChoice(3), "one monitor does not add a display picker");
 Check(UiText.ConnectionFailure(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized), false) == "비밀번호가 올바르지 않습니다.", "a rejected login says the password is wrong");
@@ -376,11 +379,11 @@ async Task ClipboardFiles()
     var cancelledBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
     using (var response = await site.Http.DeleteAsync("clipboard/uploads/" + cancelledBatch)) Check(response.IsSuccessStatusCode && !Directory.Exists(Path.Combine(site.ClipboardCache, cancelledBatch)), "cancel cleans staged clipboard files");
     using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test", clipBefore.Id, [new("../escape.bin", 1)]))) Check(response.StatusCode == HttpStatusCode.BadRequest, "clipboard filename traversal rejected");
-    using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test", clipBefore.Id, [new("oversize.bin", RemoteHost.MaxFileBytes + 1)]))) Check(response.StatusCode == HttpStatusCode.BadRequest, "clipboard file size limit enforced before upload");
+    using (var response = await site.Http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload("test", clipBefore.Id, [new("oversize.bin", RemoteHost.MaxFileBytes + 1)]))) Check(response.StatusCode == HttpStatusCode.BadRequest && (await response.Content.ReadAsStringAsync()).Contains("1GiB"), "clipboard file size limit enforced before upload");
     var staleBatch = await BeginClipboard(stagedFiles, clipBefore.Id);
     using (var response = await SendClipboardBytes(staleBatch, payload, Convert.ToHexString(SHA256.HashData(payload)))) response.EnsureSuccessStatusCode();
     site.Clipboard.Set([]);
-    using (var response = await site.Http.PostAsync("clipboard/uploads/" + staleBatch + "/commit", null)) Check(response.StatusCode == HttpStatusCode.Conflict, "new host copy is not overwritten by an older transfer");
+    using (var response = await site.Http.PostAsync("clipboard/uploads/" + staleBatch + "/commit", null)) Check(response.StatusCode == HttpStatusCode.Conflict && (await response.Content.ReadAsStringAsync()).Contains("다시 복사하세요"), "new host copy is not overwritten by an older transfer");
     using (var response = await site.Http.DeleteAsync("clipboard/uploads/" + staleBatch)) response.EnsureSuccessStatusCode();
     site.Host.Disconnect();
     await Task.Delay(2100);
@@ -420,7 +423,7 @@ async Task ClipboardFiles()
     await sync.Pull(CancellationToken.None);
     Check((await localClipboard.Read(CancellationToken.None)).Paths.SequenceEqual([sameA]), "local copy during download wins over stale remote clipboard");
     try { await client.DownloadClipboard(remoteManifest.Id, 0, Path.Combine(site.Root, "stale.bin"), CancellationToken.None); Check(false, "stale clipboard"); }
-    catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Conflict) { Check(true, "old clipboard snapshot cannot read new files"); }
+    catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Conflict) { Check(e.Message.Contains("다시 복사하세요"), "old clipboard snapshot cannot read new files"); }
     localClipboard.Set([], "클라이언트에서 복사한 한글 텍스트\r\n두 번째 줄");
     Check(await sync.PushText(CancellationToken.None), "local text copy pushes to remote clipboard");
     var hostText = await site.Clipboard.Read(CancellationToken.None);

@@ -285,10 +285,31 @@ public partial class MainWindow
 
         public async void Connect(object sender, RoutedEventArgs e)
         {
+            if (connecting || client != null) return;
+            var form = UiText.CheckConnectForm(window.Address.Text, window.ClientPort.Text, CurrentClientPassword(), window.ServerPin.Text);
+            if (form.Problem != null)
+            {
+                window.ClientNotice(form.Problem, problem: true);
+                FocusConnectProblem(form.Field);
+                return;
+            }
             suppressReconnect = false;
             reconnectAttempt = 0;
             resumeEpoch++;
             await ConnectCore(CurrentClientPassword(), announceFailure: true);
+        }
+
+        private void FocusConnectProblem(string field)
+        {
+            if (field == "address") window.Address.Focus();
+            else if (field == "port") window.ClientPort.Focus();
+            else if (field == "fingerprint")
+            {
+                window.ServerPin.Visibility = Visibility.Visible;
+                window.ServerPin.Focus();
+                window.ServerPin.CaretIndex = window.ServerPin.Text.Length;
+            }
+            else FocusClientPassword();
         }
 
         private async Task<bool> ConnectCore(string password, bool announceFailure)

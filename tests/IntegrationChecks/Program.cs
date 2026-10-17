@@ -166,6 +166,13 @@ Check(UiText.EdgeToEdge(true, true, false) && !UiText.EdgeToEdge(true, true, tru
 Check(UiText.ShareTitle(false) == "이 PC에 접속하려면" && UiText.ShareTitle(true) == "지금은 한 대만 연결됩니다" && UiText.ShareHint(false).Contains("수락 없이") && UiText.ShareHint(true).StartsWith("이미 다른 기기가 연결되어 있습니다."), "an occupied host says another device cannot connect");
 Check(UiText.ShareTitle(false, false, false) == "접속 대기를 시작하면" && UiText.ShareHint(false, false, false).Contains("접속 대기를 시작") && !UiText.ShareHint(false, false, false).Contains("수락 없이"), "a stopped host does not say another pc can connect yet");
 Check(UiText.AddressCopied("192.168.56.1:45831", true) == "192.168.56.1:45831 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요." && UiText.AddressCopied("192.168.56.1:45831", false) == "192.168.56.1:45831 복사됨 · 접속 대기를 시작한 뒤에 붙여 넣으세요." && UiText.NoticeFits(UiText.AddressCopied("192.168.56.1:45831", false), 3, 24), "copying an address says whether this pc is accepting connections");
+var missingAddress = UiText.CheckConnectForm("  ", "45831", "secret", "");
+var missingPort = UiText.CheckConnectForm("10.0.0.8", "abc", "secret", "");
+var missingPassword = UiText.CheckConnectForm("10.0.0.8", "45831", "", "  ");
+var badFingerprint = UiText.CheckConnectForm("10.0.0.8", "45831", "secret", "abcd");
+var ready = UiText.CheckConnectForm("10.0.0.8", "45831", "secret", new string('a', 64));
+Check(missingAddress.Problem == "서버 주소를 입력하세요." && missingAddress.Field == "address" && missingPort.Problem == "포트 범위: 1–65535" && missingPort.Field == "port" && missingPassword.Problem == "접속 비밀번호를 입력하세요." && missingPassword.Field == "password", "an empty address, port, or password is explained before connecting");
+Check(badFingerprint.Problem == "서버의 SHA-256 지문 64자리를 입력하세요." && badFingerprint.Field == "fingerprint" && ready.Problem == null && UiText.CheckConnectForm("10.0.0.8", "45831", "secret", "").Problem == null, "a partial fingerprint is rejected and a blank one can be learned from the password");
 Check(!UiText.RemotePointer(0, false) && !UiText.RemotePointer(20, false) && UiText.RemotePointer(20.1, false) && UiText.RemotePointer(0, true), "the toolbar strip does not move the remote pointer unless a drag is captured");
 Check(UiText.RemoteButtonRelease(true) && !UiText.RemoteButtonRelease(false) && !UiText.RemotePointer(8, false), "the toolbar does not release or scroll a remote button unless a drag is captured");
 Check(UiText.JpegFullColor(75) && UiText.JpegFullColor(55) && !UiText.JpegFullColor(40) && !UiText.JpegFullColor(25), "normal picture quality keeps full color");

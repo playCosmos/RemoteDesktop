@@ -278,6 +278,18 @@ public static class UiText
             ? endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요."
             : endpoint + " 복사됨 · 접속 대기를 시작한 뒤에 붙여 넣으세요.";
 
+    public readonly record struct ConnectCheck(string? Problem, string Field);
+
+    public static ConnectCheck CheckConnectForm(string? address, string? port, string? password, string? fingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(address)) return new("서버 주소를 입력하세요.", "address");
+        if (!int.TryParse(port?.Trim(), out var parsed) || parsed is < 1 or > 65535) return new("포트 범위: 1–65535", "port");
+        if (string.IsNullOrEmpty(password)) return new("접속 비밀번호를 입력하세요.", "password");
+        var pin = fingerprint?.Trim() ?? "";
+        if (pin.Length > 0 && (pin.Length != 64 || !pin.All(Uri.IsHexDigit))) return new("서버의 SHA-256 지문 64자리를 입력하세요.", "fingerprint");
+        return new(null, "");
+    }
+
     public static string AddressesChanged() => "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.";
 
     public static string ClipboardFileProgress(string action, int index, int count, string name, long sent, long size)

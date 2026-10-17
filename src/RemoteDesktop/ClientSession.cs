@@ -34,6 +34,7 @@ public partial class MainWindow
         private bool connectedOnce;
         public string? RemoteEndpoint => client != null || holdingPicture ? lastConnection.Address : null;
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
+        public bool IsFullscreen => fullscreen != null;
         public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
         private bool suppressClientPasswordReveal;
@@ -115,6 +116,7 @@ public partial class MainWindow
             if (!window.IsLoaded || e.Source is not System.Windows.Controls.TabControl) return;
             ApplySessionChrome();
             NoteViewerWatch();
+            if (window.ServerTab.IsSelected) DismissInboundArrival();
             var tab = window.ServerTab.IsSelected ? "host" : "client";
             if (string.Equals(lastConnection.SelectedTab, tab, StringComparison.OrdinalIgnoreCase)) return;
             lastConnection.SelectedTab = tab;
@@ -701,6 +703,21 @@ public partial class MainWindow
             else SyncSessionNotice(window.SessionToolbar.Visibility == Visibility.Visible);
         }
 
+        public void AnnounceInbound(string? peer)
+        {
+            if (client == null) return;
+            window.SessionStatus(UiText.InboundArrived(peer));
+            ShowSessionToolbar();
+        }
+
+        private void DismissInboundArrival()
+        {
+            if (client == null || !UiText.InboundArrival(window.StatusText.Text)) return;
+            sessionNoticeTimer?.Stop();
+            settlingNotice = null;
+            window.SessionStatus(UiText.SessionBaseline(inputEnabled));
+        }
+
         private void ScheduleSessionBaseline()
         {
             var text = window.StatusText.Text;
@@ -711,7 +728,8 @@ public partial class MainWindow
                 return;
             }
             settlingNotice = text;
-            sessionNoticeTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4.5) };
+            sessionNoticeTimer ??= new System.Windows.Threading.DispatcherTimer();
+            sessionNoticeTimer.Interval = UiText.SessionNoticeDuration(text);
             sessionNoticeTimer.Stop();
             sessionNoticeTimer.Tick -= RestoreSessionBaseline;
             sessionNoticeTimer.Tick += RestoreSessionBaseline;

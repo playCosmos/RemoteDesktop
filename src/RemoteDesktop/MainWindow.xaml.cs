@@ -86,6 +86,8 @@ public partial class MainWindow : Window
         SessionReveal.ToolTip = UiText.RevealTip(clientSession.ViewingLabel, inbound);
         if (departed) StopAttention();
         else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
+        if (UiText.AnnounceInbound(newlyConnected, UiText.HostPageVisible(ServerTab.IsSelected, clientSession.IsFullscreen)))
+            clientSession.AnnounceInbound(inbound);
     }
 
     private void StartAttention()

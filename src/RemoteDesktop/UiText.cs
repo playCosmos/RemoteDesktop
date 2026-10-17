@@ -166,6 +166,16 @@ public static class UiText
 
     public static bool NeedsAttention(bool newlyConnected, bool windowActive) => newlyConnected && !windowActive;
 
+    public static string InboundArrived(string? peer)
+    {
+        var name = Blank(peer);
+        return name == null ? "이 PC에 연결됨" : name + " 이 PC에 연결됨";
+    }
+
+    public static bool HostPageVisible(bool hostTabSelected, bool fullscreen) => hostTabSelected && !fullscreen;
+
+    public static bool AnnounceInbound(bool newlyConnected, bool hostPageVisible) => newlyConnected && !hostPageVisible;
+
     public static string InputBacklog() => "입력이 밀려 눌린 키와 버튼을 놓습니다.";
 
     public static bool CaptureSystemShortcut(int key, bool down, bool altFlag, bool ctrlDown, bool altHeld, bool winHeld, bool suppressed)
@@ -258,6 +268,12 @@ public static class UiText
         return text.Contains('%') && !text.Contains("완료", StringComparison.Ordinal);
     }
 
+    public static bool InboundArrival(string? text)
+        => !string.IsNullOrWhiteSpace(text) && text.Contains("이 PC에 연결됨", StringComparison.Ordinal);
+
+    public static TimeSpan SessionNoticeDuration(string? text)
+        => InboundArrival(text) ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(4.5);
+
     public static string FileDropHint(bool inputEnabled)
         => inputEnabled ? "놓으면 상대 PC에서 붙여넣을 수 있습니다" : "입력 제어를 켜야 파일을 보낼 수 있습니다";
 
@@ -267,7 +283,7 @@ public static class UiText
     public static bool SessionOnPicture(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        if (IsProblem(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (IsProblem(text) || InboundArrival(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 

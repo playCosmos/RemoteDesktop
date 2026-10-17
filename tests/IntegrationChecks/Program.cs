@@ -200,6 +200,11 @@ Check(UiText.FileDropHint(true) == "놓으면 상대 PC에서 붙여넣을 수 �
 Check(UiText.FileDropStarted(1) == "파일을 상대 PC로 보내는 중" && UiText.FileDropStarted(3) == "3개 파일을 상대 PC로 보내는 중", "a dropped batch says how many files are leaving");
 Check(UiText.SessionOnPicture("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요.") && UiText.SessionOnPicture(UiText.ClipboardFileProgress("클립보드 전송", 0, 1, "메모.txt", 50, 200)) && UiText.SessionOnPicture(UiText.FileDropStarted(2)) && UiText.SessionOnPicture(UiText.FileDropHint(false)) && UiText.SessionOnPicture("파일 보내기 실패: 다시 시도하세요."), "a file transfer stays on the picture while the toolbar is hidden");
 Check(!UiText.SessionOnPicture("연결됨") && !UiText.SessionOnPicture("화면 품질: 고화질") && !UiText.SessionOnPicture("화면만 보는 중") && !UiText.SessionOnPicture(""), "ordinary session notes stay in the toolbar");
+Check(UiText.InboundArrived("192.168.0.2") == "192.168.0.2 이 PC에 연결됨" && UiText.InboundArrived("  ") == "이 PC에 연결됨", "a new client is named when it reaches this pc");
+Check(UiText.HostPageVisible(true, false) && !UiText.HostPageVisible(false, false) && !UiText.HostPageVisible(true, true) && !UiText.HostPageVisible(false, true), "the host page is on screen only while its tab is selected outside fullscreen");
+Check(UiText.AnnounceInbound(true, false) && !UiText.AnnounceInbound(true, true) && !UiText.AnnounceInbound(false, false) && !UiText.AnnounceInbound(false, true), "a new client is announced only while the host page is hidden");
+Check(UiText.InboundArrival(UiText.InboundArrived("192.168.0.2")) && UiText.SessionOnPicture(UiText.InboundArrived("192.168.0.2")), "an inbound arrival stays on the picture after the toolbar hides");
+Check(UiText.SessionNoticeDuration(UiText.InboundArrived("192.168.0.2")) == TimeSpan.FromSeconds(12) && UiText.SessionNoticeDuration("화면 품질: 고화질") == TimeSpan.FromSeconds(4.5), "an inbound arrival stays longer than an ordinary session note");
 Check(UiText.SessionReveal("03:12 · 15 fps · 40 ms", true) == "03:12 · 15 fps · 40 ms" && UiText.SessionReveal("03:12 · 15 fps · 40 ms", false) == "03:12 · 15 fps · 40 ms · 보기만", "the collapsed session control still says when input is off");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";

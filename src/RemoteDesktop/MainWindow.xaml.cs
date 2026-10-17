@@ -40,8 +40,9 @@ public partial class MainWindow : Window
             await hostSession.StartIfConfigured();
             clientSession.FocusConnectField();
         };
-        Closing += (_, _) =>
+        Closing += (_, e) =>
         {
+            if (!ConfirmClose()) { e.Cancel = true; return; }
             clientSession.SaveWindowPlacement();
             hostSession.Closing = true;
         };
@@ -62,6 +63,13 @@ public partial class MainWindow : Window
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
+    }
+
+    private bool ConfirmClose()
+    {
+        var prompt = UiText.ClosePrompt(clientSession.RemoteEndpoint, hostSession.ConnectedPeer);
+        if (prompt == null) return true;
+        return MessageBox.Show(clientSession.DialogOwner(this), prompt, productTitle, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 
     private void HostStatus(string text) => Dispatcher.InvokeAsync(() =>

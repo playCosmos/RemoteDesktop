@@ -222,6 +222,7 @@ public partial class MainWindow
         }
 
         public void CloseFullscreen() => fullscreen?.Close();
+        public Window DialogOwner(Window fallback) => fullscreen != null && fullscreen.IsVisible ? fullscreen : fallback;
         public Task DisconnectClient()
         {
             suppressReconnect = true;

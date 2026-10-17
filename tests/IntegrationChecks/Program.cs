@@ -144,6 +144,9 @@ Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", nul
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", null, "192.168.0.2") == "192.168.0.2 연결됨 — Personal Remote Desktop 0.9.59", "an inbound client names the window");
 Check(UiText.HostTabLabel(null) == "이 PC" && UiText.HostTabLabel("192.168.0.2") == "이 PC · 192.168.0.2", "the host tab names the connected client");
 Check(UiText.FullscreenTitle(null, null) == "Personal Remote Desktop · F11로 복귀" && UiText.FullscreenTitle("10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 — 192.168.0.2 연결됨 · F11로 복귀", "fullscreen names the remote pc and an inbound client");
+Check(UiText.ClosePrompt(null, null) == null && UiText.ClosePrompt("  ", " ") == null, "an idle window closes without asking");
+Check(UiText.ClosePrompt("10.0.0.8:45831", null) == "10.0.0.8:45831 화면을 보고 있습니다. 창을 닫고 연결을 끊을까요?" && UiText.ClosePrompt(null, "192.168.0.2") == "192.168.0.2 이 PC를 보고 있습니다. 창을 닫고 연결을 끊을까요?", "closing asks before it drops a live picture or a guest");
+Check(UiText.ClosePrompt("10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 화면을 보고 있고, 192.168.0.2 이 PC를 보고 있습니다. 창을 닫고 둘 다 끊을까요?", "closing names both sessions when each side is connected");
 Check(UiText.ConnectedFor(TimeSpan.FromSeconds(5)) == "연결된 지 00:05" && UiText.ConnectedFor(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7)) == "연결된 지 03:07", "connection duration stays in minutes and seconds");
 Check(UiText.ConnectedFor(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "연결된 지 2:04:09" && UiText.ConnectedFor(TimeSpan.FromSeconds(-3)) == "연결된 지 00:00", "long connections include hours and negative time is clamped");
 Check(UiText.NeedsAttention(true, false) && !UiText.NeedsAttention(true, true) && !UiText.NeedsAttention(false, false), "only a newly arrived client flashes an inactive window");

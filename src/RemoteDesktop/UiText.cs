@@ -98,6 +98,16 @@ public static class UiText
         return "Personal Remote Desktop · F11로 복귀";
     }
 
+    public static string? ClosePrompt(string? viewing, string? hosting)
+    {
+        var remote = Blank(viewing);
+        var guest = Blank(hosting);
+        if (remote == null && guest == null) return null;
+        if (remote != null && guest != null) return remote + " 화면을 보고 있고, " + guest + " 이 PC를 보고 있습니다. 창을 닫고 둘 다 끊을까요?";
+        if (guest != null) return guest + " 이 PC를 보고 있습니다. 창을 닫고 연결을 끊을까요?";
+        return remote + " 화면을 보고 있습니다. 창을 닫고 연결을 끊을까요?";
+    }
+
     public static string HostTabLabel(string? inbound)
     {
         var hosting = Blank(inbound);

@@ -149,8 +149,13 @@ public sealed partial class RemoteHost
         routes.MapPost("/v1/input", async (HttpContext c) =>
         {
             var input = await ReadSmall<InputEvent>(c) ?? throw new ArgumentException();
-            lock (gate) { if (!Authorized(c)) return Results.Unauthorized(); desktop.Apply(input); }
-            return Results.Ok();
+            string? notice;
+            lock (gate)
+            {
+                if (!Authorized(c)) return Results.Unauthorized();
+                notice = desktop.Apply(input);
+            }
+            return string.IsNullOrEmpty(notice) ? Results.Ok() : Results.Ok(new { notice });
         });
     }
 }

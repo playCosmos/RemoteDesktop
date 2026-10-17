@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.IO;
+using System.Net.Sockets;
 
 namespace RemoteDesktop;
 
@@ -6,16 +8,18 @@ internal sealed class InputInjector
 {
     private readonly HashSet<int> keys = [];
     private readonly HashSet<int> buttons = [];
+    private DateTime lastAttentionUtc = DateTime.MinValue;
 
-    public void ApplyCore(InputEvent e)
+    public string? ApplyCore(InputEvent e)
     {
+        if (e.Kind == SecureAttention.Kind) return Attention();
         if (!SecureDesktop.OwnsDesktop)
         {
             var view = SecureDesktop.Observe(DateTime.UtcNow).View;
             if (view != SecureView.Off)
             {
                 if (view == SecureView.Live) SecureDesktop.Forward(e);
-                return;
+                return null;
             }
         }
         lock (keys)
@@ -45,6 +49,33 @@ internal sealed class InputInjector
                 case "release": ReleaseCore(); break;
                 default: throw new ArgumentException("Unknown input");
             }
+        }
+        return null;
+    }
+
+    string? Attention()
+    {
+        try
+        {
+            switch (SecureAttention.Decide(SecureDesktop.OwnsDesktop, SecureDesktop.ReadPort() != 0))
+            {
+                case SecureAttention.Delivery.Send:
+                    var now = DateTime.UtcNow;
+                    if (!SecureAttention.Ready(lastAttentionUtc, now)) return null;
+                    lastAttentionUtc = now;
+                    SecureAttention.Invoke();
+                    return UiText.SecureAttentionSent();
+                case SecureAttention.Delivery.Forward:
+                    return SecureDesktop.TryForward(new InputEvent(SecureAttention.Kind))
+                        ? UiText.SecureAttentionSent()
+                        : UiText.SecureAttentionUnavailable();
+                default:
+                    return UiText.SecureAttentionUnavailable();
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or SEHException or IOException or InvalidOperationException or SocketException)
+        {
+            return UiText.SecureAttentionUnavailable();
         }
     }
 

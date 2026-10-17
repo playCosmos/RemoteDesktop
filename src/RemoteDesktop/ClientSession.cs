@@ -670,18 +670,23 @@ public partial class MainWindow
                     while (signal.Reader.TryRead(out _)) { }
                     while (channel.Reader.TryRead(out var input))
                     {
-                        await remote.Input(input, ct);
+                        await Deliver(input);
                         if (input.Kind == "key" && input.Down) lock (inputGate) pendingKeyDowns.Remove(input.Code);
                     }
                     InputEvent? move, wheel;
                     lock (inputGate) { move = pendingMove; wheel = pendingWheel; pendingMove = null; pendingWheel = null; }
-                    if (move != null) await remote.Input(move, ct);
-                    if (wheel != null) await remote.Input(wheel, ct);
+                    if (move != null) await Deliver(move);
+                    if (wheel != null) await Deliver(wheel);
                     if (inputBacklog.Take())
                     {
                         lock (inputGate) pendingKeyDowns.Clear();
-                        await remote.Input(new("release"), ct);
+                        await Deliver(new("release"));
                     }
+                }
+                async Task Deliver(InputEvent input)
+                {
+                    var notice = await remote.Input(input, ct);
+                    if (!string.IsNullOrEmpty(notice)) window.SessionStatus(notice);
                 }
             }
             async Task Heartbeat()
@@ -1606,6 +1611,12 @@ public partial class MainWindow
         {
             Queue(new("key", Code: 21, Down: true));
             Queue(new("key", Code: 21));
+            window.ScreenImage.Focus();
+        }
+
+        public void SendSecureAttention(object sender, RoutedEventArgs e)
+        {
+            Queue(new(SecureAttention.Kind));
             window.ScreenImage.Focus();
         }
 

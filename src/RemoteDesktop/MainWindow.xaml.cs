@@ -316,6 +316,7 @@ public partial class MainWindow : Window
     private void KeyDownRemote(object sender, KeyEventArgs e) => clientSession.KeyDownRemote(sender, e);
     private void KeyUpRemote(object sender, KeyEventArgs e) => clientSession.KeyUpRemote(sender, e);
     private void ToggleKorean(object sender, RoutedEventArgs e) => clientSession.ToggleKorean(sender, e);
+    private void SendSecureAttention(object sender, RoutedEventArgs e) => clientSession.SendSecureAttention(sender, e);
     private void InputControlChanged(object sender, RoutedEventArgs e) => clientSession.InputControlChanged(sender, e);
     private void ClipboardAutoChanged(object sender, RoutedEventArgs e) => clientSession.ClipboardAutoChanged(sender, e);
     private void ClipboardSend(object sender, RoutedEventArgs e) => clientSession.ClipboardSend(sender, e);

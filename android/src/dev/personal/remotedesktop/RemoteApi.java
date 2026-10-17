@@ -82,7 +82,14 @@ final class RemoteApi {
         if (reply.getInt("protocol") != 1) throw new IOException("프로토콜 버전 불일치");
         token = reply.getString("token");
     }
-    void input(JSONObject event) throws Exception { request("input", "POST", event); }
+    String input(JSONObject event) throws Exception {
+        byte[] body = request("input", "POST", event);
+        if (body == null || body.length == 0) return null;
+        String text = new String(body, "UTF-8").trim();
+        if (text.isEmpty() || text.charAt(0) != '{') return null;
+        String notice = new JSONObject(text).optString("notice", "");
+        return notice.isEmpty() ? null : notice;
+    }
     void logout() { try { request("logout", "POST", new JSONObject()); } catch (Exception ignored) {} token = ""; }
     JSONObject clipboard() throws Exception { return new JSONObject(new String(request("clipboard", "GET", null), "UTF-8")); }
     JSONObject setClipboardText(String text,String origin,String expectedRevision) throws Exception {

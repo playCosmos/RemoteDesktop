@@ -82,6 +82,7 @@ sealed class SessionService
 
     public void Start()
     {
+        SecureAttention.TryEnsurePolicy();
         SecureDesktop.OwnsDesktop = true;
         listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -156,7 +157,13 @@ sealed class SessionService
                 {
                     while (inputs.TryDequeue(out var input)) injector.ApplyCore(input);
                 }
-                else while (inputs.TryDequeue(out _)) { }
+                else
+                {
+                    while (inputs.TryDequeue(out var input))
+                    {
+                        if (input.Kind == SecureAttention.Kind) injector.ApplyCore(input);
+                    }
+                }
             }
             catch (Exception ex) when (ex is ExternalException or IOException or InvalidOperationException or Win32Exception or ArgumentException) { }
             Thread.Sleep(80);

@@ -35,6 +35,7 @@ public static class AppInstaller
         CreateShortcut(AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)), destination);
         ClearUserAutostart();
         InstallService(destination);
+        SecureAttention.TryEnsurePolicy();
         HostFirewall.TryApplySavedPort(destination);
         StartService();
     }

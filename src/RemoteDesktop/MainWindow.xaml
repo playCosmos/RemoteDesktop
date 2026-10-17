@@ -118,6 +118,7 @@
                     <MenuItem Header="클립보드 지금 받기" Click="ClipboardReceive"/>
                     <Separator/>
                     <MenuItem Header="한/영 전환" Click="ToggleKorean"/>
+                    <MenuItem Header="Ctrl+Alt+Del" Click="SendSecureAttention"/>
                     <MenuItem Header="모니터 새로고침" Click="RefreshDisplays"/>
                     <MenuItem Header="전체화면 (F11)" Click="ToggleFullscreen"/>
                     <MenuItem Header="세션 정보" Click="ShowSessionInfo"/>

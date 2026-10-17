@@ -164,6 +164,9 @@ public static class SecureDesktop
             case "release":
                 writer.Write((byte)6);
                 break;
+            case SecureAttention.Kind:
+                writer.Write((byte)7);
+                break;
             default: throw new ArgumentException("Unknown input");
         }
         writer.Flush();
@@ -183,27 +186,32 @@ public static class SecureDesktop
             4 => new InputEvent("key", Code: reader.ReadInt32(), Down: reader.ReadBoolean()),
             5 => new InputEvent("text", Text: reader.ReadString()),
             6 => new InputEvent("release"),
+            7 => new InputEvent(SecureAttention.Kind),
             _ => throw new InvalidDataException("bad secure input")
         };
     }
 
-    public static void Forward(InputEvent input)
+    public static void Forward(InputEvent input) => TryForward(input);
+
+    public static bool TryForward(InputEvent input)
     {
         var payload = EncodeInput(input);
         lock (forwardGate)
         {
             try
             {
-                if (!EnsureForwarder()) return;
+                if (!EnsureForwarder()) return false;
                 var length = BitConverter.GetBytes(payload.Length);
                 var stream = forwarder!.GetStream();
                 stream.Write(length);
                 stream.Write(payload);
+                return true;
             }
             catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException)
             {
                 forwarder?.Dispose();
                 forwarder = null;
+                return false;
             }
         }
     }

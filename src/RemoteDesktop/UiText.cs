@@ -414,6 +414,7 @@ public static class UiText
         if (string.IsNullOrWhiteSpace(text)) return false;
         if (IsProblem(text) || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
         if (text == TransferCancelled()) return true;
+        if (text == SecureAttentionSent() || text == SecureAttentionUnavailable()) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
 
@@ -566,7 +567,7 @@ public static class UiText
         return scope switch
         {
             InstallScope.PerUser => "시작 메뉴에서 다시 열 수 있습니다. 로그인 화면과 UAC 보안 화면은 이 설치에서는 원격으로 보이지 않습니다. 그 화면까지 보내려면 모든 사용자에게 설치하세요.",
-            InstallScope.Machine => "Windows가 켜지면 서비스가 로그인한 뒤 접속 대기를 이어 갑니다. UAC 같은 보안 화면이 뜨면 그 화면을 상대 PC에 보내고, 클릭과 키도 그 화면으로 전달합니다.",
+            InstallScope.Machine => "Windows가 켜지면 서비스가 로그인한 뒤 접속 대기를 이어 갑니다. UAC 같은 보안 화면이 뜨면 그 화면을 상대 PC에 보내고, 클릭과 키도 그 화면으로 전달합니다. Ctrl+Alt+Del도 이 서비스에서 보낼 수 있습니다.",
             _ => "이 파일만으로 바로 쓸 수 있습니다. 이 사용자만 설치하면 시작 메뉴에 두고, 로그인할 때마다 접속 대기를 이어 갈 수 있습니다. 모든 사용자에게 설치하면 Windows 서비스가 보안 화면까지 원격으로 보여 줍니다."
         };
     }
@@ -584,6 +585,10 @@ public static class UiText
         "hidden" => "상대 PC에 보안 화면이 떠 있습니다. 모든 사용자로 설치되어 있어야 그 화면이 보입니다.",
         _ => null
     };
+
+    public static string SecureAttentionSent() => "Ctrl+Alt+Del을 보냈습니다.";
+
+    public static string SecureAttentionUnavailable() => "Ctrl+Alt+Del은 모든 사용자 설치에서만 보낼 수 있습니다.";
 
     public static bool ReconnectNotice(string? text)
         => text == ReconnectHold() || (text != null && text.Contains("초 후 다시 연결합니다.", StringComparison.Ordinal));

@@ -31,8 +31,14 @@ public sealed class RemoteClient : IDisposable
         var json = await result.Content.ReadFromJsonAsync<JsonElement>(timeout.Token);
         http.DefaultRequestHeaders.Authorization = new("Bearer", json.GetProperty("token").GetString());
     }
-    public async Task Input(InputEvent input, CancellationToken ct = default)
-    { using var response = await http.PostAsJsonAsync("input", input, ct); response.EnsureSuccessStatusCode(); }
+    public async Task<string?> Input(InputEvent input, CancellationToken ct = default)
+    {
+        using var response = await http.PostAsJsonAsync("input", input, ct);
+        response.EnsureSuccessStatusCode();
+        var type = response.Content.Headers.ContentType?.MediaType;
+        if (type == null || type.IndexOf("json", StringComparison.OrdinalIgnoreCase) < 0) return null;
+        return SecureAttention.ReadNotice(await response.Content.ReadAsStringAsync(ct));
+    }
     public async Task<RemoteDisplay[]?> Displays(CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

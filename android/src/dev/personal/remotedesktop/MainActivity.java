@@ -179,6 +179,7 @@ public final class MainActivity extends Activity {
         button(secondary,"←", () -> key(37));
         button(secondary,"→", () -> key(39));
         button(secondary,"한/영", () -> key(21));
+        button(secondary,"Ctrl+Alt+Del", () -> event("attention",0,false));
         button(secondary,"접속 종료", () -> { disconnect(); info("연결 종료됨"); });
         LinearLayout primary=row(chin);
         toggle(primary,"Ctrl",17); toggle(primary,"Alt",18); toggle(primary,"Shift",16);
@@ -501,7 +502,7 @@ public final class MainActivity extends Activity {
         RemoteApi api=remote;
         if(api==null || control.isShutdown() || (!inputEnabled && !"release".equals(event.optString("kind")))) return;
         if(control.getQueue().size()>128) { info("입력 지연으로 연결 종료"); disconnect(); return; }
-        control.execute(() -> { if(remote!=api) return; try { api.input(event); } catch(Exception e) { noteSessionFailure(api, e); } });
+        control.execute(() -> { if(remote!=api) return; try { String notice=api.input(event); if(notice!=null) info(notice); } catch(Exception e) { noteSessionFailure(api, e); } });
     }
     private void keepalive(RemoteApi api) {
         if(recovering.get() || reconnectNeeded) return;

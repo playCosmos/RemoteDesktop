@@ -548,6 +548,7 @@ public partial class MainWindow
                 window.HostStatus(!settings.HasOpaqueIdentity
                     ? "접속 대기 중 · 포트 " + port + ". 비밀번호만 접속은 현재 비밀번호를 한 번 더 저장하면 켜집니다."
                     : automatic ? "자동 접속 대기 중 · 포트 " + port : "접속 대기 중 · 포트 " + port);
+                RequestFirewall(port);
             }
             catch (OperationCanceledException)
             {
@@ -572,6 +573,18 @@ public partial class MainWindow
                 if (ReferenceEquals(hostStart, start)) hostStart = null;
                 start.Dispose();
             }
+        }
+
+        private void RequestFirewall(int port)
+        {
+            var program = Environment.ProcessPath;
+            _ = Task.Run(() =>
+            {
+                var notice = HostFirewall.Ensure(port, program);
+                if (notice.Length == 0 || Closing) return;
+                try { window.HostNotice(notice); }
+                catch (InvalidOperationException) { }
+            });
         }
 
         public async void StopHost(object sender, RoutedEventArgs e)

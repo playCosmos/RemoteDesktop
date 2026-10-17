@@ -15,6 +15,7 @@ public static class AppCommand
     public const string InstallMachine = "--install-machine";
     public const string UninstallMachine = "--uninstall-machine";
     public const string WaitUi = "--wait-ui";
+    public const string Firewall = "--firewall";
 
     public static bool Has(IEnumerable<string> args, string name)
     {

@@ -35,11 +35,13 @@ public static class AppInstaller
         CreateShortcut(AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)), destination);
         ClearUserAutostart();
         InstallService(destination);
+        HostFirewall.TryApplySavedPort(destination);
         StartService();
     }
 
     public static void UninstallMachineHere()
     {
+        HostFirewall.RemoveQuietly();
         StopAndDeleteService();
         var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
         if (File.Exists(shortcut)) File.Delete(shortcut);

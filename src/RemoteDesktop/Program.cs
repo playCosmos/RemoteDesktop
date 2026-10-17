@@ -12,6 +12,7 @@ public static class Program
         }
         if (AppCommand.Has(args, AppCommand.InstallMachine)) return RunInstall(() => AppInstaller.InstallMachineHere());
         if (AppCommand.Has(args, AppCommand.UninstallMachine)) return RunInstall(() => AppInstaller.UninstallMachineHere());
+        if (AppCommand.Has(args, AppCommand.Firewall)) return HostFirewall.ApplyCommand(args) ? 0 : 1;
         var app = new App();
         app.InitializeComponent();
         app.Run();

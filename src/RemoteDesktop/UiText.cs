@@ -541,6 +541,9 @@ public static class UiText
     public static string HostStartLabel(bool starting) => starting ? ConnectCancelLabel() : "접속 대기 시작";
     public static string HostStartCancelled() => "접속 대기를 취소했습니다.";
     public static string TransferCancelled() => "파일 전송을 취소했습니다.";
+    public static string FirewallOpened(int port) => "방화벽에서 포트 " + port + " 수신을 허용했습니다.";
+    public static string FirewallDeclined() => "방화벽 허용을 취소했습니다. 접속 대기는 계속됩니다.";
+    public static string FirewallLeft() => "방화벽은 그대로입니다. 같은 네트워크에서 접속이 안 되면 이 포트를 허용해 주세요.";
 
     public static string ConnectCancelled() => "접속을 취소했습니다.";
 

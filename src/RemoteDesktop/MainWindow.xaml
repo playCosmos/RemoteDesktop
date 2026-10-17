@@ -7,7 +7,10 @@
         <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True" AllowDrop="True" DragOver="FileDrag" DragLeave="FileDragLeave" Drop="FileDrop">
           <Grid>
             <Border x:Name="StageHintCard" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="16,12" IsHitTestVisible="False">
-              <TextBlock x:Name="StageHint" Text="화면을 받는 중…" Foreground="{StaticResource InkBrush}" FontSize="14" TextAlignment="Center" TextWrapping="Wrap"/>
+              <StackPanel>
+                <TextBlock x:Name="StageHint" Text="화면을 받는 중…" Foreground="{StaticResource InkBrush}" FontSize="14" TextAlignment="Center" TextWrapping="Wrap"/>
+                <Button x:Name="ReconnectCancel" Content="취소" Visibility="Collapsed" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Margin="0,12,0,0" MinWidth="104" Click="CancelReconnect" ToolTip="다시 연결을 멈추고 접속 화면으로 돌아갑니다"/>
+              </StackPanel>
             </Border>
             <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" MouseLeave="PointerLeft" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>
             <Image x:Name="RemoteCursor" HorizontalAlignment="Left" VerticalAlignment="Top" Stretch="Fill" IsHitTestVisible="False" Visibility="Collapsed" RenderOptions.BitmapScalingMode="NearestNeighbor"/>

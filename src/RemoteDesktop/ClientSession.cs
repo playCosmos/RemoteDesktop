@@ -253,6 +253,16 @@ public partial class MainWindow
             window.ConnectButton.IsEnabled = true;
             window.ConnectButton.IsDefault = true;
             window.ConnectButton.Content = UiText.ConnectCancelLabel();
+            var onPicture = window.ConnectionControls.Visibility != Visibility.Visible;
+            window.ReconnectCancel.Visibility = onPicture ? Visibility.Visible : Visibility.Collapsed;
+            window.StageHintCard.IsHitTestVisible = onPicture;
+            if (onPicture && window.StageHintCard.Visibility != Visibility.Visible) ShowStage(UiText.ReconnectHold());
+        }
+
+        private void HideReconnectCancel()
+        {
+            window.ReconnectCancel.Visibility = Visibility.Collapsed;
+            window.StageHintCard.IsHitTestVisible = false;
         }
 
         private void CancelOngoingConnect()
@@ -398,6 +408,7 @@ public partial class MainWindow
             var failureField = "";
             var cancel = ArmConnectCancel();
             ShowCancelButton();
+            if (window.ConnectionControls.Visibility != Visibility.Visible) ShowStage(UiText.ReconnectHold());
             SetConnectFormEnabled(false);
             window.ClientNotice("접속하는 중…");
             var attempt = generation;
@@ -472,6 +483,7 @@ public partial class MainWindow
                 connecting = false;
                 if (client != null || announceFailure)
                 {
+                    HideReconnectCancel();
                     window.ConnectButton.IsEnabled = client == null;
                     window.ConnectButton.IsDefault = false;
                     if (client == null) SetConnectFormEnabled(true);
@@ -763,6 +775,7 @@ public partial class MainWindow
             window.RefreshIdentity();
             window.ClientNotice(notice, problem);
             if (window.IsVisible && window.ClientTab.IsSelected) FocusClientPassword();
+            HideReconnectCancel();
         }
 
         public void UpdatePinSummary()
@@ -797,6 +810,11 @@ public partial class MainWindow
             ReleaseReconnectWait();
             await DisconnectCore();
             window.ClientNotice("연결 종료됨");
+        }
+
+        public void CancelReconnect(object sender, RoutedEventArgs e)
+        {
+            if (connecting || reconnectWait) CancelOngoingConnect();
         }
 
         private void SetSessionControlsEnabled(bool enabled)
@@ -1104,6 +1122,7 @@ public partial class MainWindow
         {
             window.StageHint.Text = hint ?? "";
             window.StageHintCard.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+            if (hint == null) HideReconnectCancel();
         }
 
         private void ShowSessionPreset()
@@ -1333,6 +1352,12 @@ public partial class MainWindow
 
         public void KeyDownRemote(object sender, KeyEventArgs e)
         {
+            if ((connecting || reconnectWait) && e.Key is Key.Enter or Key.Return)
+            {
+                e.Handled = true;
+                CancelOngoingConnect();
+                return;
+            }
             var code = NativeKey(e);
             if (code > 0) Queue(new("key", Code: code, Down: true));
             e.Handled = true;

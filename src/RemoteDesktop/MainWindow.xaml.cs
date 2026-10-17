@@ -216,6 +216,7 @@ public partial class MainWindow : Window
     }
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);
+    private void CancelReconnect(object sender, RoutedEventArgs e) => clientSession.CancelReconnect(sender, e);
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);
     private void ClientPasswordRevealChanged(object sender, RoutedEventArgs e) => clientSession.ClientPasswordRevealChanged(sender, e);
     private void ClientPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => clientSession.ClientPasswordVisibleChanged(sender, e);

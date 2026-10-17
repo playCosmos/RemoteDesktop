@@ -17,6 +17,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
+        ClientCapsLock.Text = HostCapsLock.Text = UiText.CapsLockWarning();
+        Activated += (_, _) => RefreshCapsLock();
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
         ServerPin.TextChanged += (_, _) => clientSession.UpdatePinSummary();
@@ -137,6 +139,17 @@ public partial class MainWindow : Window
     private void CopyFingerprint(object sender, RoutedEventArgs e) => hostSession.CopyFingerprint(sender, e);
     private void ToggleFingerprint(object sender, RoutedEventArgs e) => hostSession.ToggleFingerprint(sender, e);
     private void CopyAddress(object sender, RoutedEventArgs e) => hostSession.CopyAddress(sender, e);
+
+    private void RefreshCapsLock(object sender, RoutedEventArgs e) => RefreshCapsLock();
+
+    private void RefreshCapsLock()
+    {
+        var caps = Keyboard.IsKeyToggled(Key.CapsLock);
+        var clientFocused = ClientPassword.IsKeyboardFocused || ClientPasswordVisible.IsKeyboardFocused;
+        var hostFocused = HostPassword.IsKeyboardFocused || HostPasswordVisible.IsKeyboardFocused;
+        ClientCapsLock.Visibility = UiText.ShowCapsLock(clientFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
+        HostCapsLock.Visibility = UiText.ShowCapsLock(hostFocused, caps) ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);

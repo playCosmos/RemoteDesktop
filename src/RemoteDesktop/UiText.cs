@@ -340,6 +340,10 @@ public static class UiText
 
     public static string PasswordRevealTip(bool shown) => shown ? "비밀번호 숨기기" : "비밀번호 보기";
 
+    public static string CapsLockWarning() => "Caps Lock이 켜져 있습니다.";
+
+    public static bool ShowCapsLock(bool passwordFocused, bool capsLock) => passwordFocused && capsLock;
+
     public static string? RemoteFailure(string? body)
     {
         if (string.IsNullOrWhiteSpace(body)) return null;

@@ -302,9 +302,10 @@ public partial class MainWindow
             if (setup.Problem != null)
             {
                 window.HostNotice(setup.Problem, problem: true);
-                FocusHostSetup(setup.Field);
+                MarkHostField(setup.Field);
                 return;
             }
+            MarkHostField("");
             DismissNotice();
             try
             {
@@ -355,9 +356,9 @@ public partial class MainWindow
             }
             else
             {
+                suppressHostPasswordReveal = true;
                 window.HostPassword.Password = window.HostPasswordVisible.Text;
                 window.HostPasswordConfirm.Password = window.HostPasswordConfirmVisible.Text;
-                suppressHostPasswordReveal = true;
                 window.HostPasswordVisible.Clear();
                 window.HostPasswordConfirmVisible.Clear();
                 suppressHostPasswordReveal = false;
@@ -414,6 +415,37 @@ public partial class MainWindow
             else window.HostPasswordConfirm.Focus();
         }
 
+        public void Edited(FrameworkElement element)
+        {
+            if (Equals(element.Tag, UiText.InvalidField)) element.Tag = null;
+        }
+
+        public void PasswordEdited()
+        {
+            if (suppressHostPasswordReveal) return;
+            Edited(window.HostPassword);
+            Edited(window.HostPasswordVisible);
+        }
+
+        public void ConfirmEdited()
+        {
+            if (suppressHostPasswordReveal) return;
+            Edited(window.HostPasswordConfirm);
+            Edited(window.HostPasswordConfirmVisible);
+        }
+
+        private void MarkHostField(string field)
+        {
+            MarkField(window.HostPort, field == "port");
+            MarkField(window.HostPassword, field == "password");
+            MarkField(window.HostPasswordVisible, field == "password");
+            MarkField(window.HostPasswordConfirm, field == "confirm");
+            MarkField(window.HostPasswordConfirmVisible, field == "confirm");
+            if (field.Length > 0) FocusHostSetup(field);
+        }
+
+        private static void MarkField(FrameworkElement element, bool invalid) => element.Tag = invalid ? UiText.InvalidField : null;
+
         private void ClearHostPassword()
         {
             suppressHostPasswordReveal = true;
@@ -428,6 +460,10 @@ public partial class MainWindow
             window.HostPassword.Visibility = Visibility.Visible;
             window.HostPasswordConfirmVisible.Visibility = Visibility.Collapsed;
             window.HostPasswordConfirm.Visibility = Visibility.Visible;
+            window.HostPassword.Tag = null;
+            window.HostPasswordVisible.Tag = null;
+            window.HostPasswordConfirm.Tag = null;
+            window.HostPasswordConfirmVisible.Tag = null;
             suppressHostPasswordReveal = false;
         }
 
@@ -448,9 +484,10 @@ public partial class MainWindow
             if (setup.Problem != null)
             {
                 window.HostNotice(setup.Problem, problem: true);
-                FocusHostSetup(setup.Field);
+                MarkHostField(setup.Field);
                 return;
             }
+            MarkHostField("");
             DismissNotice();
             settings.SmoothHost = window.SmoothHostToggle.IsChecked == true;
             hostStarting = true;
@@ -478,6 +515,8 @@ public partial class MainWindow
                 if (host != null) { await host.DisposeAsync(); host = null; }
                 window.HostStatus((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + UiText.Explain(ex, "포트와 비밀번호를 확인하세요."));
                 SetHostState(HostUiState.Stopped);
+                var field = UiText.HostFailureField(ex);
+                if (field.Length > 0) MarkHostField(field);
             }
             finally { hostStarting = false; }
         }

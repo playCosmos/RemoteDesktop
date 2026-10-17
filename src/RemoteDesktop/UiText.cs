@@ -290,6 +290,8 @@ public static class UiText
 
     public readonly record struct ConnectCheck(string? Problem, string Field);
 
+    public const string InvalidField = "invalid";
+
     public static ConnectCheck CheckConnectForm(string? address, string? port, string? password, string? fingerprint)
     {
         if (string.IsNullOrWhiteSpace(address)) return new("서버 주소를 입력하세요.", "address");
@@ -298,6 +300,25 @@ public static class UiText
         var pin = fingerprint?.Trim() ?? "";
         if (pin.Length > 0 && (pin.Length != 64 || !pin.All(Uri.IsHexDigit))) return new("서버의 SHA-256 지문 64자리를 입력하세요.", "fingerprint");
         return new(null, "");
+    }
+
+    public static string ConnectFailureField(Exception exception) => ClassifyDrop(exception) switch
+    {
+        DropKind.Rejected => "password",
+        DropKind.Certificate => "fingerprint",
+        DropKind.Network or DropKind.Timeout => "address",
+        _ => ""
+    };
+
+    public static string HostFailureField(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is SocketException socket && socket.SocketErrorCode == SocketError.AddressAlreadyInUse) return "port";
+            var message = current.Message ?? "";
+            if (message.Contains("address already in use", StringComparison.OrdinalIgnoreCase) || message.Contains("EADDRINUSE", StringComparison.Ordinal)) return "port";
+        }
+        return "";
     }
 
     public readonly record struct HostSetupCheck(string? Problem, string Field);

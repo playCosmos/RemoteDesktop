@@ -52,6 +52,9 @@
             <Trigger Property="IsKeyboardFocused" Value="True">
               <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
             </Trigger>
+            <Trigger Property="Tag" Value="invalid">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
+            </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
             </Trigger>
@@ -78,6 +81,9 @@
           <ControlTemplate.Triggers>
             <Trigger Property="IsKeyboardFocused" Value="True">
               <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+            </Trigger>
+            <Trigger Property="Tag" Value="invalid">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource DangerBrush}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>

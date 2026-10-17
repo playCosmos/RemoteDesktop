@@ -291,9 +291,10 @@ public partial class MainWindow
             if (form.Problem != null)
             {
                 window.ClientNotice(form.Problem, problem: true);
-                FocusConnectProblem(form.Field);
+                MarkConnectField(form.Field);
                 return;
             }
+            MarkConnectField("");
             suppressReconnect = false;
             reconnectAttempt = 0;
             resumeEpoch++;
@@ -313,10 +314,23 @@ public partial class MainWindow
             else FocusClientPassword();
         }
 
+        private void MarkConnectField(string field)
+        {
+            MarkField(window.Address, field == "address");
+            MarkField(window.ClientPort, field == "port");
+            MarkField(window.ClientPassword, field == "password");
+            MarkField(window.ClientPasswordVisible, field == "password");
+            MarkField(window.ServerPin, field == "fingerprint");
+            if (field.Length > 0) FocusConnectProblem(field);
+        }
+
+        private static void MarkField(FrameworkElement element, bool invalid) => element.Tag = invalid ? UiText.InvalidField : null;
+
         private async Task<bool> ConnectCore(string password, bool announceFailure)
         {
             if (connecting || client != null) return false;
             connecting = true;
+            var failureField = "";
             window.ConnectButton.IsEnabled = false;
             window.ConnectButton.Content = "접속 중…";
             SetConnectFormEnabled(false);
@@ -372,7 +386,11 @@ public partial class MainWindow
             catch (Exception ex)
             {
                 connectFailure = ex;
-                if (announceFailure) window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true);
+                if (announceFailure)
+                {
+                    window.ClientNotice("접속 실패: " + UiText.ConnectionFailure(ex, false), problem: true);
+                    failureField = UiText.ConnectFailureField(ex);
+                }
                 return false;
             }
             finally
@@ -383,6 +401,7 @@ public partial class MainWindow
                     window.ConnectButton.IsEnabled = client == null;
                     if (client == null) SetConnectFormEnabled(true);
                     if (client == null) window.ConnectButton.Content = connectedOnce ? "다시 접속" : "접속";
+                    if (client == null && failureField.Length > 0) MarkConnectField(failureField);
                 }
             }
         }
@@ -427,8 +446,8 @@ public partial class MainWindow
             }
             else
             {
-                window.ClientPassword.Password = window.ClientPasswordVisible.Text;
                 suppressClientPasswordReveal = true;
+                window.ClientPassword.Password = window.ClientPasswordVisible.Text;
                 window.ClientPasswordVisible.Clear();
                 suppressClientPasswordReveal = false;
                 window.ClientPasswordVisible.Visibility = Visibility.Collapsed;
@@ -466,7 +485,21 @@ public partial class MainWindow
             window.ClientPasswordReveal.ToolTip = UiText.PasswordRevealTip(false);
             window.ClientPasswordVisible.Visibility = Visibility.Collapsed;
             window.ClientPassword.Visibility = Visibility.Visible;
+            window.ClientPassword.Tag = null;
+            window.ClientPasswordVisible.Tag = null;
             suppressClientPasswordReveal = false;
+        }
+
+        public void Edited(FrameworkElement element)
+        {
+            if (Equals(element.Tag, UiText.InvalidField)) element.Tag = null;
+        }
+
+        public void PasswordEdited()
+        {
+            if (suppressClientPasswordReveal) return;
+            Edited(window.ClientPassword);
+            Edited(window.ClientPasswordVisible);
         }
 
         private string BuildEndpoint()

@@ -23,6 +23,13 @@ public partial class MainWindow : Window
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
         ServerPin.TextChanged += (_, _) => clientSession.UpdatePinSummary();
+        HostPort.TextChanged += (_, _) => hostSession.Edited(HostPort);
+        Address.TextChanged += (_, _) => clientSession.Edited(Address);
+        ClientPort.TextChanged += (_, _) => clientSession.Edited(ClientPort);
+        ServerPin.TextChanged += (_, _) => clientSession.Edited(ServerPin);
+        ClientPassword.PasswordChanged += (_, _) => clientSession.PasswordEdited();
+        HostPassword.PasswordChanged += (_, _) => hostSession.PasswordEdited();
+        HostPasswordConfirm.PasswordChanged += (_, _) => hostSession.ConfirmEdited();
         var version = typeof(MainWindow).Assembly.GetName().Version;
         productTitle = version is null ? "Personal Remote Desktop" : "Personal Remote Desktop " + version.ToString(3);
         Title = productTitle;

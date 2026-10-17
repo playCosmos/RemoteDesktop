@@ -115,9 +115,14 @@ final class RemoteApi {
     }
     void logout() { try { request("logout", "POST", new JSONObject()); } catch (Exception ignored) {} token = ""; }
     JSONObject clipboard() throws Exception { return new JSONObject(new String(request("clipboard", "GET", null), "UTF-8")); }
-    JSONObject setClipboardText(String text,String origin,String expectedRevision) throws Exception {
+    JSONObject setClipboardText(String text,String origin,String expectedRevision) throws Exception { return setClipboardText(text,origin,expectedRevision,""); }
+    JSONObject setClipboardText(String text,String origin,String expectedRevision,String html) throws Exception {
         if(text==null || text.length()>1000000)throw new IOException("클립보드 텍스트는 100만 자까지 지원합니다.");
-        return new JSONObject(new String(request("clipboard/text","PUT",new JSONObject().put("text",text).put("origin",origin).put("expectedRevision",expectedRevision)),"UTF-8"));
+        if(html==null)html="";
+        if(html.length()>1000000)throw new IOException("서식 있는 텍스트는 100만 자까지 지원합니다.");
+        JSONObject body=new JSONObject().put("text",text).put("origin",origin).put("expectedRevision",expectedRevision);
+        if(!html.isEmpty())body.put("html",html);
+        return new JSONObject(new String(request("clipboard/text","PUT",body),"UTF-8"));
     }
     JSONObject setClipboardImage(byte[] png,String origin,String expectedRevision) throws Exception {
         if(png==null || png.length==0 || png.length>16*1024*1024)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다.");
@@ -167,7 +172,17 @@ final class RemoteApi {
     }
     void downloadClipboard(String id,int index,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/"+index,out,1024L*1024*1024,progress); }
     void downloadClipboardImage(String id,OutputStream out,Progress progress) throws Exception { downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/image",out,16L*1024*1024,progress); }
+    String downloadClipboardHtml(String id) throws Exception {
+        ByteArrayOutputStream out=new ByteArrayOutputStream();
+        downloadPath("clipboard/"+URLEncoder.encode(id,"UTF-8")+"/html",out,4000000L,bytes -> {},"서식 있는 텍스트는 100만 자까지 지원합니다.");
+        String html=new String(out.toByteArray(),"UTF-8");
+        if(html.length()>1000000)throw new IOException("서식 있는 텍스트는 100만 자까지 지원합니다.");
+        return html;
+    }
     private void downloadPath(String path, OutputStream out, long maxBytes, Progress progress) throws Exception {
+        downloadPath(path,out,maxBytes,progress,maxBytes<=16L*1024*1024?"클립보드 이미지는 16MB 이하만 지원합니다.":"최대 파일 크기 초과");
+    }
+    private void downloadPath(String path, OutputStream out, long maxBytes, Progress progress, String limitMessage) throws Exception {
         HttpsURLConnection c = open(path, "GET");
         try {
             check(c); long total = 0; MessageDigest hash = MessageDigest.getInstance("SHA-256");
@@ -175,7 +190,7 @@ final class RemoteApi {
                 byte[] buffer = new byte[65536]; int n;
                 while ((n = in.read(buffer)) != -1) {
                     if (cancelled) throw new IOException("전송 취소됨");
-                    total += n; if (total > maxBytes) throw new IOException(maxBytes <= 16L*1024*1024 ? "클립보드 이미지는 16MB 이하만 지원합니다." : "최대 파일 크기 초과");
+                    total += n; if (total > maxBytes) throw new IOException(limitMessage);
                     hash.update(buffer,0,n); out.write(buffer,0,n); progress.update(total);
                 }
             }

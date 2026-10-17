@@ -42,28 +42,42 @@ final class ClipboardFiles {
     }
     private void syncText(RemoteApi api) throws Exception {
         int now=revision.get(); ClipData local=clipboard.getPrimaryClip(); ClipDescription description=clipboard.getPrimaryClipDescription();
-        String text="",label="";
-        if(local!=null && description!=null && description.hasMimeType("text/plain") && local.getItemCount()>0 && local.getItemAt(0).getText()!=null) {
-            text=local.getItemAt(0).getText().toString(); label=String.valueOf(description.getLabel());
+        String text="",html="",label="";
+        if(local!=null && description!=null && local.getItemCount()>0) {
+            ClipData.Item item=local.getItemAt(0);
+            if(description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) && item.getText()!=null) text=item.getText().toString();
+            if(description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) {
+                try { String formatted=item.getHtmlText(); if(formatted!=null) html=formatted; }
+                catch(RuntimeException ignored) {}
+            }
+            if(description.getLabel()!=null) label=String.valueOf(description.getLabel());
         }
+        boolean htmlTooLarge=false;
+        if(html.length()>1000000) { if(text.isEmpty()) htmlTooLarge=true; html=""; }
         JSONObject snapshot=api.clipboard();
         if(now!=observedTextSequence) {
             boolean first=!sawTextSequence;
             sawTextSequence=true;
             observedTextSequence=now;
             boolean own=label.startsWith(TEXT_MARKER);
-            Uri picture=text.isEmpty()?localPicture(local,description):null;
-            if(picture!=null) { if(!ownPicture(description,picture)) publishLocalImage(api,snapshot,picture); return; }
-            if(!own && text.length()<=1000000 && copied().isEmpty() && (!text.isEmpty() || !first)) {
-                JSONObject published=api.setClipboardText(text,origin,snapshot.getString("id")); remoteTextRevision=published.getString("id"); status.accept(text.isEmpty()?"클립보드를 지웠습니다.":"텍스트 클립보드 동기화 완료"); return;
+            if(htmlTooLarge) status.accept("서식 있는 텍스트는 100만 자까지만 복사됩니다.");
+            else {
+                Uri picture=text.isEmpty() && html.isEmpty()?localPicture(local,description):null;
+                if(picture!=null) { if(!ownPicture(description,picture)) publishLocalImage(api,snapshot,picture); return; }
+                if(!own && text.length()<=1000000 && copied().isEmpty() && (!text.isEmpty() || !html.isEmpty() || !first)) {
+                    JSONObject published=api.setClipboardText(text,origin,snapshot.getString("id"),html); remoteTextRevision=published.getString("id"); status.accept(text.isEmpty()&&html.isEmpty()?"클립보드를 지웠습니다.":html.isEmpty()?"텍스트 클립보드 동기화 완료":"서식 있는 텍스트를 보냈습니다."); return;
+                }
             }
         }
         if(snapshot.getString("id").equals(remoteTextRevision))return;
         JSONArray files=snapshot.getJSONArray("files"); String remoteText=snapshot.optString("text","");
         if(origin.equals(snapshot.optString("origin","")) || files.length()!=0) { remoteTextRevision=snapshot.getString("id"); return; }
         long image=snapshot.optLong("image",0);
-        if(image>0 && remoteText.isEmpty()) { acceptImage(api,snapshot,now,image); return; }
-        if(remoteText.isEmpty()) {
+        long htmlLength=snapshot.optLong("html",0);
+        if(htmlLength>1000000) { remoteTextRevision=snapshot.optString("id",""); status.accept("서식 있는 텍스트는 100만 자까지만 복사됩니다."); return; }
+        if(image>0 && remoteText.isEmpty() && htmlLength==0) { acceptImage(api,snapshot,now,image); return; }
+        if(remoteText.isEmpty() && htmlLength==0) {
+            if(htmlTooLarge) { remoteTextRevision=snapshot.optString("id",""); return; }
             activity.runOnUiThread(() -> {
                 if(server.get()!=api || revision.get()!=now)return;
                 try { clipboard.clearPrimaryClip(); }
@@ -73,6 +87,16 @@ final class ClipboardFiles {
             return;
         }
         if(revision.get()!=now)return;
+        if(htmlLength>0) {
+            String fragment=api.downloadClipboardHtml(snapshot.getString("id"));
+            if(fragment.length()!=htmlLength) throw new IOException("클립보드 서식 크기 불일치");
+            activity.runOnUiThread(() -> {
+                if(server.get()!=api || revision.get()!=now)return;
+                clipboard.setPrimaryClip(ClipData.newHtmlText(TEXT_MARKER+snapshot.optString("id",""),remoteText,fragment));
+                observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("서식 있는 텍스트를 받았습니다.");
+            });
+            return;
+        }
         activity.runOnUiThread(() -> {
             if(server.get()!=api || revision.get()!=now)return;
             clipboard.setPrimaryClip(ClipData.newPlainText(TEXT_MARKER+snapshot.optString("id",""),remoteText));

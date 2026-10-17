@@ -86,7 +86,7 @@ public sealed class RemoteClient : IDisposable
     }
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {
-        var files = paths.Select(p => new ClipboardFile(Path.GetFileName(p), new FileInfo(p).Length)).ToArray(); ClipboardPaths.Validate(files);
+        var files = ClipboardPaths.Accept(paths);
         using var begin = await http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload(origin, expectedRevision, files), ct); begin.EnsureSuccessStatusCode();
         var json = await begin.Content.ReadFromJsonAsync<JsonElement>(ct); var id = json.GetProperty("id").GetString()!;
         var committed = false;

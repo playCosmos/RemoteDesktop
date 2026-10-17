@@ -56,7 +56,7 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
             var selected = await local.Read(ct);
             if (selected.Paths.Length == 0 || selected.Origin.Length > 0) { observedLocal = selected.Sequence; return false; }
             if (uploadedLocal == selected.Sequence) return true;
-            if (selected.Paths.Any(p => !File.Exists(p) || (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new ArgumentException("일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.");
+            ClipboardPaths.Accept(selected.Paths);
             var snapshot = await remote.Clipboard(ct);
             ClipboardManifest result;
             try { result = await remote.SendClipboard(selected.Paths, origin, snapshot.Id, ct, status); }
@@ -64,6 +64,19 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
             { observedLocal = selected.Sequence; throw; }
             observedLocal = selected.Sequence; uploadedLocal = selected.Sequence; remoteRevision = result.Id;
             status("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요."); return true;
+        }
+        finally { mutex.Release(); }
+    }
+    public async Task PushFiles(string[] paths, CancellationToken ct)
+    {
+        await mutex.WaitAsync(ct);
+        try
+        {
+            ClipboardPaths.Accept(paths);
+            var snapshot = await remote.Clipboard(ct);
+            var result = await remote.SendClipboard(paths, origin, snapshot.Id, ct, status);
+            remoteRevision = result.Id;
+            status("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요.");
         }
         finally { mutex.Release(); }
     }

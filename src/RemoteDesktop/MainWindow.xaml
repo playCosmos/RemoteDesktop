@@ -4,7 +4,7 @@
       <Grid x:Name="ClientHost">
       <DockPanel x:Name="ClientPanel" Margin="12">
         <Grid>
-        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True">
+        <Border x:Name="Stage" Background="{StaticResource StageBrush}" BorderBrush="Transparent" BorderThickness="0" CornerRadius="12" ClipToBounds="True" AllowDrop="True" DragOver="FileDrag" Drop="FileDrop">
           <Grid>
             <TextBlock x:Name="StageHint" Text="화면을 받는 중…" Visibility="Collapsed" Foreground="{StaticResource StageTextBrush}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             <Image x:Name="ScreenImage" Stretch="Uniform" Focusable="True" InputMethod.IsInputMethodEnabled="False" MouseMove="Move" MouseDown="MouseDownRemote" MouseUp="MouseUpRemote" MouseWheel="Wheel" MouseLeave="PointerLeft" PreviewKeyDown="KeyDownRemote" PreviewKeyUp="KeyUpRemote" GotKeyboardFocus="RemoteFocusChanged" LostKeyboardFocus="ReleaseInput"/>

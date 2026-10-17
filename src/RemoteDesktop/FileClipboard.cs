@@ -121,6 +121,20 @@ public static class ClipboardPaths
     {
         if (text is null || text.Length > MaxTextCharacters) throw new ArgumentException("클립보드 텍스트는 100만 자까지 지원합니다.");
     }
+    public static ClipboardFile[] Accept(string[] paths)
+    {
+        if (paths is null || paths.Length is < 1 or > MaxFiles) throw new ArgumentException("한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.");
+        var files = new ClipboardFile[paths.Length];
+        for (var index = 0; index < paths.Length; index++)
+        {
+            var path = paths[index];
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new ArgumentException("일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.");
+            files[index] = new ClipboardFile(Path.GetFileName(path), new FileInfo(path).Length);
+        }
+        Validate(files);
+        return files;
+    }
     public static void Validate(ClipboardFile[] files)
     {
         if (files is null || files.Length is < 1 or > MaxFiles) throw new ArgumentException("한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.");

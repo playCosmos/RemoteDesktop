@@ -46,6 +46,40 @@ try
     Check(ClipboardPaths.DeleteRetired(retiredRoot, [retiredCurrent]) == 0 && File.Exists(retiredCurrent), "the current clipboard batch is not removed twice");
 }
 finally { Directory.Delete(retiredRoot, true); Directory.Delete(retiredOutside, true); }
+var dropRoot = Path.Combine(Path.GetTempPath(), "prd-drop-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(dropRoot);
+var dropFile = Path.Combine(dropRoot, "note.txt");
+File.WriteAllText(dropFile, "hello");
+var dropSecond = Path.Combine(dropRoot, "two.txt");
+File.WriteAllText(dropSecond, "x");
+var dropDir = Path.Combine(dropRoot, "folder");
+Directory.CreateDirectory(dropDir);
+try
+{
+    var accepted = ClipboardPaths.Accept([dropFile, dropSecond]);
+    Check(accepted.Length == 2 && accepted[0].Name == "note.txt" && accepted[0].Size == 5 && accepted[1].Name == "two.txt" && accepted[1].Size == 1, "dropped files are accepted in order");
+    try { ClipboardPaths.Accept([dropDir]); Check(false, "a dropped folder is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a dropped folder is rejected"); }
+    try { ClipboardPaths.Accept([Path.Combine(dropRoot, "missing.txt")]); Check(false, "a missing drop is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a missing drop is rejected"); }
+    try { ClipboardPaths.Accept([]); Check(false, "an empty drop is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.", "an empty drop is rejected"); }
+    try { ClipboardPaths.Accept(Enumerable.Repeat(dropFile, ClipboardPaths.MaxFiles + 1).ToArray()); Check(false, "too many dropped files are rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.", "too many dropped files are rejected"); }
+    try { ClipboardPaths.Validate([new ClipboardFile("big.bin", RemoteHost.MaxFileBytes + 1)]); Check(false, "a file over 1GiB is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "파일당 최대 1GiB입니다.", "a file over 1GiB is rejected"); }
+    try { ClipboardPaths.Validate([new ClipboardFile("a.bin", RemoteHost.MaxFileBytes), new ClipboardFile("b.bin", RemoteHost.MaxFileBytes), new ClipboardFile("c.bin", RemoteHost.MaxFileBytes), new ClipboardFile("d.bin", RemoteHost.MaxFileBytes), new ClipboardFile("e.bin", 1)]); Check(false, "a batch over 4GiB is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "한 번에 최대 4GiB까지 복사할 수 있습니다.", "a batch over 4GiB is rejected"); }
+    string? link = null;
+    try { link = Path.Combine(dropRoot, "link.txt"); File.CreateSymbolicLink(link, dropFile); }
+    catch (Exception) { link = null; }
+    if (link != null && File.Exists(link))
+    {
+        try { ClipboardPaths.Accept([link]); Check(false, "a dropped link is rejected"); }
+        catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a dropped link is rejected"); }
+    }
+}
+finally { Directory.Delete(dropRoot, true); }
 var placed = new ClientSettings { WindowLeft = -120, WindowTop = 40, WindowWidth = 1100, WindowHeight = 720, WindowMaximized = true };
 Check(placed.TryGetWindowPlacement(-1920, 0, 3840, 1080, out var placement) && placement.Left == -120 && placement.Maximized, "window placement restores on a shifted desktop");
 Check(!new ClientSettings { WindowLeft = 5000, WindowTop = 0, WindowWidth = 1000, WindowHeight = 700 }.TryGetWindowPlacement(0, 0, 1920, 1080, out _), "off-screen window placement is ignored");

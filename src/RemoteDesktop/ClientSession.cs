@@ -1318,6 +1318,26 @@ public partial class MainWindow
             catch (Exception ex) { window.SessionStatus("클립보드 받기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
         }
 
+        public void FileDrag(object sender, DragEventArgs e)
+        {
+            e.Effects = CanDropFiles(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Handled = true;
+        }
+
+        public async void FileDrop(object sender, DragEventArgs e)
+        {
+            e.Handled = true;
+            if (client == null || connection is null || !e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            if (!inputEnabled) { window.SessionStatus("입력 제어 꺼짐 · 화면 보기만 가능"); return; }
+            if (clipboardSync is not { } sync || e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+            try { await sync.PushFiles(paths, connection.Token); }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { window.SessionStatus("파일 보내기 실패: " + UiText.Explain(ex, "다시 시도하세요.")); }
+        }
+
+        private bool CanDropFiles(System.Windows.IDataObject data)
+            => client != null && inputEnabled && connection != null && data.GetDataPresent(DataFormats.FileDrop);
+
         public void QualityMenuChanged(object sender, RoutedEventArgs e)
         {
             if (sender is not MenuItem selected || !int.TryParse(selected.Tag?.ToString(), out var quality)) return;

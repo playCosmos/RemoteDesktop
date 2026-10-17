@@ -106,7 +106,7 @@ public partial class MainWindow
             {
                 System.Windows.Clipboard.SetText(endpoint);
                 if (sender is System.Windows.Controls.Button button) ShowCopied(button, "복사");
-                window.HostNotice(endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.");
+                window.HostNotice(UiText.AddressCopied(endpoint, hostState == HostUiState.Listening));
             }
             catch (Exception ex) { window.HostNotice("주소 복사 실패: " + UiText.Explain(ex, "클립보드를 사용할 수 없습니다."), problem: true); }
         }
@@ -171,8 +171,9 @@ public partial class MainWindow
             var live = hostState is HostUiState.Starting or HostUiState.Listening;
             window.HostSetup.Visibility = UiText.ShowHostSetup(hostState != HostUiState.Stopped) ? Visibility.Visible : Visibility.Collapsed;
             window.HostCardTitle.Text = UiText.HostCardTitle(occupied, live, ConnectedPeer, hostQuiet);
-            window.ShareTitle.Text = UiText.ShareTitle(occupied, hostQuiet);
-            window.ShareHint.Text = UiText.ShareHint(occupied, hostQuiet);
+            var accepting = hostState == HostUiState.Listening;
+            window.ShareTitle.Text = UiText.ShareTitle(occupied, hostQuiet, accepting);
+            window.ShareHint.Text = UiText.ShareHint(occupied, hostQuiet, accepting);
             window.KickButton.Style = occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.StopButton.Style = hostState is HostUiState.Listening or HostUiState.Stopping && !occupied ? (System.Windows.Style)window.FindResource("PrimaryButton") : null;
             window.HostStateMark.Fill = (System.Windows.Media.Brush)window.FindResource(UiText.HostPresence(occupied, live, hostQuiet));

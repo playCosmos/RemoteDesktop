@@ -257,13 +257,26 @@ public static class UiText
     public static bool EdgeToEdge(bool connected, bool clientTabSelected, bool fullscreen) => connected && clientTabSelected && !fullscreen;
 
     public static string ShareTitle(bool occupied, bool quiet = false)
-        => quiet ? "응답이 멈춘 접속입니다" : occupied ? "지금은 한 대만 연결됩니다" : "이 PC에 접속하려면";
+        => ShareTitle(occupied, quiet, accepting: true);
 
-    public static string ShareHint(bool occupied, bool quiet = false) => quiet
+    public static string ShareTitle(bool occupied, bool quiet, bool accepting)
+        => quiet ? "응답이 멈춘 접속입니다" : occupied ? "지금은 한 대만 연결됩니다" : accepting ? "이 PC에 접속하려면" : "접속 대기를 시작하면";
+
+    public static string ShareHint(bool occupied, bool quiet = false)
+        => ShareHint(occupied, quiet, accepting: true);
+
+    public static string ShareHint(bool occupied, bool quiet, bool accepting) => quiet
         ? "상대가 응답하지 않습니다. 다른 PC가 이 접속을 이어받을 수 있고, 바로 비우려면 현재 접속 끊기를 누르세요."
         : occupied
         ? "이미 다른 기기가 연결되어 있습니다. 현재 접속을 끊어야 다른 PC가 들어올 수 있습니다."
-        : "상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다.";
+        : accepting
+        ? "상대 PC의 주소 칸에 붙여 넣으면 포트도 같이 들어갑니다. 비밀번호만 맞으면 수락 없이 연결됩니다."
+        : "아직 접속을 받고 있지 않습니다. 접속 대기를 시작한 뒤에 주소를 복사하세요.";
+
+    public static string AddressCopied(string endpoint, bool accepting)
+        => accepting
+            ? endpoint + " 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요."
+            : endpoint + " 복사됨 · 접속 대기를 시작한 뒤에 붙여 넣으세요.";
 
     public static string AddressesChanged() => "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.";
 

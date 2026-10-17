@@ -145,6 +145,7 @@ try
     Check(ClipboardPaths.DeleteRetired(Path.Combine(retiredRoot, "missing"), []) == 0, "a missing clipboard cache has nothing to remove");
     Check(ClipboardPaths.DeleteRetired(retiredRoot, [retiredCurrent, Path.Combine(retiredOutside, "keep.txt")]) == 2 && !Directory.Exists(Path.Combine(retiredRoot, "stale")) && !Directory.Exists(Path.Combine(retiredRoot, "current-extra")) && File.Exists(retiredCurrent) && File.Exists(Path.Combine(retiredOutside, "keep.txt")), "retired clipboard batches are removed and the current paste stays");
     Check(ClipboardPaths.DeleteRetired(retiredRoot, [retiredCurrent]) == 0 && File.Exists(retiredCurrent), "the current clipboard batch is not removed twice");
+    Check(ClipboardPaths.RetiredNames(["stale", "current", ""], ["current"]).SequenceEqual(["stale"]) && ClipboardPaths.RetiredNames(["a", "b"], ["A", "b"]).Count == 0 && ClipboardPaths.RetiredNames(["only"], []).SequenceEqual(["only"]) && ClipboardPaths.RetiredNames(null, ["current"]).Count == 0, "a clipboard cache drops batches the current paste does not use");
 }
 finally { Directory.Delete(retiredRoot, true); Directory.Delete(retiredOutside, true); }
 var dropRoot = Path.Combine(Path.GetTempPath(), "prd-drop-" + Guid.NewGuid().ToString("N"));

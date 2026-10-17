@@ -278,10 +278,14 @@ public static class ClipboardPaths
             var slash = relative.IndexOf(Path.DirectorySeparatorChar);
             kept.Add(slash < 0 ? absolute : absolute[..(parent.Length + slash)]);
         }
+        var names = new List<string>();
+        foreach (var batch in Directory.EnumerateDirectories(root)) names.Add(Path.GetFileName(batch));
+        var keepNames = new List<string>();
+        foreach (var path in kept) keepNames.Add(Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
         var removed = 0;
-        foreach (var batch in Directory.EnumerateDirectories(root))
+        foreach (var name in RetiredNames(names, keepNames))
         {
-            if (kept.Contains(Path.GetFullPath(batch))) continue;
+            var batch = Path.Combine(root, name);
             try
             {
                 if ((File.GetAttributes(batch) & FileAttributes.ReparsePoint) != 0) continue;
@@ -291,5 +295,21 @@ public static class ClipboardPaths
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
         return removed;
+    }
+
+    public static IReadOnlyList<string> RetiredNames(IReadOnlyList<string>? batches, IEnumerable<string>? keep)
+    {
+        var kept = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (keep != null)
+            foreach (var name in keep)
+                if (!string.IsNullOrWhiteSpace(name)) kept.Add(name);
+        var retired = new List<string>();
+        if (batches == null) return retired;
+        foreach (var batch in batches)
+        {
+            if (string.IsNullOrWhiteSpace(batch) || kept.Contains(batch)) continue;
+            retired.Add(batch);
+        }
+        return retired;
     }
 }

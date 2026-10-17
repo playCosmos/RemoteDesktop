@@ -25,6 +25,7 @@ final class ClipboardFiles {
     private final String origin=UUID.randomUUID().toString();
     private final ClipboardManager.OnPrimaryClipChangedListener listener=() -> revision.incrementAndGet();
     private ArrayList<Uri> pending=new ArrayList<>();
+    private final Set<String> downloading=Collections.synchronizedSet(new HashSet<>());
     private int observedTextSequence=-1;
     private boolean sawTextSequence;
     private String remoteTextRevision="";
@@ -32,6 +33,7 @@ final class ClipboardFiles {
     ClipboardFiles(Activity activity,Supplier<RemoteApi> server,Consumer<String> status,ExecutorService worker) {
         this.activity=activity; this.server=server; this.status=status; this.worker=worker;
         clipboard=(ClipboardManager)activity.getSystemService(Context.CLIPBOARD_SERVICE); clipboard.addPrimaryClipChangedListener(listener);
+        try { retireUnused(); } catch(RuntimeException ignored) {}
     }
     void dispose() { clipboard.removePrimaryClipChangedListener(listener); }
     void syncText() {
@@ -62,7 +64,7 @@ final class ClipboardFiles {
                 if(server.get()!=api || revision.get()!=now)return;
                 try { clipboard.clearPrimaryClip(); }
                 catch(RuntimeException e) { status.accept("클립보드: "+e.getMessage()); return; }
-                observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); status.accept("클립보드를 지웠습니다.");
+                observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("클립보드를 지웠습니다.");
             });
             return;
         }
@@ -70,7 +72,7 @@ final class ClipboardFiles {
         activity.runOnUiThread(() -> {
             if(server.get()!=api || revision.get()!=now)return;
             clipboard.setPrimaryClip(ClipData.newPlainText(TEXT_MARKER+snapshot.optString("id",""),remoteText));
-            observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); status.accept("텍스트 클립보드 수신 완료");
+            observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("텍스트 클립보드 수신 완료");
         });
     }
     void accept(Intent intent) {
@@ -143,6 +145,7 @@ final class ClipboardFiles {
         RemoteApi api=server.get(); if(api==null)return; int before=revision.get();
         work(api,() -> {
             File directory=new File(new File(activity.getFilesDir(),"clipboard"),UUID.randomUUID().toString());
+            downloading.add(directory.getName());
             try {
                 JSONObject snapshot=api.clipboard(); JSONArray files=snapshot.getJSONArray("files"); String id=snapshot.getString("id");
                 if(files.length()==0 || files.length()>100)throw new IOException("원격 탐색기에서 파일이나 폴더를 먼저 복사하세요.");
@@ -159,11 +162,11 @@ final class ClipboardFiles {
                 }
                 if(!api.clipboard().getString("id").equals(id))throw new IOException("원격 클립보드가 변경되었습니다.");
                 activity.runOnUiThread(() -> {
-                    if(server.get()!=api || revision.get()!=before || api.cancelled) { remove(directory); status.accept("새로 복사한 클립보드를 유지했습니다."); return; }
+                    if(server.get()!=api || revision.get()!=before || api.cancelled) { downloading.remove(directory.getName()); remove(directory); status.accept("새로 복사한 클립보드를 유지했습니다."); return; }
                     ClipData data=ClipData.newRawUri("Remote Desktop files",uris.get(0)); for(int i=1;i<uris.size();i++)data.addItem(new ClipData.Item(uris.get(i)));
-                    pending.clear(); clipboard.setPrimaryClip(data); status.accept("파일이 클립보드에 복사됐습니다. 지원 앱 또는 ‘이 기기 폴더에 붙여넣기’를 사용하세요.");
+                    pending.clear(); clipboard.setPrimaryClip(data); retireUnused(); downloading.remove(directory.getName()); status.accept("파일이 클립보드에 복사됐습니다. 지원 앱 또는 ‘이 기기 폴더에 붙여넣기’를 사용하세요.");
                 });
-            } catch(Exception e) { remove(directory); status.accept("클립보드: "+e.getMessage()); }
+            } catch(Exception e) { downloading.remove(directory.getName()); remove(directory); status.accept("클립보드: "+e.getMessage()); }
         });
     }
     void pasteFolder(Uri tree) {
@@ -224,6 +227,20 @@ final class ClipboardFiles {
     private long lastProgress;
     private void progress(long bytes) { long now=android.os.SystemClock.elapsedRealtime(); if(now-lastProgress>250) { lastProgress=now; status.accept(String.format("클립보드 전송: %.1f MB",bytes/1048576.0)); } }
     private static void remove(File file) { File[] children=file.listFiles(); if(children!=null)for(File child:children)remove(child); file.delete(); }
+    private void retireUnused() {
+        java.util.HashSet<String> keep=new java.util.HashSet<>();
+        ClipData clip=clipboard.getPrimaryClip();
+        if(clip!=null) for(int i=0;i<clip.getItemCount();i++) {
+            Uri uri=clip.getItemAt(i).getUri();
+            if(uri==null || !ClipboardProvider.AUTHORITY.equals(uri.getAuthority())) continue;
+            java.util.List<String> parts=uri.getPathSegments();
+            if(!parts.isEmpty() && parts.get(0).matches("[0-9a-fA-F-]{36}")) keep.add(parts.get(0));
+        }
+        File root=new File(activity.getFilesDir(),"clipboard");
+        File[] children=root.listFiles();
+        if(children==null) return;
+        for(File child:children) if(child.isDirectory() && !keep.contains(child.getName()) && !downloading.contains(child.getName())) remove(child);
+    }
 
     private static File nestedFile(File root, String name) throws IOException {
         File current=root;

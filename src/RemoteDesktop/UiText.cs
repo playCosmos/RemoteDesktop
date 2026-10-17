@@ -290,6 +290,17 @@ public static class UiText
         return new(null, "");
     }
 
+    public readonly record struct HostSetupCheck(string? Problem, string Field);
+
+    public static HostSetupCheck CheckHostSetup(string? port, string? password, bool passwordRequired, bool confirmingExisting = false)
+    {
+        if (!int.TryParse(port?.Trim(), out var parsed) || parsed is < 1024 or > 65535) return new("포트 범위: 1024–65535", "port");
+        if (string.IsNullOrEmpty(password))
+            return passwordRequired ? new(confirmingExisting ? "현재 비밀번호를 입력하세요." : "비밀번호를 8~1024자 입력하세요.", "password") : new(null, "");
+        if (password.Length > 1024 || (!confirmingExisting && password.Length < 8)) return new("비밀번호를 8~1024자 입력하세요.", "password");
+        return new(null, "");
+    }
+
     public static string AddressesChanged() => "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.";
 
     public static string ClipboardFileProgress(string action, int index, int count, string name, long sent, long size)

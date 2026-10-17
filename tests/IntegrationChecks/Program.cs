@@ -173,6 +173,13 @@ var badFingerprint = UiText.CheckConnectForm("10.0.0.8", "45831", "secret", "abc
 var ready = UiText.CheckConnectForm("10.0.0.8", "45831", "secret", new string('a', 64));
 Check(missingAddress.Problem == "서버 주소를 입력하세요." && missingAddress.Field == "address" && missingPort.Problem == "포트 범위: 1–65535" && missingPort.Field == "port" && missingPassword.Problem == "접속 비밀번호를 입력하세요." && missingPassword.Field == "password", "an empty address, port, or password is explained before connecting");
 Check(badFingerprint.Problem == "서버의 SHA-256 지문 64자리를 입력하세요." && badFingerprint.Field == "fingerprint" && ready.Problem == null && UiText.CheckConnectForm("10.0.0.8", "45831", "secret", "").Problem == null, "a partial fingerprint is rejected and a blank one can be learned from the password");
+var badHostPort = UiText.CheckHostSetup("80", "12345678", false);
+var shortHostPassword = UiText.CheckHostSetup("45831", "short", true);
+var emptyConfirm = UiText.CheckHostSetup("45831", "", true, true);
+var savedHost = UiText.CheckHostSetup("45831", "", false);
+var readyHost = UiText.CheckHostSetup("45831", "12345678", true);
+Check(badHostPort.Problem == "포트 범위: 1024–65535" && badHostPort.Field == "port" && shortHostPassword.Problem == "비밀번호를 8~1024자 입력하세요." && shortHostPassword.Field == "password", "a host port or new password is checked before waiting starts");
+Check(emptyConfirm.Problem == "현재 비밀번호를 입력하세요." && emptyConfirm.Field == "password" && savedHost.Problem == null && readyHost.Problem == null, "a saved host can wait without typing the password again");
 Check(!UiText.RemotePointer(0, false) && !UiText.RemotePointer(20, false) && UiText.RemotePointer(20.1, false) && UiText.RemotePointer(0, true), "the toolbar strip does not move the remote pointer unless a drag is captured");
 Check(UiText.RemoteButtonRelease(true) && !UiText.RemoteButtonRelease(false) && !UiText.RemotePointer(8, false), "the toolbar does not release or scroll a remote button unless a drag is captured");
 Check(UiText.JpegFullColor(75) && UiText.JpegFullColor(55) && !UiText.JpegFullColor(40) && !UiText.JpegFullColor(25), "normal picture quality keeps full color");

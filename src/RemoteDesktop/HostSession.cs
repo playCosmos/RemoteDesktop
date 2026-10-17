@@ -193,6 +193,11 @@ public partial class MainWindow
                 ? (System.Windows.Media.Brush)window.FindResource("DangerBrush")
                 : (System.Windows.Media.Brush)window.FindResource("AccentBrush");
             window.HostNoticeText.Visibility = Visibility.Visible;
+            if (problem)
+            {
+                noticeTimer?.Stop();
+                return;
+            }
             noticeTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4.5) };
             noticeTimer.Stop();
             noticeTimer.Tick -= ClearNotice;
@@ -288,6 +293,14 @@ public partial class MainWindow
         public async void SaveHostPassword(object sender, RoutedEventArgs e)
         {
             if (host != null || hostStarting) { window.HostStatus("서버를 중지한 뒤 비밀번호를 변경하세요."); return; }
+            var confirming = settings.HasPassword && !settings.HasOpaqueIdentity;
+            var setup = UiText.CheckHostSetup(window.HostPort.Text, CurrentHostPassword(), passwordRequired: true, confirming);
+            if (setup.Problem != null)
+            {
+                window.HostNotice(setup.Problem, problem: true);
+                FocusHostSetup(setup.Field);
+                return;
+            }
             try
             {
                 if (settings.HasPassword && !settings.HasOpaqueIdentity)
@@ -304,7 +317,7 @@ public partial class MainWindow
                 UpdatePasswordState();
                 await StartHostAsync(automatic: false);
             }
-            catch (Exception ex) { window.HostStatus(UiText.Explain(ex, "비밀번호를 저장하지 못했습니다.")); }
+            catch (Exception ex) { window.HostNotice(UiText.Explain(ex, "비밀번호를 저장하지 못했습니다."), problem: true); }
         }
 
         public void HostPasswordKeyDown(object sender, KeyEventArgs e)
@@ -363,6 +376,12 @@ public partial class MainWindow
             else window.HostPassword.Focus();
         }
 
+        private void FocusHostSetup(string field)
+        {
+            if (field == "port") window.HostPort.Focus();
+            else FocusHostPassword();
+        }
+
         private void ClearHostPassword()
         {
             suppressHostPasswordReveal = true;
@@ -381,20 +400,27 @@ public partial class MainWindow
         private async Task StartHostAsync(bool automatic)
         {
             if (host != null || hostStarting || Closing) return;
+            if (automatic && !settings.HasPassword)
+            {
+                window.HostStatus("접속 비밀번호를 한 번 저장하면 다음 실행부터 자동으로 접속 대기를 시작합니다.");
+                SetHostState(HostUiState.Stopped);
+                return;
+            }
+            var typedPassword = CurrentHostPassword();
+            var setup = UiText.CheckHostSetup(window.HostPort.Text, typedPassword, passwordRequired: !settings.HasPassword);
+            if (setup.Problem != null)
+            {
+                window.HostNotice(setup.Problem, problem: true);
+                FocusHostSetup(setup.Field);
+                return;
+            }
             settings.SmoothHost = window.SmoothHostToggle.IsChecked == true;
             hostStarting = true;
             SetHostState(HostUiState.Starting);
             try
             {
-                if (automatic && !settings.HasPassword)
-                {
-                    window.HostStatus("접속 비밀번호를 한 번 저장하면 다음 실행부터 자동으로 접속 대기를 시작합니다.");
-                    SetHostState(HostUiState.Stopped);
-                    return;
-                }
                 if (!int.TryParse(window.HostPort.Text, out var port) || port is < 1024 or > 65535) throw new ArgumentException("포트 범위: 1024–65535");
                 settings.Port = port;
-                var typedPassword = CurrentHostPassword();
                 if (typedPassword.Length > 0) settings.SetPassword(typedPassword);
                 if (!settings.HasPassword) throw new InvalidOperationException("비밀번호를 먼저 저장하세요.");
                 window.HostStatus("접속 대기를 시작하는 중…");

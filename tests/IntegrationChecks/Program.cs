@@ -75,6 +75,39 @@ var secureMove = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEv
 var secureKey = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("key", Code: 13, Down: true)));
 Check(secureMove.Kind == "move" && secureMove.X == 0.25 && secureMove.Y == 0.75 && secureKey.Kind == "key" && secureKey.Code == 13 && secureKey.Down, "secure input keeps the pointer and the key");
 Check(AppCommand.Has(["--wait-ui"], AppCommand.WaitUi) && AppCommand.Has(["RemoteDesktop.exe", "--service"], AppCommand.Service) && !AppCommand.Has(["--install"], AppCommand.InstallMachine), "service and install arguments are recognized");
+Check(VideoCodec.Negotiate("h264", true) == "h264" && VideoCodec.Negotiate("h264", false) == "jpeg" && VideoCodec.Negotiate(null, true) == "jpeg" && VideoCodec.Negotiate("jpeg", true) == "jpeg", "h264 is used only when the client asks and the encoder is ready");
+Check(VideoCodec.Bitrate(55, 1920, 1080) == 4_000_000 && VideoCodec.Bitrate(30, 1920, 1080) == 1_500_000 && VideoCodec.Bitrate(80, 1920, 1080) == 8_000_000 && VideoCodec.Bitrate(55, 960, 540) == 1_000_000 && VideoCodec.Bitrate(90, 16, 16) == 400_000, "video bitrate follows the picture size and quality");
+Check(VideoCodec.NeedsKeyframe(0, 15, false) && VideoCodec.NeedsKeyframe(30, 15, false) && !VideoCodec.NeedsKeyframe(10, 15, false) && VideoCodec.NeedsKeyframe(1, 15, true), "a skipped or forced picture starts a new video keyframe");
+var avcc = new byte[] { 0, 0, 0, 2, 9, 16, 0, 0, 0, 1, 5 };
+var annex = VideoCodec.ToAnnexB(avcc);
+Check(!VideoCodec.IsAnnexB(avcc) && VideoCodec.IsAnnexB(annex) && annex.Length == 4 + 2 + 4 + 1 && annex[4] == 9 && annex[10] == 5, "length-prefixed video turns into annex-b");
+Check(UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "h264") == "10.0.0.8:45831 · 균형 · 15 FPS · H.264" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "jpeg") == "10.0.0.8:45831 · 균형 · 15 FPS · JPEG" && UiText.SessionPreset(null, "균형", 15) == "균형 · 15 FPS", "the toolbar names the video codec without dropping the older preset");
+using (var picture = new System.Drawing.Bitmap(64, 48, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+{
+    using (var graphics = System.Drawing.Graphics.FromImage(picture))
+    {
+        graphics.Clear(System.Drawing.Color.FromArgb(255, 220, 20, 20));
+        graphics.FillRectangle(System.Drawing.Brushes.Blue, 32, 0, 32, 48);
+    }
+    using var encoder = new H264Encoder();
+    using var decoder = new H264Decoder();
+    byte[]? seen = null;
+    var seenWidth = 0;
+    var seenHeight = 0;
+    for (var frame = 0; frame < 4; frame++)
+    {
+        var encoded = encoder.Encode(picture, frame == 0, 15, 55);
+        if (encoded.Length == 0) continue;
+        if (!decoder.TryDecode(encoded, out var pixels, out var decodedWidth, out var decodedHeight)) continue;
+        seen = pixels;
+        seenWidth = decodedWidth;
+        seenHeight = decodedHeight;
+    }
+    Check(seen != null && seenWidth == 64 && seenHeight == 48, "h264 roundtrip keeps the frame size");
+    var left = (24 * seenWidth + 8) * 4;
+    var right = (24 * seenWidth + 40) * 4;
+    Check(seen![left + 2] > seen[left] + 20 && seen[right] > seen[right + 2] + 20, "h264 keeps a red side and a blue side");
+}
 var retiredRoot = Path.Combine(Path.GetTempPath(), "prd-cache-" + Guid.NewGuid().ToString("N"));
 var retiredOutside = Path.Combine(Path.GetTempPath(), "prd-outside-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(retiredRoot);
@@ -584,6 +617,18 @@ async Task Capture()
     Check(smoothFrame.Bytes.Length > 100 && smoothFrame.Bytes[0] == 0xFF && smoothFrame.Bytes[1] == 0xD8, "smooth capture returns JPEG");
     var repeatedFrame = smoothDesktop.CaptureDetailed(null, 55, 0, 0, 1, 1, 30, true);
     Check(repeatedFrame.Bytes[0] == 0xFF && repeatedFrame.Bytes[1] == 0xD8 && repeatedFrame.LocalCursor, "smooth capture serves a prepared frame");
+    var h264Frame = await client.FrameDetailed(CancellationToken.None, null, 55, 15, true, false, null, true);
+    Check(h264Frame.Codec == "h264" && h264Frame.Bytes.Length > 8 && VideoCodec.IsAnnexB(h264Frame.Bytes), "a windows frame request receives h264");
+    using var h264 = new H264Decoder();
+    var opened = h264.TryDecode(h264Frame.Bytes, out var h264Pixels, out var h264Width, out var h264Height);
+    if (!opened)
+    {
+        var follow = await client.FrameDetailed(CancellationToken.None, null, 55, 15, true, true, null, false);
+        if (follow.Bytes.Length > 0) opened = h264.TryDecode(follow.Bytes, out h264Pixels, out h264Width, out h264Height);
+    }
+    Check(opened && h264Width > 1 && h264Height > 1 && h264Pixels.Length == h264Width * h264Height * 4, "the h264 desktop frame decodes");
+    var plain = await client.Frame(CancellationToken.None);
+    Check(plain.Length > 100 && plain[0] == 0xFF && plain[1] == 0xD8, "a client that omits the codec still receives jpeg");
 }
 
 async Task<RunningHost> OpenHost()

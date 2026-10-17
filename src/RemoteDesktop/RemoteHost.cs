@@ -35,6 +35,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private int listenPort;
     private readonly ClipboardExchange clipboard;
     private Task clipboardCleanup = Task.CompletedTask;
+    private H264Session? video;
     public event Action<string>? Status;
     public bool HasSession { get { lock (gate) return token != null; } }
     public string? SessionPeer { get { lock (gate) return sessionPeer; } }
@@ -178,9 +179,19 @@ public sealed partial class RemoteHost : IAsyncDisposable
             var oldToken = token; token = null; sessionPeer = null; sessionStarted = null; session.Cancel();
             if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
             try { desktop.Release(); } catch (InvalidOperationException) { }
-            if (disposeState != 0) return;
-            Status?.Invoke(hadSession ? UiText.SessionEnded(peer, reason, listenPort) : UiText.Listening(listenPort));
+            if (disposeState == 0) Status?.Invoke(hadSession ? UiText.SessionEnded(peer, reason, listenPort) : UiText.Listening(listenPort));
         }
+        RetireVideo();
+    }
+    private void RetireVideo()
+    {
+        if (!captureGate.Wait(TimeSpan.FromSeconds(5))) return;
+        try
+        {
+            video?.Dispose();
+            video = null;
+        }
+        finally { captureGate.Release(); }
     }
     public async ValueTask DisposeAsync()
     {

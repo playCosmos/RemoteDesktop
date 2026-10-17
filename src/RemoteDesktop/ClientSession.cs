@@ -73,6 +73,11 @@ public partial class MainWindow
         private int lastFrameQuality;
         private string? announcedDelivery;
         private int lastFrameBytes;
+        private string? pictureCodec;
+        private bool needKeyframe = true;
+        private int videoMisses;
+        private H264Decoder? videoDecoder;
+        private readonly object videoGate = new();
         private WriteableBitmap? frameSurface;
         private nint systemShortcutHook;
         private KeyboardHookProc? systemShortcutHookProc;
@@ -624,7 +629,7 @@ public partial class MainWindow
                     try
                     {
                         var viewerHasFrame = renderedDisplay == display && window.ScreenImage.Source != null;
-                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame, cursorHash);
+                        frame = await remote.FrameDetailed(ct, display, frameQuality, frameRate, inputEnabled, viewerHasFrame, cursorHash, !viewerHasFrame || needKeyframe);
                         data = frame.Bytes;
                         lastCaptureMilliseconds = frame.CaptureMilliseconds;
                         lastEncodeMilliseconds = frame.EncodeMilliseconds;
@@ -645,7 +650,7 @@ public partial class MainWindow
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
                     if (display != selectedDisplay) continue;
-                    if (data.Length > 0) await PresentFrameAsync(data, generation);
+                    if (data.Length > 0) await PresentFrameAsync(data, generation, frame.Codec);
                     if (display != selectedDisplay || ct.IsCancellationRequested) continue;
                     ShowStage(null);
                     renderedDisplay = display;
@@ -721,6 +726,7 @@ public partial class MainWindow
         private async Task DisconnectCore(bool retrying = false)
         {
             generation++;
+            needKeyframe = true;
             var remote = client;
             client = null;
             holdingPicture = retrying;
@@ -732,6 +738,7 @@ public partial class MainWindow
             lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
             inputBacklog.Reset();
             if (!retrying) ClearFrame();
+            if (!retrying) ResetVideo();
             ShowStage(retrying ? UiText.ReconnectHold() : null);
             if (retrying) window.SessionStatus(UiText.ReconnectHold());
             window.SessionInfoCard.Visibility = Visibility.Collapsed;
@@ -1149,7 +1156,7 @@ public partial class MainWindow
         private void ShowSessionPreset()
         {
             var delivered = client != null && lastFrameQuality > 0 ? QualityLabel(lastFrameQuality) : null;
-            window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate, delivered);
+            window.SessionPresetText.Text = UiText.SessionPreset(client == null ? null : lastConnection.Address, QualityLabel(frameQuality), frameRate, delivered, client == null ? null : pictureCodec);
         }
 
         private void AnnounceQuality(int quality)
@@ -1167,6 +1174,8 @@ public partial class MainWindow
         private static string QualityLabel(int quality) => quality <= 40 ? "저대역폭" : quality >= 70 ? "고화질" : "균형";
 
         private readonly record struct DecodedFrame(int Width, int Height, double DpiX, double DpiY, int Stride, byte[] Pixels);
+        private enum PictureRead { None, Frame, Failed }
+        private readonly record struct PictureDecode(PictureRead Read, DecodedFrame Frame);
 
         private static DecodedFrame DecodeFrame(byte[] jpeg)
         {
@@ -1200,21 +1209,74 @@ public partial class MainWindow
             }
         }
 
-        private async Task PresentFrameAsync(byte[] data, int attempt)
+        private static DecodedFrame CopyFrame(byte[] pixels, int width, int height)
         {
-            var decoded = await Task.Run(() => DecodeFrame(data));
+            var stride = width * 4;
+            var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(stride * height);
+            Buffer.BlockCopy(pixels, 0, rented, 0, stride * height);
+            return new DecodedFrame(width, height, 96, 96, stride, rented);
+        }
+
+        private PictureDecode ReadPicture(byte[] data, string codec)
+        {
+            if (VideoCodec.Normalize(codec) != "h264") return new(PictureRead.Frame, DecodeFrame(data));
+            lock (videoGate)
+            {
+                try
+                {
+                    videoDecoder ??= new H264Decoder();
+                    if (!videoDecoder.TryDecode(data, out var pixels, out var width, out var height)) return new(PictureRead.None, default);
+                    return new(PictureRead.Frame, CopyFrame(pixels, width, height));
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or COMException or ArgumentException)
+                {
+                    return new(PictureRead.Failed, default);
+                }
+            }
+        }
+
+        private void ResetVideo()
+        {
+            lock (videoGate)
+            {
+                videoDecoder?.Dispose();
+                videoDecoder = null;
+            }
+            videoMisses = 0;
+            pictureCodec = null;
+        }
+
+        private async Task PresentFrameAsync(byte[] data, int attempt, string codec)
+        {
+            if (attempt != generation) return;
+            var decoded = await Task.Run(() => ReadPicture(data, codec));
+            if (decoded.Read != PictureRead.Frame)
+            {
+                if (decoded.Read == PictureRead.Failed || ++videoMisses >= 8) needKeyframe = true;
+                if (decoded.Read == PictureRead.Failed) ResetVideo();
+                return;
+            }
             try
             {
                 if (attempt != generation || client == null) return;
-                if (frameSurface == null || frameSurface.PixelWidth != decoded.Width || frameSurface.PixelHeight != decoded.Height)
+                var frame = decoded.Frame;
+                if (frameSurface == null || frameSurface.PixelWidth != frame.Width || frameSurface.PixelHeight != frame.Height)
                 {
-                    frameSurface = new WriteableBitmap(decoded.Width, decoded.Height, decoded.DpiX, decoded.DpiY, System.Windows.Media.PixelFormats.Bgra32, null);
+                    frameSurface = new WriteableBitmap(frame.Width, frame.Height, frame.DpiX, frame.DpiY, System.Windows.Media.PixelFormats.Bgra32, null);
                     window.ScreenImage.Source = frameSurface;
                 }
-                frameSurface.WritePixels(new Int32Rect(0, 0, decoded.Width, decoded.Height), decoded.Pixels, decoded.Stride, 0);
+                frameSurface.WritePixels(new Int32Rect(0, 0, frame.Width, frame.Height), frame.Pixels, frame.Stride, 0);
+                videoMisses = 0;
+                needKeyframe = false;
+                var shown = VideoCodec.Normalize(codec);
+                if (pictureCodec != shown)
+                {
+                    pictureCodec = shown;
+                    ShowSessionPreset();
+                }
                 ApplyPictureScaling();
             }
-            finally { System.Buffers.ArrayPool<byte>.Shared.Return(decoded.Pixels); }
+            finally { System.Buffers.ArrayPool<byte>.Shared.Return(decoded.Frame.Pixels); }
         }
 
         private void ApplyPictureScaling()

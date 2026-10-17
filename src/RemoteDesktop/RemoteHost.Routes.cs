@@ -119,7 +119,28 @@ public sealed partial class RemoteHost
                     var encoded = Convert.ToBase64String(png);
                     if (encoded.Length <= 24000) c.Response.Headers["X-Cursor-Png"] = encoded;
                 }
-                if (!RemoteClient.SendJpeg(c.Request.Query["cached"].FirstOrDefault() == "1", frame.Timing.Reused))
+                var skipped = !RemoteClient.SendJpeg(c.Request.Query["cached"].FirstOrDefault() == "1", frame.Timing.Reused);
+                if (VideoCodec.Normalize(c.Request.Query["codec"].FirstOrDefault()) == "h264")
+                {
+                    video ??= new H264Session();
+                    if (!video.Retired)
+                    {
+                        if (skipped)
+                        {
+                            video.NoteSkipped();
+                            c.Response.Headers["X-Codec"] = "h264";
+                            return Results.Bytes(Array.Empty<byte>(), "video/h264");
+                        }
+                        var picture = video.Encode(frame.Bytes, c.Request.Query["key"].FirstOrDefault() == "1", frame.Timing.Reused, requestedRate, frame.Timing.Quality);
+                        if (picture.Length > 0)
+                        {
+                            c.Response.Headers["X-Codec"] = "h264";
+                            return Results.Bytes(picture, "video/h264");
+                        }
+                    }
+                }
+                c.Response.Headers["X-Codec"] = "jpeg";
+                if (skipped)
                     return Results.Bytes(Array.Empty<byte>(), "image/jpeg");
                 return Results.Bytes(frame.Bytes, "image/jpeg");
             }

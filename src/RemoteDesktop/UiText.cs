@@ -166,6 +166,13 @@ public static class UiText
     public static string SessionPreset(string? address, string quality, int frameRate, string? delivered)
         => SessionPreset(address, DeliveredQuality(quality, delivered), frameRate);
 
+    public static string SessionPreset(string? address, string quality, int frameRate, string? delivered, string? codec)
+    {
+        var text = SessionPreset(address, quality, frameRate, delivered);
+        if (string.IsNullOrWhiteSpace(codec)) return text;
+        return text + " · " + (VideoCodec.Normalize(codec) == "h264" ? "H.264" : "JPEG");
+    }
+
     public static string DeliveredQuality(string requested, string? delivered)
     {
         requested = requested.Trim();

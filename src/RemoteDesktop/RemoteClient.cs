@@ -48,14 +48,14 @@ public sealed class RemoteClient : IDisposable
         var query = (display == null ? "?quality=" + quality : "?display=" + Uri.EscapeDataString(display) + "&quality=" + quality) + "&view=" + view;
         return await http.GetByteArrayAsync("frame" + query, timeout.Token);
     }
-    public async Task<RemoteFrame> FrameDetailed(CancellationToken ct, string? display, int quality, int fps, bool localCursor, bool viewerHasFrame = false, string? cursorShape = null)
+    public async Task<RemoteFrame> FrameDetailed(CancellationToken ct, string? display, int quality, int fps, bool localCursor, bool viewerHasFrame = false, string? cursorShape = null, bool keyframe = false)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        var query = (display == null ? "?quality=" + quality : "?display=" + Uri.EscapeDataString(display) + "&quality=" + quality) + "&view=0,0,1,1&fps=" + fps + (localCursor ? "&cursor=local" : "") + (viewerHasFrame ? "&cached=1" : "") + (localCursor && !string.IsNullOrEmpty(cursorShape) ? "&shape=" + Uri.EscapeDataString(cursorShape) : "");
+        var query = (display == null ? "?quality=" + quality : "?display=" + Uri.EscapeDataString(display) + "&quality=" + quality) + "&view=0,0,1,1&fps=" + fps + (localCursor ? "&cursor=local" : "") + (viewerHasFrame ? "&cached=1" : "") + (localCursor && !string.IsNullOrEmpty(cursorShape) ? "&shape=" + Uri.EscapeDataString(cursorShape) : "") + "&codec=h264" + (keyframe ? "&key=1" : "");
         using var response = await http.GetAsync("frame" + query, timeout.Token);
         response.EnsureSuccessStatusCode();
         var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
-        return new RemoteFrame(bytes, Header(response, "X-Capture-Ms"), Header(response, "X-Encode-Ms"), HeaderFlag(response, "X-Frame-Reused"), (int)Header(response, "X-Jpeg-Quality"), Header(response, "X-Cursor-X"), Header(response, "X-Cursor-Y"), HeaderFlag(response, "X-Cursor-Local"), HeaderFlag(response, "X-Cursor-Visible"), (int)Header(response, "X-Cursor-Hot-X"), (int)Header(response, "X-Cursor-Hot-Y"), HeaderText(response, "X-Cursor-Hash"), HeaderBytes(response, "X-Cursor-Png"), HeaderText(response, "X-Secure-Desktop"));
+        return new RemoteFrame(bytes, Header(response, "X-Capture-Ms"), Header(response, "X-Encode-Ms"), HeaderFlag(response, "X-Frame-Reused"), (int)Header(response, "X-Jpeg-Quality"), Header(response, "X-Cursor-X"), Header(response, "X-Cursor-Y"), HeaderFlag(response, "X-Cursor-Local"), HeaderFlag(response, "X-Cursor-Visible"), (int)Header(response, "X-Cursor-Hot-X"), (int)Header(response, "X-Cursor-Hot-Y"), HeaderText(response, "X-Cursor-Hash"), HeaderBytes(response, "X-Cursor-Png"), HeaderText(response, "X-Secure-Desktop"), HeaderText(response, "X-Codec"));
     }
 
     public static bool SendJpeg(bool viewerHasFrame, bool reused) => !viewerHasFrame || !reused;
@@ -221,4 +221,4 @@ public sealed class RemoteClient : IDisposable
         protected override void Dispose(bool disposing) { }
     }
 }
-public readonly record struct RemoteFrame(byte[] Bytes, double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality, double CursorX, double CursorY, bool LocalCursor, bool CursorVisible, int CursorHotX, int CursorHotY, string CursorHash, byte[]? CursorPng, string Secure = "");
+public readonly record struct RemoteFrame(byte[] Bytes, double CaptureMilliseconds, double EncodeMilliseconds, bool Reused, int Quality, double CursorX, double CursorY, bool LocalCursor, bool CursorVisible, int CursorHotX, int CursorHotY, string CursorHash, byte[]? CursorPng, string Secure = "", string Codec = "");

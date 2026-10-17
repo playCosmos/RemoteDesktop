@@ -144,6 +144,8 @@ Check(UiText.PasswordReveal(false) == "보기" && UiText.PasswordReveal(true) ==
 Check(UiText.CapsLockWarning() == "Caps Lock이 켜져 있습니다." && !UiText.ShowCapsLock(false, true) && !UiText.ShowCapsLock(true, false) && UiText.ShowCapsLock(true, true), "caps lock is warned only while typing a password");
 Check(UiText.CopiedLabel("복사", false) == "복사" && UiText.CopiedLabel("복사", true) == "복사됨" && UiText.CopiedLabel("지문 복사", true) == "복사됨" && UiText.CopiedLabel("지문 복사", false) == "지문 복사", "a copy button shows which value was copied");
 Check(!UiText.SelectEntireValue(true) && UiText.SelectEntireValue(false), "the first click selects an address or password, and the next click edits it");
+Check(UiText.NoticeFits("접속 실패: 서버 인증서 지문이 일치하지 않습니다. 지문을 비우면 비밀번호로 다시 확인합니다.", 3, 28) && UiText.NoticeFits("192.168.56.1:45831 복사됨 · 상대 PC의 주소 칸에 붙여 넣으세요.", 3, 24) && UiText.NoticeFits("파일 보내기 실패: 클립보드가 변경되었거나 전송이 만료되었습니다. 다시 복사하세요.", 2, 32), "connection and clipboard notices fit on the card");
+Check(!UiText.NoticeFits("한 줄", 0, 20) && !UiText.NoticeFits(new string('가', 90), 2, 28), "a notice does not claim to fit when the card is too small");
 Check(UiText.CaptureSystemShortcut(0x12, true, false, false, false, false, false) && UiText.CaptureSystemShortcut(0x5B, true, false, false, false, false, false), "alt and the windows key go to the remote pc");
 Check(UiText.CaptureSystemShortcut(0x73, true, true, false, true, false, false) && UiText.CaptureSystemShortcut(0x09, true, true, false, true, false, false), "alt+f4 and alt+tab stay on the remote pc");
 Check(UiText.CaptureSystemShortcut(0x45, true, false, false, false, true, false), "win+e does not open the local explorer");

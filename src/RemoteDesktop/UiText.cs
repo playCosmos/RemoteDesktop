@@ -348,6 +348,23 @@ public static class UiText
 
     public static bool SelectEntireValue(bool alreadyFocused) => !alreadyFocused;
 
+    public static bool NoticeFits(string? text, int maxLines, int charsPerLine)
+    {
+        if (maxLines < 1 || charsPerLine < 8 || string.IsNullOrEmpty(text)) return false;
+        var lines = 1;
+        var column = 0;
+        foreach (var character in text)
+        {
+            if (character == (char)10 || column == charsPerLine)
+            {
+                lines++;
+                column = character == (char)10 ? 0 : 1;
+            }
+            else column++;
+        }
+        return lines <= maxLines;
+    }
+
     public static string? RemoteFailure(string? body)
     {
         if (string.IsNullOrWhiteSpace(body)) return null;

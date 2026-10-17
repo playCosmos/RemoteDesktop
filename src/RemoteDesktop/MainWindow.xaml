@@ -57,7 +57,7 @@
               <TextBlock x:Name="PinSummary" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
             </DockPanel>
             <TextBox x:Name="ServerPin" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="7" Visibility="Collapsed" PreviewKeyDown="ClientPasswordKeyDown" PreviewMouseLeftButtonDown="SelectWholeValue" GotKeyboardFocus="SelectWholeValueOnFocus"/>
-            <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            <TextBlock x:Name="ClientNoticeText" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="7" Text="지문을 비우면 비밀번호만으로 서버 키를 확인합니다." Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             <StackPanel x:Name="RecentPanel" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="7" Margin="0,10,0,0" Visibility="Collapsed">
               <TextBlock Text="최근 연결" Style="{StaticResource FieldLabel}"/>
               <ScrollViewer VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Auto">
@@ -132,7 +132,7 @@
         </Border>
         <Button x:Name="SessionReveal" Content="측정 중" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Padding="14,4" MinHeight="28" Click="RevealSessionToolbar" ToolTip="세션 조작 열기"/>
         <Border x:Name="SessionAlert" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource DangerBrush}" BorderThickness="1" CornerRadius="8" Padding="12,8" IsHitTestVisible="False">
-          <TextBlock x:Name="SessionAlertText" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="36" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+          <TextBlock x:Name="SessionAlertText" Foreground="{StaticResource DangerBrush}" FontSize="12" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="52" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </Border>
         <Border x:Name="InputHint" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24,16" MaxWidth="520" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="8" Padding="12,7" IsHitTestVisible="False">
           <TextBlock x:Name="InputHintText" Foreground="{StaticResource InkBrush}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"/>
@@ -176,7 +176,7 @@
                 </StackPanel>
                 <TextBlock x:Name="ServerStatusText" Text="준비됨" Style="{StaticResource BodyText}" Margin="0,8,0,16" TextWrapping="Wrap" MaxHeight="60" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <TextBlock x:Name="HostSessionText" Visibility="Collapsed" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource LiveBrush}" Margin="0,-8,0,12"/>
-                <TextBlock x:Name="HostNoticeText" Visibility="Collapsed" Style="{StaticResource BodyText}" Margin="0,-8,0,12" TextWrapping="Wrap" MaxHeight="40" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                <TextBlock x:Name="HostNoticeText" Visibility="Collapsed" Style="{StaticResource BodyText}" Margin="0,-8,0,12" TextWrapping="Wrap" MaxHeight="64" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
                 <StackPanel x:Name="HostSetup">
                   <TextBlock x:Name="PasswordState" Style="{StaticResource BodyText}" Margin="0,0,0,12"/>
                   <Button x:Name="ChangePasswordButton" Content="비밀번호 변경" Click="ChangeHostPassword" HorizontalAlignment="Left" Margin="0,0,0,12"/>

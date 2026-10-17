@@ -26,6 +26,7 @@ final class ClipboardFiles {
     private final ClipboardManager.OnPrimaryClipChangedListener listener=() -> revision.incrementAndGet();
     private ArrayList<Uri> pending=new ArrayList<>();
     private int observedTextSequence=-1;
+    private boolean sawTextSequence;
     private String remoteTextRevision="";
     private static final String TEXT_MARKER="PersonalRemoteDesktop:text:";
     ClipboardFiles(Activity activity,Supplier<RemoteApi> server,Consumer<String> status,ExecutorService worker) {
@@ -45,14 +46,26 @@ final class ClipboardFiles {
         }
         JSONObject snapshot=api.clipboard();
         if(now!=observedTextSequence) {
+            boolean first=!sawTextSequence;
+            sawTextSequence=true;
             observedTextSequence=now;
-            if(!text.isEmpty() && text.length()<=1000000 && !label.startsWith(TEXT_MARKER)) {
-                JSONObject published=api.setClipboardText(text,origin,snapshot.getString("id")); remoteTextRevision=published.getString("id"); status.accept("텍스트 클립보드 동기화 완료"); return;
+            boolean own=label.startsWith(TEXT_MARKER);
+            if(!own && text.length()<=1000000 && copied().isEmpty() && (!text.isEmpty() || !first)) {
+                JSONObject published=api.setClipboardText(text,origin,snapshot.getString("id")); remoteTextRevision=published.getString("id"); status.accept(text.isEmpty()?"클립보드를 지웠습니다.":"텍스트 클립보드 동기화 완료"); return;
             }
         }
         if(snapshot.getString("id").equals(remoteTextRevision))return;
         JSONArray files=snapshot.getJSONArray("files"); String remoteText=snapshot.optString("text","");
-        if(files.length()!=0 || remoteText.isEmpty() || origin.equals(snapshot.optString("origin",""))) { remoteTextRevision=snapshot.getString("id"); return; }
+        if(origin.equals(snapshot.optString("origin","")) || files.length()!=0) { remoteTextRevision=snapshot.getString("id"); return; }
+        if(remoteText.isEmpty()) {
+            activity.runOnUiThread(() -> {
+                if(server.get()!=api || revision.get()!=now)return;
+                try { clipboard.clearPrimaryClip(); }
+                catch(RuntimeException e) { status.accept("클립보드: "+e.getMessage()); return; }
+                observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); status.accept("클립보드를 지웠습니다.");
+            });
+            return;
+        }
         if(revision.get()!=now)return;
         activity.runOnUiThread(() -> {
             if(server.get()!=api || revision.get()!=now)return;

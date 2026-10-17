@@ -249,6 +249,9 @@ Check(UiText.ConnectCancelLabel() == "취소" && UiText.ConnectCancelled() == "�
 Check(UiText.HostStartLabel(false) == "접속 대기 시작" && UiText.HostStartLabel(true) == "취소" && UiText.HostStartCancelled() == "접속 대기를 취소했습니다." && !UiText.IsProblem(UiText.HostStartCancelled()), "cancelling host start is quiet and the same button does it");
 Check(UiText.TransferCancelled() == "파일 전송을 취소했습니다." && !UiText.IsProblem(UiText.TransferCancelled()) && UiText.SessionOnPicture(UiText.TransferCancelled()), "a cancelled file transfer stays quiet on the picture");
 Check(UiText.FolderPasteCancelled() == "붙여넣기를 취소했습니다." && !UiText.IsProblem(UiText.FolderPasteCancelled()) && UiText.SessionOnPicture(UiText.FolderPasteCancelled()), "cancelling a folder paste stays quiet");
+Check(UiText.ClipboardCleared() == "클립보드를 지웠습니다." && !UiText.IsProblem(UiText.ClipboardCleared()) && UiText.SessionOnPicture(UiText.ClipboardCleared()), "clearing the clipboard stays quiet on the picture");
+Check(ClipboardSync.ClipboardClear.PushEmpty(0, 0, false) && !ClipboardSync.ClipboardClear.PushEmpty(1, 0, false) && !ClipboardSync.ClipboardClear.PushEmpty(0, 3, false) && !ClipboardSync.ClipboardClear.PushEmpty(0, 0, true), "an empty local clipboard is pushed only when this sync did not write it");
+Check(ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(1, 0, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 2, false, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, true, false, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, true, false) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, true), "an empty remote clipboard clears local text and files unless it is our own or already empty");
 Check(UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("reset"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TimeoutException("slow"))) && UiText.ShouldReconnect(UiText.ClassifyDrop(new TaskCanceledException())), "a dropped network or a timeout can reconnect");
 Check(!UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("denied", null, HttpStatusCode.Unauthorized))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("busy", null, HttpStatusCode.Conflict))) && !UiText.ShouldReconnect(UiText.ClassifyDrop(new HttpRequestException("The SSL connection could not be established"))), "a rejected login, a busy host, or a certificate mismatch does not reconnect");
 Check(UiText.ReconnectDelay(1) == TimeSpan.FromSeconds(2) && UiText.ReconnectDelay(2) == TimeSpan.FromSeconds(4) && UiText.ReconnectDelay(3) == TimeSpan.FromSeconds(8) && UiText.MaxAutomaticReconnects == 3, "reconnect waits grow and then stop");
@@ -635,6 +638,16 @@ async Task ClipboardFiles()
     var longText = new string('가', 40_000);
     await client.SendClipboardText(longText, "test", (await client.Clipboard(CancellationToken.None)).Id, CancellationToken.None);
     Check((await site.Clipboard.Read(CancellationToken.None)).Text == longText, "text beyond control-message limit reaches clipboard");
+    localClipboard.Set([]);
+    Check(await sync.PushText(CancellationToken.None), "an empty local clipboard clears the remote clipboard");
+    var clearedHost = await site.Clipboard.Read(CancellationToken.None);
+    Check(clearedHost.Paths.Length == 0 && clearedHost.Text.Length == 0, "the remote clipboard is empty after a local clear");
+    site.Clipboard.Set([], "다시 채운 텍스트");
+    await sync.Pull(CancellationToken.None);
+    site.Clipboard.Set([]);
+    await sync.Pull(CancellationToken.None);
+    var clearedLocal = await localClipboard.Read(CancellationToken.None);
+    Check(clearedLocal.Paths.Length == 0 && clearedLocal.Text.Length == 0, "an empty remote clipboard clears the local clipboard");
 }
 
 async Task Capture()

@@ -11,6 +11,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     private string owner = "";
     private ClipboardSelection? selected;
     private ClipboardManifest manifest = new("", "", []);
+    private ClipboardLeaf[] leaves = [];
     private readonly Dictionary<string, Pending> pending = [];
     private sealed class Pending(string owner, ClipboardUpload request, string directory)
     {
@@ -23,11 +24,8 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
     {
         var current = await clipboard.Read(ct);
         if (owner == scope && current.Sequence == selected?.Sequence) return manifest;
-        var files = current.Paths.Any(path => !File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) ? [] : current.Paths.Select(path =>
-        {
-            var info = new FileInfo(path); return new ClipboardFile(info.Name, info.Length);
-        }).ToArray();
-        if (files.Length > 0) ClipboardPaths.Validate(files);
+        leaves = current.Paths.Length == 0 ? [] : ClipboardPaths.Collect(current.Paths);
+        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
         owner = scope; selected = current;
         ClipboardPaths.ValidateText(current.Text);
         manifest = new(Guid.NewGuid().ToString("N"), current.Origin, files, files.Length == 0 ? current.Text : ""); return manifest;
@@ -99,7 +97,7 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
             var batch = Get(scope, id);
             if (batch.Complete.Any(done => !done)) throw new ClipboardConflictException();
             if ((await ReadCore(scope, ct)).Id != batch.Request.ExpectedRevision) throw new ClipboardConflictException();
-            var paths = batch.Request.Files.Select((f, i) => ClipboardPaths.FileAt(batch.Directory, i, f.Name)).ToArray();
+            var paths = ClipboardPaths.Publish(batch.Directory, batch.Request.Files);
             if (!await clipboard.Write(paths, "", batch.Request.Origin, selected!.Sequence, ct)) throw new ClipboardConflictException();
             pending.Remove(id); selected = null;
             var committed = await ReadCore(scope, ct);
@@ -114,9 +112,10 @@ public sealed class ClipboardExchange(IFileClipboard clipboard, string cacheRoot
         try
         {
             var current = await ReadCore(scope, ct);
-            if (current.Id != id || index < 0 || index >= current.Files.Length) throw new ClipboardConflictException();
-            if ((File.GetAttributes(selected!.Paths[index]) & FileAttributes.ReparsePoint) != 0) throw new ClipboardConflictException();
-            var stream = new FileStream(selected!.Paths[index], FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+            if (current.Id != id || index < 0 || index >= leaves.Length || index >= current.Files.Length) throw new ClipboardConflictException();
+            var source = leaves[index].Source;
+            if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) throw new ClipboardConflictException();
+            var stream = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
             if (stream.Length != current.Files[index].Size) { stream.Dispose(); throw new ClipboardConflictException(); }
             return stream;
         }

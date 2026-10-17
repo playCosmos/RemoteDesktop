@@ -85,7 +85,10 @@ final class ClipboardFiles {
         throw new IOException("파일 이름을 읽을 수 없습니다.");
     }
     private static void validateName(String name) throws IOException {
-        if(name==null || name.isEmpty() || name.length()>200 || name.equals(".") || name.equals("..") || name.contains("/") || name.contains("\\"))throw new IOException("지원하지 않는 파일 이름");
+        if(name==null || name.isEmpty() || name.length()>240 || name.indexOf(92)>=0 || name.indexOf(':')>=0)throw new IOException("지원하지 않는 파일 이름");
+        String[] parts=name.split("/", -1);
+        if(parts.length==0 || parts.length>32)throw new IOException("지원하지 않는 파일 이름");
+        for(String part:parts) if(part.isEmpty() || part.equals(".") || part.equals("..") || part.length()>200 || part.endsWith(".") || part.endsWith(" "))throw new IOException("지원하지 않는 파일 이름");
     }
     private void work(RemoteApi api,Runnable task) {
         if(!busy.compareAndSet(false,true)) { status.accept("클립보드 전송 중입니다."); return; }
@@ -122,15 +125,17 @@ final class ClipboardFiles {
             File directory=new File(new File(activity.getFilesDir(),"clipboard"),UUID.randomUUID().toString());
             try {
                 JSONObject snapshot=api.clipboard(); JSONArray files=snapshot.getJSONArray("files"); String id=snapshot.getString("id");
-                if(files.length()==0 || files.length()>100)throw new IOException("원격 탐색기에서 파일을 먼저 복사하세요. 폴더는 지원하지 않습니다.");
+                if(files.length()==0 || files.length()>100)throw new IOException("원격 탐색기에서 파일이나 폴더를 먼저 복사하세요.");
                 ArrayList<Uri> uris=new ArrayList<>(); long total=0;
                 for(int i=0;i<files.length();i++) {
                     String name=files.getJSONObject(i).getString("name"); validateName(name); long size=files.getJSONObject(i).getLong("size"); total+=size;
                     if(size<0 || size>1073741824L || total>4294967296L)throw new IOException("클립보드 파일 크기 제한");
-                    File folder=new File(directory,Integer.toString(i)); folder.mkdirs(); File file=new File(folder,name);
+                    File folder=new File(directory,Integer.toString(i)); folder.mkdirs(); File file=nestedFile(folder, name);
                     try(OutputStream out=new FileOutputStream(file)) { api.downloadClipboard(id,i,out,bytes -> progress(bytes)); }
                     if(file.length()!=size)throw new IOException("파일 크기 불일치");
-                    uris.add(new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(directory.getName()).appendPath(Integer.toString(i)).appendPath(name).build());
+                    Uri.Builder builder=new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(directory.getName()).appendPath(Integer.toString(i));
+                    for(String part:name.split("/", -1))builder.appendPath(part);
+                    uris.add(builder.build());
                 }
                 if(!api.clipboard().getString("id").equals(id))throw new IOException("원격 클립보드가 변경되었습니다.");
                 activity.runOnUiThread(() -> {
@@ -146,8 +151,23 @@ final class ClipboardFiles {
         work(null,() -> {
             try {
                 Uri parent=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
+                java.util.HashMap<String,Uri> dirs=new java.util.HashMap<>();
+                dirs.put("", parent);
                 for(Uri uri:uris) {
-                    Uri destination=DocumentsContract.createDocument(activity.getContentResolver(),parent,"application/octet-stream",name(uri));
+                    java.util.List<String> parts=uri.getPathSegments();
+                    if(parts.size()<3)throw new IOException("지원하지 않는 파일 이름");
+                    Uri dir=parent; String key="";
+                    for(int i=2;i<parts.size()-1;i++) {
+                        key=key+"/"+parts.get(i);
+                        Uri next=dirs.get(key);
+                        if(next==null) {
+                            next=DocumentsContract.createDocument(activity.getContentResolver(),dir,DocumentsContract.Document.MIME_TYPE_DIR,parts.get(i));
+                            if(next==null)throw new IOException("폴더를 만들지 못했습니다");
+                            dirs.put(key, next);
+                        }
+                        dir=next;
+                    }
+                    Uri destination=DocumentsContract.createDocument(activity.getContentResolver(),dir,"application/octet-stream",parts.get(parts.size()-1));
                     if(destination==null)throw new IOException("파일 생성 실패");
                     try(InputStream in=activity.getContentResolver().openInputStream(uri); OutputStream out=activity.getContentResolver().openOutputStream(destination,"w")) { byte[] b=new byte[65536]; int n; while((n=in.read(b))!=-1)out.write(b,0,n); }
                     catch(Exception e) { DocumentsContract.deleteDocument(activity.getContentResolver(),destination); throw e; }
@@ -159,4 +179,17 @@ final class ClipboardFiles {
     private long lastProgress;
     private void progress(long bytes) { long now=android.os.SystemClock.elapsedRealtime(); if(now-lastProgress>250) { lastProgress=now; status.accept(String.format("클립보드 전송: %.1f MB",bytes/1048576.0)); } }
     private static void remove(File file) { File[] children=file.listFiles(); if(children!=null)for(File child:children)remove(child); file.delete(); }
+
+    private static File nestedFile(File root, String name) throws IOException {
+        File current=root;
+        String[] parts=name.split("/", -1);
+        for(int i=0;i<parts.length-1;i++) {
+            current=new File(current, parts[i]);
+            if(!current.isDirectory() && !current.mkdirs())throw new IOException("폴더를 만들지 못했습니다");
+        }
+        File file=new File(current, parts[parts.length-1]);
+        String rootPath=root.getCanonicalPath()+File.separator;
+        if(!file.getCanonicalPath().startsWith(rootPath))throw new IOException("지원하지 않는 파일 이름");
+        return file;
+    }
 }

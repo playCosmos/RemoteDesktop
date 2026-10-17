@@ -170,28 +170,29 @@ public sealed class ClipboardSync(RemoteClient remote, IFileClipboard local, Act
             SetTransferring(true);
             try
             {
-                var paths = new string[snapshot.Files.Length];
-                for (var index = 0; index < paths.Length; index++)
+                var stored = new string[snapshot.Files.Length];
+                for (var index = 0; index < stored.Length; index++)
                 {
-                    var file = snapshot.Files[index]; paths[index] = ClipboardPaths.FileAt(directory, index, file.Name);
+                    var file = snapshot.Files[index]; stored[index] = ClipboardPaths.FileAt(directory, index, file.Name);
                     var reported = -1;
-                    await remote.DownloadClipboard(snapshot.Id, index, paths[index], linked.Token, (sent, size) =>
+                    await remote.DownloadClipboard(snapshot.Id, index, stored[index], linked.Token, (sent, size) =>
                     {
                         var percent = size <= 0 ? 100 : (int)Math.Clamp(sent * 100 / size, 0, 100);
                         if (!UiText.ShouldReportProgress(reported, percent)) return;
                         reported = percent;
-                        status(UiText.ClipboardFileProgress("클립보드 수신", index, paths.Length, file.Name, sent, size));
+                        status(UiText.ClipboardFileProgress("클립보드 수신", index, stored.Length, file.Name, sent, size));
                     });
-                    if (new FileInfo(paths[index]).Length != file.Size) throw new IOException("클립보드 파일 크기 불일치");
+                    if (new FileInfo(stored[index]).Length != file.Size) throw new IOException("클립보드 파일 크기 불일치");
                 }
                 if ((await remote.Clipboard(linked.Token)).Id != snapshot.Id) return true;
-                retained = await local.Write(paths, "", "remote:" + snapshot.Id, before.Sequence, linked.Token);
+                var published = ClipboardPaths.Publish(directory, snapshot.Files);
+                retained = await local.Write(published, "", "remote:" + snapshot.Id, before.Sequence, linked.Token);
                 remoteRevision = snapshot.Id;
                 if (retained) { observedLocal = (await local.Read(ct)).Sequence; status("클립보드 파일 수신 완료 · 이 PC의 탐색기에서 Ctrl+V로 붙여넣으세요."); }
                 else status("새로 복사한 로컬 파일을 유지했습니다.");
                 if (retained)
                 {
-                    try { ClipboardPaths.DeleteRetired(cache, paths); }
+                    try { ClipboardPaths.DeleteRetired(cache, published); }
                     catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
                 }
                 return true;

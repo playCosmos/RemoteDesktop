@@ -92,18 +92,19 @@ public sealed class RemoteClient : IDisposable
     }
     public async Task<ClipboardManifest> SendClipboard(string[] paths, string origin, string expectedRevision, CancellationToken ct, Action<string>? progress = null)
     {
-        var files = ClipboardPaths.Accept(paths);
+        var leaves = ClipboardPaths.Collect(paths);
+        var files = leaves.Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
         using var begin = await http.PostAsJsonAsync("clipboard/uploads", new ClipboardUpload(origin, expectedRevision, files), ct);
         await EnsureClipboard(begin);
         var json = await begin.Content.ReadFromJsonAsync<JsonElement>(ct); var id = json.GetProperty("id").GetString()!;
         var committed = false;
         try
         {
-            for (var index = 0; index < paths.Length; index++)
+            for (var index = 0; index < leaves.Length; index++)
             {
-                var name = files[index].Name;
-                var size = files[index].Size;
-                await using var stream = new FileStream(paths[index], FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+                var name = leaves[index].Name;
+                var size = leaves[index].Size;
+                await using var stream = new FileStream(leaves[index].Source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
                 using var incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                 var buffer = new byte[65536];
                 long hashed = 0;
@@ -113,12 +114,12 @@ public sealed class RemoteClient : IDisposable
                 {
                     incremental.AppendData(buffer, 0, read);
                     hashed += read;
-                    ReportClipboard(progress, "클립보드 확인", index, paths.Length, name, hashed, size, reported);
+                    ReportClipboard(progress, "클립보드 확인", index, leaves.Length, name, hashed, size, reported);
                 }
                 var hash = Convert.ToHexString(incremental.GetHashAndReset());
                 stream.Position = 0;
                 reported.Percent = -1;
-                var content = new StreamContent(new CountingStream(stream, sent => ReportClipboard(progress, "클립보드 전송", index, paths.Length, name, sent, size, reported)));
+                var content = new StreamContent(new CountingStream(stream, sent => ReportClipboard(progress, "클립보드 전송", index, leaves.Length, name, sent, size, reported)));
                 content.Headers.ContentLength = stream.Length;
                 using var request = new HttpRequestMessage(HttpMethod.Put, $"clipboard/uploads/{id}/{index}") { Content = content };
                 request.Headers.Add("X-Content-SHA256", hash);

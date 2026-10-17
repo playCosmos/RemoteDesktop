@@ -151,14 +151,38 @@ try
 {
     var accepted = ClipboardPaths.Accept([dropFile, dropSecond]);
     Check(accepted.Length == 2 && accepted[0].Name == "note.txt" && accepted[0].Size == 5 && accepted[1].Name == "two.txt" && accepted[1].Size == 1, "dropped files are accepted in order");
-    try { ClipboardPaths.Accept([dropDir]); Check(false, "a dropped folder is rejected"); }
-    catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a dropped folder is rejected"); }
+    File.WriteAllText(Path.Combine(dropDir, "b.txt"), "bb");
+    Directory.CreateDirectory(Path.Combine(dropDir, "nested"));
+    File.WriteAllText(Path.Combine(dropDir, "nested", "a.txt"), "aaa");
+    var folderFiles = ClipboardPaths.Accept([dropDir]);
+    Check(folderFiles.Length == 2 && folderFiles[0].Name == "folder/b.txt" && folderFiles[0].Size == 2 && folderFiles[1].Name == "folder/nested/a.txt" && folderFiles[1].Size == 3, "a dropped folder keeps its files and subfolders");
+    var stage = Path.Combine(dropRoot, "stage");
+    Directory.CreateDirectory(stage);
+    File.WriteAllText(ClipboardPaths.FileAt(stage, 0, folderFiles[0].Name), "bb");
+    File.WriteAllText(ClipboardPaths.FileAt(stage, 1, folderFiles[1].Name), "aaa");
+    var published = ClipboardPaths.Publish(stage, folderFiles);
+    Check(published.Length == 1 && Directory.Exists(published[0]) && Path.GetFileName(published[0]) == "folder" && File.ReadAllText(Path.Combine(published[0], "nested", "a.txt")) == "aaa" && File.ReadAllText(Path.Combine(published[0], "b.txt")) == "bb", "a received folder is pasted as one folder");
+    var again = ClipboardPaths.Accept(published);
+    Check(again.Length == 2 && again[0].Name == "folder/b.txt" && again[1].Name == "folder/nested/a.txt", "a pasted folder copies again with the same names");
+    var otherFolder = Path.Combine(dropRoot, "other", "folder");
+    Directory.CreateDirectory(otherFolder);
+    File.WriteAllText(Path.Combine(otherFolder, "c.txt"), "c");
+    var both = ClipboardPaths.Accept([dropDir, otherFolder]);
+    Check(both.Any(file => file.Name == "folder/b.txt") && both.Any(file => file.Name == "folder (2)/c.txt"), "two folders with the same name stay separate");
+    var emptyDir = Path.Combine(dropRoot, "empty");
+    Directory.CreateDirectory(emptyDir);
+    try { ClipboardPaths.Accept([emptyDir]); Check(false, "an empty folder is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "빈 폴더는 복사할 수 없습니다.", "an empty folder is rejected"); }
+    try { ClipboardPaths.Validate([new ClipboardFile("folder/../../x.txt", 1)]); Check(false, "a folder path cannot escape"); }
+    catch (ArgumentException ex) { Check(ex.Message == "지원하지 않는 파일 이름입니다.", "a folder path cannot escape"); }
+    try { ClipboardPaths.FileAt(stage, 0, "../outside.txt"); Check(false, "a stored folder path cannot escape"); }
+    catch (ArgumentException) { Check(!File.Exists(Path.Combine(dropRoot, "outside.txt")), "a stored folder path cannot escape"); }
     try { ClipboardPaths.Accept([Path.Combine(dropRoot, "missing.txt")]); Check(false, "a missing drop is rejected"); }
-    catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a missing drop is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "파일이나 폴더만 복사할 수 있습니다. 링크는 지원하지 않습니다.", "a missing drop is rejected"); }
     try { ClipboardPaths.Accept([]); Check(false, "an empty drop is rejected"); }
-    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.", "an empty drop is rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다.", "an empty drop is rejected"); }
     try { ClipboardPaths.Accept(Enumerable.Repeat(dropFile, ClipboardPaths.MaxFiles + 1).ToArray()); Check(false, "too many dropped files are rejected"); }
-    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.", "too many dropped files are rejected"); }
+    catch (ArgumentException ex) { Check(ex.Message == "한 번에 파일 1~100개를 복사할 수 있습니다.", "too many dropped files are rejected"); }
     try { ClipboardPaths.Validate([new ClipboardFile("big.bin", RemoteHost.MaxFileBytes + 1)]); Check(false, "a file over 1GiB is rejected"); }
     catch (ArgumentException ex) { Check(ex.Message == "파일당 최대 1GiB입니다.", "a file over 1GiB is rejected"); }
     try { ClipboardPaths.Validate([new ClipboardFile("a.bin", RemoteHost.MaxFileBytes), new ClipboardFile("b.bin", RemoteHost.MaxFileBytes), new ClipboardFile("c.bin", RemoteHost.MaxFileBytes), new ClipboardFile("d.bin", RemoteHost.MaxFileBytes), new ClipboardFile("e.bin", 1)]); Check(false, "a batch over 4GiB is rejected"); }
@@ -169,7 +193,7 @@ try
     if (link != null && File.Exists(link))
     {
         try { ClipboardPaths.Accept([link]); Check(false, "a dropped link is rejected"); }
-        catch (ArgumentException ex) { Check(ex.Message == "일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.", "a dropped link is rejected"); }
+        catch (ArgumentException ex) { Check(ex.Message == "파일이나 폴더만 복사할 수 있습니다. 링크는 지원하지 않습니다.", "a dropped link is rejected"); }
     }
 }
 finally { Directory.Delete(dropRoot, true); }

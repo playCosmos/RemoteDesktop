@@ -111,54 +111,158 @@ public record ClipboardFile(string Name, long Size);
 public record ClipboardManifest(string Id, string Origin, ClipboardFile[] Files, string Text = "");
 public record ClipboardUpload(string Origin, string ExpectedRevision, ClipboardFile[] Files);
 public record ClipboardTextUpdate(string Origin, string ExpectedRevision, string Text);
+public readonly record struct ClipboardLeaf(string Source, string Name, long Size);
 
 public static class ClipboardPaths
 {
     public const int MaxFiles = 100;
     public const long MaxBatchBytes = 4L * 1024 * 1024 * 1024;
     public const int MaxTextCharacters = 1_000_000;
+    const int MaxDepth = 32;
+    const int MaxNameLength = 240;
     public static void ValidateText(string? text)
     {
         if (text is null || text.Length > MaxTextCharacters) throw new ArgumentException("클립보드 텍스트는 100만 자까지 지원합니다.");
     }
     public static ClipboardFile[] Accept(string[] paths)
+        => Collect(paths).Select(leaf => new ClipboardFile(leaf.Name, leaf.Size)).ToArray();
+
+    public static ClipboardLeaf[] Collect(string[] paths)
     {
-        if (paths is null || paths.Length is < 1 or > MaxFiles) throw new ArgumentException("한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.");
-        var files = new ClipboardFile[paths.Length];
-        for (var index = 0; index < paths.Length; index++)
+        if (paths is null || paths.Length is < 1 or > MaxFiles) throw new ArgumentException(TooMany());
+        var leaves = new List<ClipboardLeaf>();
+        var folderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
         {
-            var path = paths[index];
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException("일반 파일만 복사할 수 있습니다. 폴더·링크는 지원하지 않습니다.");
-            files[index] = new ClipboardFile(Path.GetFileName(path), new FileInfo(path).Length);
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException(PlainFiles());
+            string full;
+            try { full = Path.GetFullPath(path); }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { throw new ArgumentException(PlainFiles()); }
+            if (!File.Exists(full) && !Directory.Exists(full)) throw new ArgumentException(PlainFiles());
+            var attributes = File.GetAttributes(full);
+            if ((attributes & FileAttributes.ReparsePoint) != 0) throw new ArgumentException(PlainFiles());
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                leaves.Add(new ClipboardLeaf(full, Path.GetFileName(full), new FileInfo(full).Length));
+                continue;
+            }
+            var top = UniqueFolder(Path.GetFileName(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), folderNames);
+            var found = new List<ClipboardLeaf>();
+            Walk(full, top, full, found, leaves.Count, 0);
+            if (found.Count == 0) throw new ArgumentException("빈 폴더는 복사할 수 없습니다.");
+            found.Sort((left, right) => string.CompareOrdinal(left.Name, right.Name));
+            leaves.AddRange(found);
         }
+        if (leaves.Count is < 1 or > MaxFiles) throw new ArgumentException(TooMany());
+        var files = new ClipboardFile[leaves.Count];
+        for (var index = 0; index < leaves.Count; index++) files[index] = new ClipboardFile(leaves[index].Name, leaves[index].Size);
         Validate(files);
-        return files;
+        return leaves.ToArray();
     }
+
     public static void Validate(ClipboardFile[] files)
     {
-        if (files is null || files.Length is < 1 or > MaxFiles) throw new ArgumentException("한 번에 파일 1~100개를 복사할 수 있습니다. 폴더는 지원하지 않습니다.");
+        if (files is null || files.Length is < 1 or > MaxFiles) throw new ArgumentException(TooMany());
         long total = 0;
         foreach (var file in files)
         {
             if (file is null) throw new ArgumentException("Invalid clipboard file");
-            var name = file.Name;
-            if (string.IsNullOrWhiteSpace(name) || name.Length > 200 || name != Path.GetFileName(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.EndsWith('.') || name.EndsWith(' ')) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
-            var stem = name.Split('.')[0].ToUpperInvariant();
-            if (stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && char.IsDigit(stem[3]))) throw new ArgumentException("예약된 파일 이름입니다.");
+            Segments(file.Name);
             if (file.Size < 0 || file.Size > RemoteHost.MaxFileBytes) throw new ArgumentException("파일당 최대 1GiB입니다.");
             total += file.Size;
         }
         if (total > MaxBatchBytes) throw new ArgumentException("한 번에 최대 4GiB까지 복사할 수 있습니다.");
     }
+
+    public static string[] Segments(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxNameLength || name.IndexOf((char)92) >= 0 || name.IndexOf(':') >= 0) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+        var parts = name.Split('/');
+        if (parts.Length == 0 || parts.Length > MaxDepth) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+        foreach (var part in parts)
+        {
+            if (string.IsNullOrWhiteSpace(part) || part.Length > 200 || part is "." or ".." || part != Path.GetFileName(part) || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || part.EndsWith('.') || part.EndsWith(' ')) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+            var stem = part.Split('.')[0].ToUpperInvariant();
+            if (stem is "CON" or "PRN" or "AUX" or "NUL" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && char.IsDigit(stem[3]))) throw new ArgumentException("예약된 파일 이름입니다.");
+        }
+        return parts;
+    }
+
     public static string FileAt(string directory, int index, string name)
-    { var folder = Path.Combine(directory, index.ToString()); Directory.CreateDirectory(folder); return Path.Combine(folder, name); }
+    {
+        var parts = Segments(name);
+        var root = Path.GetFullPath(directory);
+        var current = parts.Length == 1 ? Path.Combine(root, "f", index.ToString()) : Path.Combine(root, "d");
+        for (var part = 0; part < parts.Length - 1; part++) current = Path.Combine(current, parts[part]);
+        Directory.CreateDirectory(current);
+        var full = Path.GetFullPath(Path.Combine(current, parts[^1]));
+        var parent = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+        return full;
+    }
+
+    public static string[] Publish(string directory, ClipboardFile[] files)
+    {
+        Validate(files);
+        var paths = new List<string>();
+        var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var index = 0; index < files.Length; index++)
+        {
+            var stored = FileAt(directory, index, files[index].Name);
+            var parts = Segments(files[index].Name);
+            if (parts.Length == 1) { paths.Add(stored); continue; }
+            var top = Path.GetFullPath(Path.Combine(Path.GetFullPath(directory), "d", parts[0]));
+            if (folders.Add(top)) paths.Add(top);
+        }
+        return paths.ToArray();
+    }
+
     public static void DeleteBatch(string root, string batch)
     {
         var absolute = Path.GetFullPath(batch); var parent = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!absolute.StartsWith(parent, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Invalid cache path");
         if (Directory.Exists(absolute) && (File.GetAttributes(absolute) & FileAttributes.ReparsePoint) == 0) Directory.Delete(absolute, true);
     }
+
+    static void Walk(string directory, string top, string root, List<ClipboardLeaf> into, int already, int depth)
+    {
+        if (depth > MaxDepth) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+        List<string> entries;
+        try { entries = Directory.EnumerateFileSystemEntries(directory).ToList(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { throw new ArgumentException("폴더를 읽지 못했습니다."); }
+        entries.Sort(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(entry); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { throw new ArgumentException("폴더를 읽지 못했습니다."); }
+            if ((attributes & FileAttributes.ReparsePoint) != 0) throw new ArgumentException(PlainFiles());
+            if ((attributes & FileAttributes.Directory) != 0)
+            {
+                Walk(entry, top, root, into, already, depth + 1);
+                continue;
+            }
+            if (already + into.Count >= MaxFiles) throw new ArgumentException(TooMany());
+            var relative = Path.GetRelativePath(root, entry).Replace((char)92, '/');
+            into.Add(new ClipboardLeaf(Path.GetFullPath(entry), top + "/" + relative, new FileInfo(entry).Length));
+        }
+    }
+
+    static string UniqueFolder(string name, HashSet<string> taken)
+    {
+        var candidate = name;
+        var number = 2;
+        while (!taken.Add(candidate))
+        {
+            candidate = name + " (" + number + ")";
+            number++;
+            if (number > MaxFiles) throw new ArgumentException("지원하지 않는 파일 이름입니다.");
+        }
+        return candidate;
+    }
+
+    static string TooMany() => "한 번에 파일 1~100개를 복사할 수 있습니다.";
+    static string PlainFiles() => "파일이나 폴더만 복사할 수 있습니다. 링크는 지원하지 않습니다.";
 
     public static int DeleteRetired(string root, IEnumerable<string> keepPaths)
     {

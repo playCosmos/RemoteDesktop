@@ -14,8 +14,15 @@ public final class ClipboardProvider extends ContentProvider {
     private File resolve(Uri uri) throws FileNotFoundException {
         try {
             java.util.List<String> parts=uri.getPathSegments();
-            if(!AUTHORITY.equals(uri.getAuthority()) || parts.size()!=3 || !parts.get(0).matches("[0-9a-f-]{36}") || !parts.get(1).matches("[0-9]{1,2}") || parts.get(2).contains("/") || parts.get(2).contains("\\") || parts.get(2).equals(".."))throw new IOException();
-            File root=new File(getContext().getFilesDir(),"clipboard").getCanonicalFile(); File file=new File(new File(new File(root,parts.get(0)),parts.get(1)),parts.get(2)).getCanonicalFile();
+            if(!AUTHORITY.equals(uri.getAuthority()) || parts.size()<3 || parts.size()>34 || !parts.get(0).matches("[0-9a-f-]{36}") || !parts.get(1).matches("[0-9]{1,2}"))throw new IOException();
+            File root=new File(getContext().getFilesDir(),"clipboard").getCanonicalFile();
+            File current=new File(new File(root,parts.get(0)),parts.get(1));
+            for(int i=2;i<parts.size();i++) {
+                String part=parts.get(i);
+                if(part.isEmpty() || part.equals(".") || part.equals("..") || part.indexOf(92)>=0 || part.indexOf('/')>=0)throw new IOException();
+                current=new File(current, part);
+            }
+            File file=current.getCanonicalFile();
             if(!file.getPath().startsWith(root.getPath()+File.separator) || !file.isFile())throw new IOException(); return file;
         } catch(IOException e) { throw new FileNotFoundException("Invalid clipboard URI"); }
     }

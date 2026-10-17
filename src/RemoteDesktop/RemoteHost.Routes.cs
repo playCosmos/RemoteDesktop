@@ -105,6 +105,7 @@ public sealed partial class RemoteHost
                 c.Response.Headers["X-Encode-Ms"] = frame.Timing.EncodeMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Frame-Reused"] = frame.Timing.Reused ? "1" : "0";
                 c.Response.Headers["X-Jpeg-Quality"] = frame.Timing.Quality.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                c.Response.Headers["X-Secure-Desktop"] = SecureDesktop.Header(SecureDesktop.LastView);
                 c.Response.Headers["X-Cursor-X"] = frame.CursorX.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Y"] = frame.CursorY.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Cursor-Local"] = frame.LocalCursor ? "1" : "0";

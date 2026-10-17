@@ -82,6 +82,7 @@ public partial class MainWindow
         private System.Windows.Threading.DispatcherTimer? toolbarTimer;
         private System.Windows.Threading.DispatcherTimer? sessionNoticeTimer;
         private string? settlingNotice;
+        private string? secureNotice;
         private volatile bool viewerWatching = true;
         private string? sessionPassword;
         private Exception? connectFailure;
@@ -637,7 +638,9 @@ public partial class MainWindow
                         }
                         if (data.Length > 0) lastFrameBytes = data.Length;
                         var cursorFrame = frame;
+                        var secureText = UiText.SecureDesktopNotice(frame.Secure);
                         _ = window.Dispatcher.InvokeAsync(() => ApplyRemoteCursor(cursorFrame));
+                        _ = window.Dispatcher.InvokeAsync(() => ShowSecureDesktop(secureText));
                     }
                     catch (System.Net.Http.HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.BadRequest)
                     { await LoadDisplays(); continue; }
@@ -842,6 +845,7 @@ public partial class MainWindow
             if (!enabled) window.DropHint.Visibility = Visibility.Collapsed;
             if (!enabled) sessionNoticeTimer?.Stop();
             if (!enabled) settlingNotice = null;
+            if (!enabled) secureNotice = null;
             if (!enabled) { announcedDelivery = null; lastFrameQuality = 0; }
             UpdateInputChrome();
             if (enabled) ShowSessionToolbar();
@@ -910,9 +914,26 @@ public partial class MainWindow
             window.SessionStatus(UiText.SessionBaseline(inputEnabled));
         }
 
+        private void ShowSecureDesktop(string? text)
+        {
+            if (secureNotice == text) return;
+            secureNotice = text;
+            SyncSessionNotice(window.SessionToolbar.Visibility == Visibility.Visible);
+        }
+
         private void SyncSessionNotice(bool toolbarOpen)
         {
             var text = window.StatusText.Text;
+            if (!string.IsNullOrEmpty(secureNotice))
+            {
+                window.SessionAlertText.Text = secureNotice;
+                var showSecure = client != null && !toolbarOpen;
+                window.SessionAlert.Visibility = showSecure ? Visibility.Visible : Visibility.Collapsed;
+                if (!showSecure) return;
+                window.SessionAlert.BorderBrush = (System.Windows.Media.Brush)window.FindResource("LineBrush");
+                window.SessionAlertText.Foreground = (System.Windows.Media.Brush)window.FindResource("InkBrush");
+                return;
+            }
             var show = client != null && !toolbarOpen && UiText.SessionOnPicture(text);
             window.SessionAlert.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             if (!show) return;

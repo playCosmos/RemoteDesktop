@@ -27,6 +27,54 @@ Check(HostAddresses.Same(["10.0.0.2:45831", "192.168.0.8:45831"], ["10.0.0.2:458
 Check(UiText.AddressesChanged() == "네트워크 주소가 바뀌었습니다. 새 주소를 다시 복사하세요.", "a changed network tells the host to copy the new address");
 Check(UiText.ClipboardFileProgress("클립보드 전송", 0, 1, "메모.txt", 50, 200) == "클립보드 전송 · 메모.txt · 25%" && UiText.ClipboardFileProgress("클립보드 수신", 1, 3, "사진.png", 100, 100) == "클립보드 수신 · 2/3 · 사진.png · 100%" && UiText.ClipboardFileProgress("클립보드 확인", 0, 1, "빈.bin", 0, 0) == "클립보드 확인 · 빈.bin", "clipboard progress names the file and percent");
 Check(!UiText.ShouldReportProgress(0, 4) && UiText.ShouldReportProgress(-1, 0) && UiText.ShouldReportProgress(0, 5) && UiText.ShouldReportProgress(96, 100) && !UiText.ShouldReportProgress(100, 100), "clipboard progress updates on the first byte, each five percent, and completion");
+var perUserInstall = AppInstall.PerUserDirectory(@"C:\Users\me\AppData\Local");
+var machineInstall = AppInstall.MachineDirectory(@"C:\Program Files");
+Check(AppInstall.ScopeOf(Path.Combine(perUserInstall, "RemoteDesktop.exe"), perUserInstall, machineInstall) == InstallScope.PerUser, "an exe in the user programs folder is a per-user install");
+Check(AppInstall.ScopeOf(Path.Combine(machineInstall, "RemoteDesktop.exe"), perUserInstall, machineInstall) == InstallScope.Machine, "an exe in Program Files is a machine install");
+Check(AppInstall.ScopeOf(@"D:\Tools\RemoteDesktop.exe", perUserInstall, machineInstall) == InstallScope.Portable, "an exe outside the install folders stays portable");
+Check(!AppInstall.ShowUninstall(InstallScope.Portable) && AppInstall.ShowUserInstall(InstallScope.Portable) && AppInstall.ShowMachineInstall(InstallScope.Portable) && AppInstall.ShowAutostart(InstallScope.Portable), "a portable run offers both installs");
+Check(!AppInstall.ShowUserInstall(InstallScope.PerUser) && AppInstall.ShowMachineInstall(InstallScope.PerUser) && AppInstall.ShowUninstall(InstallScope.PerUser) && !AppInstall.ShowAutostart(InstallScope.PerUser), "a per-user install can move to everyone or be removed");
+Check(!AppInstall.ShowMachineInstall(InstallScope.Machine) && !AppInstall.ShowUserInstall(InstallScope.Machine) && AppInstall.ShowUninstall(InstallScope.Machine), "a machine install offers removal");
+var serviceCommand = (char)34 + Path.Combine(machineInstall, "RemoteDesktop.exe") + (char)34 + " --service";
+Check(AppInstall.ServiceCommand(Path.Combine(machineInstall, "RemoteDesktop.exe")) == serviceCommand, "the service starts the installed exe");
+Check(AppInstall.CanRemoveDirectory(perUserInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && AppInstall.CanRemoveDirectory(machineInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && !AppInstall.CanRemoveDirectory(@"C:\Windows", @"C:\Program Files", @"C:\Users\me\AppData\Local"), "uninstall can remove only an install folder");
+var publishedDir = Path.Combine(Path.GetTempPath(), "prd-pub-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(publishedDir);
+var publishedExe = Path.Combine(publishedDir, "RemoteDesktop.exe");
+File.WriteAllText(publishedExe, "exe");
+var devDir = Path.Combine(Path.GetTempPath(), "prd-dev-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(devDir);
+File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.exe"), "exe");
+File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.dll"), "dll");
+var copiedDir = Path.Combine(Path.GetTempPath(), "prd-copy-" + Guid.NewGuid().ToString("N"));
+try
+{
+    Check(AppInstall.CanInstall(publishedExe) && !AppInstall.CanInstall(Path.Combine(devDir, "RemoteDesktop.exe")) && !AppInstall.CanInstall(Path.Combine(publishedDir, "Other.exe")), "only a published RemoteDesktop.exe can be installed");
+    AppInstaller.CopyExecutable(publishedExe, copiedDir);
+    Check(File.Exists(Path.Combine(copiedDir, "RemoteDesktop.exe")), "install copies the published exe into the chosen folder");
+}
+finally
+{
+    if (Directory.Exists(publishedDir)) Directory.Delete(publishedDir, true);
+    if (Directory.Exists(devDir)) Directory.Delete(devDir, true);
+    if (Directory.Exists(copiedDir)) Directory.Delete(copiedDir, true);
+}
+Check(UiText.PlacementTitle(InstallScope.Portable) == "설치하지 않고 실행 중" && UiText.PlacementTitle(InstallScope.PerUser) == "이 사용자에게 설치됨" && UiText.PlacementTitle(InstallScope.Machine) == "이 PC에 설치됨", "the host names portable, per-user, and machine installs");
+Check(UiText.PlacementBody(InstallScope.Portable, false).Contains("개발용", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Portable, true).Contains("모든 사용자", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Machine, true).Contains("보안 화면", StringComparison.Ordinal), "install copy says what portable, per-user, and machine installs do");
+Check(UiText.InstallCancelled() == "설치를 취소했습니다." && !UiText.IsProblem(UiText.InstallCancelled()) && !UiText.IsProblem(UiText.RemoveCancelled()) && UiText.IsProblem(UiText.InstallFailed(new InvalidOperationException("x"))) && UiText.IsProblem(UiText.RemoveFailed(new InvalidOperationException("x"))), "canceling install is quiet and a failed install is red");
+Check(UiText.SecureDesktopNotice("live") == "보안 화면 · 클릭과 키는 이 화면으로 갑니다." && UiText.SecureDesktopNotice("hidden")!.Contains("모든 사용자", StringComparison.Ordinal) && UiText.SecureDesktopNotice("off") == null && !UiText.IsProblem(UiText.SecureDesktopNotice("hidden")), "a secure desktop is named without looking like a failure");
+Check(SecureDesktop.Decide(false, true) == SecureView.Off && SecureDesktop.Decide(true, false) == SecureView.Hidden && SecureDesktop.Decide(true, true) == SecureView.Live, "the secure desktop is shown only when a fresh frame exists");
+Check(SecureDesktop.Header(SecureView.Live) == "live" && SecureDesktop.Header(SecureView.Hidden) == "hidden" && SecureDesktop.Header(SecureView.Off) == "off", "the secure desktop header stays small");
+Check(SecureDesktop.IsSecureName("Winlogon") && SecureDesktop.IsSecureName("Disconnect") && !SecureDesktop.IsSecureName("Default") && !SecureDesktop.IsSecureName(null), "the sign-in and UAC desktops are the secure ones");
+var secureNow = new DateTime(2026, 8, 22, 0, 0, 0, DateTimeKind.Utc);
+var securePacked = SecureDesktop.Pack(secureNow, 8, 4, new byte[] { 1, 2, 3, 4 });
+Check(SecureDesktop.TryUnpack(securePacked, secureNow.AddSeconds(1), TimeSpan.FromSeconds(2), out var secureJpeg) && secureJpeg.SequenceEqual(new byte[] { 1, 2, 3, 4 }), "a fresh secure frame unpacks");
+Check(!SecureDesktop.TryUnpack(securePacked, secureNow.AddSeconds(5), TimeSpan.FromSeconds(2), out _), "a stale secure frame is ignored");
+Check(!SecureDesktop.TryUnpack(securePacked.AsSpan(0, 8).ToArray(), secureNow, TimeSpan.FromSeconds(2), out _), "a short secure frame is ignored");
+var secureMove = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("move", 0.25, 0.75)));
+var secureKey = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("key", Code: 13, Down: true)));
+Check(secureMove.Kind == "move" && secureMove.X == 0.25 && secureMove.Y == 0.75 && secureKey.Kind == "key" && secureKey.Code == 13 && secureKey.Down, "secure input keeps the pointer and the key");
+Check(AppCommand.Has(["--wait-ui"], AppCommand.WaitUi) && AppCommand.Has(["RemoteDesktop.exe", "--service"], AppCommand.Service) && !AppCommand.Has(["--install"], AppCommand.InstallMachine), "service and install arguments are recognized");
 var retiredRoot = Path.Combine(Path.GetTempPath(), "prd-cache-" + Guid.NewGuid().ToString("N"));
 var retiredOutside = Path.Combine(Path.GetTempPath(), "prd-outside-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(retiredRoot);

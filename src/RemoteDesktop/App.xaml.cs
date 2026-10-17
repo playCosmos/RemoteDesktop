@@ -28,7 +28,16 @@ public partial class App : System.Windows.Application
     {
         const string mutexName = @"Local\PersonalRemoteDesktop.UI";
         const string eventName = @"Local\PersonalRemoteDesktop.UI.Activate";
-        uiMutex = new Mutex(initiallyOwned: true, mutexName, out ownsUiMutex);
+        var wait = AppCommand.Has(Environment.GetCommandLineArgs(), AppCommand.WaitUi);
+        uiMutex = new Mutex(initiallyOwned: false, mutexName);
+        var until = DateTime.UtcNow + (wait ? TimeSpan.FromSeconds(8) : TimeSpan.Zero);
+        while (true)
+        {
+            try { ownsUiMutex = uiMutex.WaitOne(0); }
+            catch (AbandonedMutexException) { ownsUiMutex = true; }
+            if (ownsUiMutex || DateTime.UtcNow >= until) break;
+            Thread.Sleep(100);
+        }
         if (!ownsUiMutex)
         {
             try

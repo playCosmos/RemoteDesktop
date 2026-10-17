@@ -39,7 +39,7 @@ Windows 서버 TLS 키는 Schannel이 사용할 수 있도록 현재 사용자 �
 
 현재 연결 범위는 LAN/VPN입니다. Windows 방화벽에서 해당 포트에 접근할 수 있어야 하며 앱은 방화벽을 자동 변경하지 않습니다. 로그인한 서버 데스크톱에서 앱이 실행 중이어야 합니다.
 
-통합 EXE는 일반 사용자 권한(`asInvoker`)으로 실행합니다. Windows 서비스와 UAC 보안 데스크톱 제어 경로는 제거했으므로 UAC 확인 화면이나 Ctrl+Alt+Del은 원격으로 제어할 수 없습니다. 로그인한 사용자의 일반 데스크톱에서만 화면 캡처와 입력 제어가 가능합니다. [SendInput 문서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
+실행 파일만으로 바로 쓸 수 있습니다. 이 PC 탭에서 **이 사용자만 설치**하면 시작 메뉴와, 선택하면 로그인 후 자동 실행이 추가됩니다. **모든 사용자에게 설치**는 관리자 권한으로 Program Files에 두고 Windows 서비스를 등록합니다. 그 서비스는 로그인한 뒤 접속 대기를 이어 가고, UAC 보안 화면을 상대 PC에 보내며 클릭과 키를 그 화면으로 전달합니다. 설치하지 않았거나 이 사용자만 설치한 경우에는 로그인한 일반 데스크톱만 제어합니다. Ctrl+Alt+Del은 어느 설치에서도 원격으로 보낼 수 없습니다. [SendInput 문서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
 
 ## Windows 파일 복사·붙여넣기
 
@@ -112,7 +112,7 @@ Android의 파일 관리 앱마다 클립보드 지원 방식이 달라 Windows 
 - Windows 화면 클릭 후 키 입력을 서버로 직접 전달합니다. 한/영 키 또는 한/영 버튼을 사용할 수 있으며 서버에 한국어 IME가 설치되어 있어야 합니다.
 - 원격 화면에 포커스가 있으면 Alt+Tab, Alt+F4, Win 조합, Ctrl+Esc, Ctrl+Shift+Esc, Print Screen을 원격 PC에 우선 전달합니다. Ctrl+Alt+Del은 Windows 보안 시퀀스라 전달할 수 없습니다.
 - Android는 기본 키보드로 한글을 조합하고 확정된 문자열을 전송 버튼 없이 전달합니다. 조합 중 문자열은 화면 위 상태 표시에 남아 있고, 확정되면 곧 사라집니다.
-- Windows 원격 세션은 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. UAC 보안 데스크톱과 Ctrl+Alt+Del은 원격으로 제어할 수 없습니다. [Microsoft SendInput 문서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
+- Windows 원격 세션은 기본적으로 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. 모든 사용자 설치의 Windows 서비스가 켜져 있으면 UAC 보안 화면도 상대 PC에 보이고, 그 화면으로 조작이 전달됩니다. Ctrl+Alt+Del은 원격으로 보낼 수 없습니다. [Microsoft SendInput 문서](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
 
 ## 세션 툴바
 

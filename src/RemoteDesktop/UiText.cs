@@ -533,6 +533,39 @@ public static class UiText
 
     public static string ConnectCancelled() => "접속을 취소했습니다.";
 
+    public static string PlacementTitle(InstallScope scope) => scope switch
+    {
+        InstallScope.PerUser => "이 사용자에게 설치됨",
+        InstallScope.Machine => "이 PC에 설치됨",
+        _ => "설치하지 않고 실행 중"
+    };
+
+    public static string PlacementBody(InstallScope scope, bool published)
+    {
+        if (scope == InstallScope.Portable && !published)
+            return "개발용 빌드입니다. 설치는 배포된 RemoteDesktop.exe에서만 할 수 있습니다.";
+        return scope switch
+        {
+            InstallScope.PerUser => "시작 메뉴에서 다시 열 수 있습니다. 로그인 화면과 UAC 보안 화면은 이 설치에서는 원격으로 보이지 않습니다. 그 화면까지 보내려면 모든 사용자에게 설치하세요.",
+            InstallScope.Machine => "Windows가 켜지면 서비스가 로그인한 뒤 접속 대기를 이어 갑니다. UAC 같은 보안 화면이 뜨면 그 화면을 상대 PC에 보내고, 클릭과 키도 그 화면으로 전달합니다.",
+            _ => "이 파일만으로 바로 쓸 수 있습니다. 이 사용자만 설치하면 시작 메뉴에 두고, 로그인할 때마다 접속 대기를 이어 갈 수 있습니다. 모든 사용자에게 설치하면 Windows 서비스가 보안 화면까지 원격으로 보여 줍니다."
+        };
+    }
+
+    public static string InstallNeedsPublished() => "배포된 RemoteDesktop.exe에서만 이 PC에 설치할 수 있습니다.";
+    public static string InstallCancelled() => "설치를 취소했습니다.";
+    public static string InstallFailed(Exception exception) => "설치하지 못했습니다. " + Explain(exception, "다시 시도하세요.");
+    public static string RemoveFailed(Exception exception) => "제거하지 못했습니다. " + Explain(exception, "다시 시도하세요.");
+    public static string RemoveCancelled() => "제거를 취소했습니다.";
+    public static string UninstallLabel() => "설치 제거";
+    public static string UninstallConfirm() => "비밀번호는 남기고 제거";
+    public static string? SecureDesktopNotice(string? state) => state switch
+    {
+        "live" => "보안 화면 · 클릭과 키는 이 화면으로 갑니다.",
+        "hidden" => "상대 PC에 보안 화면이 떠 있습니다. 모든 사용자로 설치되어 있어야 그 화면이 보입니다.",
+        _ => null
+    };
+
     public static bool ReconnectNotice(string? text)
         => text == ReconnectHold() || (text != null && text.Contains("초 후 다시 연결합니다.", StringComparison.Ordinal));
 

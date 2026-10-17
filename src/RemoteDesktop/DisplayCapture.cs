@@ -30,6 +30,7 @@ internal sealed class DisplayCapture
     private string reusableKey = "";
     private int[]? cleanPixels;
     private bool dxgiRejected;
+    private bool secureLatched;
     public CaptureTiming LastTiming { get; private set; } = new(0, 0, false, 55);
 
     public CapturedFrame CaptureDetailed(string? display = null, long quality = 55, double viewX = 0, double viewY = 0, double viewWidth = 1, double viewHeight = 1, int fps = 15, bool localCursor = false)
@@ -106,6 +107,8 @@ internal sealed class DisplayCapture
         var started = Stopwatch.GetTimestamp();
         var bounds = Desktop.Bounds(request.Display);
         var view = Viewport(bounds, request.X, request.Y, request.Width, request.Height);
+        var secure = SecureReplacement(request, view);
+        if (secure.HasValue) return secure.Value;
         try
         {
             using var bitmap = new Bitmap(view.Width, view.Height);
@@ -130,6 +133,8 @@ internal sealed class DisplayCapture
         var started = Stopwatch.GetTimestamp();
         var bounds = Desktop.Bounds(request.Display);
         var view = Viewport(bounds, request.X, request.Y, request.Width, request.Height);
+        var secure = SecureReplacement(request, view);
+        if (secure.HasValue) return secure.Value;
         var cursor = System.Windows.Forms.Cursor.Position;
         var key = FrameKey(view, quality, request.LocalCursor, cursor);
         if (!dxgiRejected && request.Display != "all" && DxgiDisplayCapture.TryAcquire(request.Display, 8, out var image))
@@ -192,6 +197,21 @@ internal sealed class DisplayCapture
         LastTiming = timing;
         var shot = request.LocalCursor ? CursorGlyph.Capture() : default;
         return new CapturedFrame(bytes, timing, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), request.LocalCursor, shot.Visible, shot.HotspotX, shot.HotspotY, shot.Hash ?? "", shot.Png);
+    }
+
+    private CapturedFrame? SecureReplacement(CaptureRequest request, Rectangle view)
+    {
+        var observed = SecureDesktop.Observe(DateTime.UtcNow);
+        if (observed.View == SecureView.Off)
+        {
+            if (secureLatched) { secureLatched = false; reusableJpeg = null; }
+            return null;
+        }
+        secureLatched = true;
+        reusableJpeg = null;
+        if (observed.View == SecureView.Live && observed.Jpeg is { Length: > 0 } jpeg)
+            return Finish(request, view, jpeg, new CaptureTiming(1, 0, false, request.Quality));
+        return Finish(request, view, UnavailableFrame(view.Size, request.Quality), new CaptureTiming(0, 0, false, request.Quality));
     }
     private bool Unchanged(Bitmap bitmap)
     {

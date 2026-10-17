@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
@@ -5,6 +6,8 @@ using System.Security.Cryptography.X509Certificates;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
+using System.Diagnostics;
+using System.ComponentModel;
 
 namespace RemoteDesktop;
 
@@ -42,6 +45,7 @@ public partial class MainWindow
             window.Fingerprint.Text = Convert.ToHexString(SHA256.HashData(certificate.RawData));
             window.FingerprintSummary.Text = UiText.ShortSecret(window.Fingerprint.Text);
             RefreshAddresses();
+            RefreshPlacement();
             if (!addressWatch)
             {
                 NetworkChange.NetworkAddressChanged += NetworkChanged;
@@ -564,6 +568,124 @@ public partial class MainWindow
             copiedTimer?.Stop();
             if (copiedButton != null) copiedButton.Content = copiedIdle;
             copiedButton = null;
+        }
+
+        private bool installBusy;
+        private bool uninstallArmed;
+
+        private void RefreshPlacement()
+        {
+            var scope = CurrentScope();
+            var published = AppInstall.CanInstall(Environment.ProcessPath);
+            window.PlacementTitle.Text = UiText.PlacementTitle(scope);
+            window.PlacementBody.Text = UiText.PlacementBody(scope, published);
+            window.InstallAutostart.Visibility = AppInstall.ShowAutostart(scope) ? Visibility.Visible : Visibility.Collapsed;
+            window.InstallUserButton.Visibility = AppInstall.ShowUserInstall(scope) ? Visibility.Visible : Visibility.Collapsed;
+            window.InstallMachineButton.Visibility = AppInstall.ShowMachineInstall(scope) ? Visibility.Visible : Visibility.Collapsed;
+            window.UninstallButton.Visibility = AppInstall.ShowUninstall(scope) ? Visibility.Visible : Visibility.Collapsed;
+            window.UninstallButton.Content = UiText.UninstallLabel();
+            uninstallArmed = false;
+        }
+
+        private static InstallScope CurrentScope()
+        {
+            var path = Environment.ProcessPath ?? "";
+            return AppInstall.ScopeOf(path, AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));
+        }
+
+        public void InstallForUser(object sender, RoutedEventArgs e)
+        {
+            if (installBusy) return;
+            installBusy = true;
+            try
+            {
+                var source = Environment.ProcessPath ?? "";
+                if (!AppInstall.CanInstall(source))
+                {
+                    window.HostNotice(UiText.InstallNeedsPublished());
+                    return;
+                }
+                var destination = AppInstaller.InstallPerUser(new AppInstaller.PerUserRequest(source, AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), Environment.GetFolderPath(Environment.SpecialFolder.Programs), window.InstallAutostart.IsChecked == true));
+                AppInstaller.Relaunch(destination);
+            }
+            catch (Exception ex) { window.HostNotice(UiText.InstallFailed(ex), problem: true); }
+            finally { installBusy = false; }
+        }
+
+        public async void InstallForMachine(object sender, RoutedEventArgs e)
+        {
+            if (installBusy) return;
+            var source = Environment.ProcessPath ?? "";
+            if (!AppInstall.CanInstall(source))
+            {
+                window.HostNotice(UiText.InstallNeedsPublished());
+                return;
+            }
+            installBusy = true;
+            try
+            {
+                Process? elevated;
+                try
+                {
+                    elevated = Process.Start(new ProcessStartInfo(source, AppCommand.InstallMachine) { UseShellExecute = true, Verb = "runas" });
+                }
+                catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+                {
+                    window.HostNotice(UiText.InstallCancelled());
+                    return;
+                }
+                if (elevated == null) throw new InvalidOperationException("설치 권한 창을 열지 못했습니다.");
+                await Task.Run(() => elevated.WaitForExit());
+                if (elevated.ExitCode != 0) throw new InvalidOperationException("모든 사용자 설치가 끝나지 않았습니다.");
+                AppInstaller.Relaunch(AppInstall.Executable(AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles))));
+            }
+            catch (Exception ex) { window.HostNotice(UiText.InstallFailed(ex), problem: true); }
+            finally { installBusy = false; }
+        }
+
+        public async void UninstallApp(object sender, RoutedEventArgs e)
+        {
+            if (installBusy) return;
+            if (!uninstallArmed)
+            {
+                uninstallArmed = true;
+                window.UninstallButton.Content = UiText.UninstallConfirm();
+                return;
+            }
+            installBusy = true;
+            try
+            {
+                if (CurrentScope() == InstallScope.Machine)
+                {
+                    var source = Environment.ProcessPath ?? "";
+                    Process? elevated;
+                    try { elevated = Process.Start(new ProcessStartInfo(source, AppCommand.UninstallMachine) { UseShellExecute = true, Verb = "runas" }); }
+                    catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+                    {
+                        uninstallArmed = false;
+                        window.UninstallButton.Content = UiText.UninstallLabel();
+                        window.HostNotice(UiText.RemoveCancelled());
+                        return;
+                    }
+                    if (elevated == null) throw new InvalidOperationException("제거 권한 창을 열지 못했습니다.");
+                    await Task.Run(() => elevated.WaitForExit());
+                    if (elevated.ExitCode != 0) throw new InvalidOperationException("설치 제거가 끝나지 않았습니다.");
+                    System.Windows.Application.Current?.Shutdown();
+                    return;
+                }
+                AppInstaller.ClearUserAutostart();
+                var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
+                if (File.Exists(shortcut)) File.Delete(shortcut);
+                AppInstaller.DeleteAfterExit(AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
+                System.Windows.Application.Current?.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                window.HostNotice(UiText.RemoveFailed(ex), problem: true);
+                uninstallArmed = false;
+                window.UninstallButton.Content = UiText.UninstallLabel();
+            }
+            finally { installBusy = false; }
         }
     }
 }

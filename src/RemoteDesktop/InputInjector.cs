@@ -9,6 +9,15 @@ internal sealed class InputInjector
 
     public void ApplyCore(InputEvent e)
     {
+        if (!SecureDesktop.OwnsDesktop)
+        {
+            var view = SecureDesktop.Observe(DateTime.UtcNow).View;
+            if (view != SecureView.Off)
+            {
+                if (view == SecureView.Live) SecureDesktop.Forward(e);
+                return;
+            }
+        }
         lock (keys)
         {
             switch (e.Kind)

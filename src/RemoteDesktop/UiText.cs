@@ -601,6 +601,7 @@ public static class UiText
     public static string AutostartDisabled() => "로그인 후 자동 실행을 껐습니다.";
     public static string AutostartFailed(Exception exception) => "자동 실행을 바꾸지 못했습니다. " + Explain(exception, "다시 시도하세요.");
     public static string InstallCancelled() => "설치를 취소했습니다.";
+    public static string InstallInProgress() => "이 사용자용 앱을 설치하는 중…";
     public static string InstallFailed(Exception exception) => "설치하지 못했습니다. " + Explain(exception, "다시 시도하세요.");
     public static string RemoveFailed(Exception exception) => "제거하지 못했습니다. " + Explain(exception, "다시 시도하세요.");
     public static string RemoveCancelled() => "제거를 취소했습니다.";

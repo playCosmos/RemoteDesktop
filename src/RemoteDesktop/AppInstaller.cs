@@ -42,6 +42,9 @@ public static class AppInstaller
         }
     }
 
+    public static Task<string> CopyExecutableAsync(string source, string destinationDirectory)
+        => Task.Run(() => CopyExecutable(source, destinationDirectory));
+
     public static string InstallExecutableTransactionally(
         string source,
         string destinationDirectory,
@@ -113,6 +116,15 @@ public static class AppInstaller
     public static string InstallPerUser(PerUserRequest request)
     {
         var destination = CopyExecutable(request.SourceExecutable, request.DestinationDirectory);
+        CreateShortcut(AppInstall.ShortcutPath(request.ProgramsDirectory), destination);
+        if (request.StartWithWindows) SetUserAutostart(destination);
+        else ClearUserAutostart();
+        return destination;
+    }
+
+    public static async Task<string> InstallPerUserAsync(PerUserRequest request)
+    {
+        var destination = await CopyExecutableAsync(request.SourceExecutable, request.DestinationDirectory);
         CreateShortcut(AppInstall.ShortcutPath(request.ProgramsDirectory), destination);
         if (request.StartWithWindows) SetUserAutostart(destination);
         else ClearUserAutostart();

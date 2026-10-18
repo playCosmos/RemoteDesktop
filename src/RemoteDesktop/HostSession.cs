@@ -22,6 +22,7 @@ public partial class MainWindow
         private bool hostStarting;
         private CancellationTokenSource? hostStart;
         private Task? hostStartTask;
+        private Task? perUserInstallTask;
         private bool changingPassword;
         private bool suppressHostPasswordReveal;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
@@ -132,6 +133,11 @@ public partial class MainWindow
         {
             Closing = true;
             var failures = new List<Exception>();
+            if (perUserInstallTask != null)
+            {
+                try { await perUserInstallTask; }
+                catch (Exception error) { failures.Add(error); }
+            }
             if (addressWatch)
             {
                 try { NetworkChange.NetworkAddressChanged -= NetworkChanged; }
@@ -715,23 +721,42 @@ public partial class MainWindow
             return AppInstall.ScopeOf(path, AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));
         }
 
-        public void InstallForUser(object sender, RoutedEventArgs e)
+        public async void InstallForUser(object sender, RoutedEventArgs e)
         {
             if (installBusy) return;
             installBusy = true;
+            window.InstallUserButton.IsEnabled = false;
+            var installTask = InstallForUserAsync();
+            perUserInstallTask = installTask;
             try
             {
-                var source = Environment.ProcessPath ?? "";
-                if (!AppInstall.CanInstall(source))
-                {
-                    window.HostNotice(UiText.InstallNeedsPublished());
-                    return;
-                }
-                var destination = AppInstaller.InstallPerUser(new AppInstaller.PerUserRequest(source, AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), Environment.GetFolderPath(Environment.SpecialFolder.Programs), window.InstallAutostart.IsChecked == true));
-                AppInstaller.Relaunch(destination);
+                await installTask;
             }
-            catch (Exception ex) { window.HostNotice(UiText.InstallFailed(ex), problem: true); }
-            finally { installBusy = false; }
+            catch (Exception ex)
+            {
+                if (!Closing) window.HostNotice(UiText.InstallFailed(ex), problem: true);
+                else Trace.TraceError("Per-user install failed while the application was closing: {0}", ex);
+            }
+            finally
+            {
+                if (ReferenceEquals(perUserInstallTask, installTask)) perUserInstallTask = null;
+                installBusy = false;
+                if (!Closing) window.InstallUserButton.IsEnabled = true;
+            }
+        }
+
+        private async Task InstallForUserAsync()
+        {
+            var source = Environment.ProcessPath ?? "";
+            if (!AppInstall.CanInstall(source))
+            {
+                window.HostNotice(UiText.InstallNeedsPublished());
+                return;
+            }
+            var request = new AppInstaller.PerUserRequest(source, AppInstall.PerUserDirectory(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)), Environment.GetFolderPath(Environment.SpecialFolder.Programs), window.InstallAutostart.IsChecked == true);
+            window.HostNotice(UiText.InstallInProgress());
+            var destination = await AppInstaller.InstallPerUserAsync(request);
+            if (!Closing) AppInstaller.Relaunch(destination);
         }
 
         public async void InstallForMachine(object sender, RoutedEventArgs e)

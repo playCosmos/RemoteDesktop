@@ -107,6 +107,7 @@ Directory.CreateDirectory(devDir);
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.exe"), "exe");
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.dll"), "dll");
 var copiedDir = Path.Combine(AppContext.BaseDirectory, "prd-copy-" + Guid.NewGuid().ToString("N"));
+var asyncCopiedDir = Path.Combine(AppContext.BaseDirectory, "prd-async-copy-" + Guid.NewGuid().ToString("N"));
 var transactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-" + Guid.NewGuid().ToString("N"));
 var freshTransactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-fresh-" + Guid.NewGuid().ToString("N"));
 var failedRollbackDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-recovery-" + Guid.NewGuid().ToString("N"));
@@ -119,6 +120,8 @@ try
     File.WriteAllText(publishedExe, "updated executable");
     AppInstaller.CopyExecutable(publishedExe, copiedDir);
     Check(File.ReadAllText(Path.Combine(copiedDir, "RemoteDesktop.exe")) == "updated executable", "install atomically replaces an existing executable");
+    var asyncCopiedExe = await AppInstaller.CopyExecutableAsync(publishedExe, asyncCopiedDir);
+    Check(asyncCopiedExe == AppInstall.Executable(asyncCopiedDir) && File.ReadAllText(asyncCopiedExe) == "updated executable", "per-user install copies its executable asynchronously");
     var failedCopyPreservedInstall = false;
     try { AppInstaller.CopyExecutable(missingExe, copiedDir); }
     catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
@@ -197,13 +200,14 @@ finally
     if (Directory.Exists(publishedDir)) Directory.Delete(publishedDir, true);
     if (Directory.Exists(devDir)) Directory.Delete(devDir, true);
     if (Directory.Exists(copiedDir)) Directory.Delete(copiedDir, true);
+    if (Directory.Exists(asyncCopiedDir)) Directory.Delete(asyncCopiedDir, true);
     if (Directory.Exists(transactionDir)) Directory.Delete(transactionDir, true);
     if (Directory.Exists(freshTransactionDir)) Directory.Delete(freshTransactionDir, true);
     if (Directory.Exists(failedRollbackDir)) Directory.Delete(failedRollbackDir, true);
 }
 Check(UiText.PlacementTitle(InstallScope.Portable) == "설치하지 않고 실행 중" && UiText.PlacementTitle(InstallScope.PerUser) == "이 사용자에게 설치됨" && UiText.PlacementTitle(InstallScope.Machine) == "이 PC에 설치됨", "the host names portable, per-user, and machine installs");
 Check(UiText.PlacementBody(InstallScope.Portable, false).Contains("개발용", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Portable, true).Contains("모든 사용자", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Machine, true).Contains("보안 화면", StringComparison.Ordinal), "install copy says what portable, per-user, and machine installs do");
-Check(UiText.InstallCancelled() == "설치를 취소했습니다." && !UiText.IsProblem(UiText.InstallCancelled()) && !UiText.IsProblem(UiText.RemoveCancelled()) && UiText.IsProblem(UiText.InstallFailed(new InvalidOperationException("x"))) && UiText.IsProblem(UiText.RemoveFailed(new InvalidOperationException("x"))), "canceling install is quiet and a failed install is red");
+Check(UiText.InstallInProgress() == "이 사용자용 앱을 설치하는 중…" && !UiText.IsProblem(UiText.InstallInProgress()) && UiText.InstallCancelled() == "설치를 취소했습니다." && !UiText.IsProblem(UiText.InstallCancelled()) && !UiText.IsProblem(UiText.RemoveCancelled()) && UiText.IsProblem(UiText.InstallFailed(new InvalidOperationException("x"))) && UiText.IsProblem(UiText.RemoveFailed(new InvalidOperationException("x"))), "user install progress stays informative without looking like a failure");
 Check(UiText.SecureDesktopNotice("live") == "보안 화면 · 클릭과 키는 이 화면으로 갑니다." && UiText.SecureDesktopNotice("hidden")!.Contains("모든 사용자", StringComparison.Ordinal) && UiText.SecureDesktopNotice("off") == null && !UiText.IsProblem(UiText.SecureDesktopNotice("hidden")), "a secure desktop is named without looking like a failure");
 Check(UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("live")) && UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("hidden")) && !UiText.ShowSecureDesktop(true, UiText.SecureDesktopNotice("live")) && !UiText.ShowSecureDesktop(false, null) && !UiText.ShowSecureDesktop(false, ""), "the secure desktop notice stays on the picture until the controls open");
 Check(SecureDesktop.Decide(false, true) == SecureView.Off && SecureDesktop.Decide(true, false) == SecureView.Hidden && SecureDesktop.Decide(true, true) == SecureView.Live, "the secure desktop is shown only when a fresh frame exists");

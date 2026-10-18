@@ -915,6 +915,7 @@ public final class MainActivity extends Activity {
     private PolledFrame pollFrame(RemoteApi api, String display) throws Exception {
         final int epoch=generation.get();
         if(picturedSession!=api) { picturedSession=api; needKey=true; }
+        final int requestedFps=frameRate;
         final float frameViewX=viewX, frameViewY=viewY, frameViewWidth=viewWidth, frameViewHeight=viewHeight;
         final long frameCursorGeneration=cursorGeneration.get();
         String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",frameViewX,frameViewY,frameViewWidth,frameViewHeight);
@@ -925,7 +926,7 @@ public final class MainActivity extends Activity {
             cursorQuery="&cursor=local";
             if(cursorHash!=null && cursorHash.length()>0) cursorQuery+="&shape="+java.net.URLEncoder.encode(cursorHash,"UTF-8");
         }
-        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+frameRate+"&view="+view+cursorQuery+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
+        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+requestedFps+"&view="+view+cursorQuery+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
         RemoteApi.Picture picture=api.frame(path);
         lastTransferMs=picture.transferMs;
         noteSecure(api, epoch, picture.secure);
@@ -938,7 +939,7 @@ public final class MainActivity extends Activity {
                     if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) return null;
                     if(h264Picture==null) h264Picture=new H264Picture();
                     decoder=h264Picture;
-                    decoded=decoder.decode(picture.bytes,frameRate);
+                    decoded=decoder.decode(picture.bytes,requestedFps);
                 }
                 synchronized(sessionGate) {
                     if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { decoded.recycle(); return null; }

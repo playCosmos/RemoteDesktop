@@ -952,9 +952,11 @@ async Task Capture()
         using var decoded = System.Drawing.Image.FromStream(new MemoryStream(frame));
         Check(decoded.Width == display.Width && decoded.Height == display.Height, "capture dimensions: " + display.Name + " (" + display.Width + "x" + display.Height + ")");
     }
+    var virtualDisplay = displays.Single(display => display.Id == "all");
+    var expectedViewport = Desktop.Viewport(new System.Drawing.Rectangle(virtualDisplay.Left, virtualDisplay.Top, virtualDisplay.Width, virtualDisplay.Height), .25, .25, .5, .5);
     var cropped = await client.Frame(CancellationToken.None, "all", 30, .25, .25, .5, .5);
     using var croppedDecoded = System.Drawing.Image.FromStream(new MemoryStream(cropped));
-    Check(croppedDecoded.Width == 1920 && croppedDecoded.Height == 540, "viewport capture reduces requested frame area");
+    Check(croppedDecoded.Width == expectedViewport.Width && croppedDecoded.Height == expectedViewport.Height && croppedDecoded.Width < virtualDisplay.Width && croppedDecoded.Height < virtualDisplay.Height, "viewport capture reduces requested frame area");
     Desktop.SmoothCapture = true;
     var smoothDesktop = new Desktop();
     var smoothFrame = smoothDesktop.CaptureDetailed(null, 55, 0, 0, 1, 1, 30, true);

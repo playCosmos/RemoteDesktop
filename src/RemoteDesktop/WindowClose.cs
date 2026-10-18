@@ -22,11 +22,12 @@ public static class AppLifetime
     public static bool ExitRequested { get; private set; }
     public static bool ForceExit { get; private set; }
 
-    public static void RequestExit(bool force = false)
+    public static void RequestExit(bool force = false, int exitCode = 0)
     {
         ExitRequested = true;
         ForceExit = force;
-        System.Windows.Application.Current?.Shutdown();
+        Environment.ExitCode = exitCode;
+        System.Windows.Application.Current?.Shutdown(exitCode);
     }
 
     public static void NoteSystemExit()

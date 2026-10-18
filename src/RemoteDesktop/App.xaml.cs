@@ -10,16 +10,37 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(System.Windows.StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (!AcquireUiInstance()) return;
+        var uiSmoke = AppCommand.Has(e.Args, AppCommand.UiSmoke);
+        if (!AcquireUiInstance())
+        {
+            if (uiSmoke) Environment.ExitCode = 1;
+            return;
+        }
         ShutdownMode = System.Windows.ShutdownMode.OnMainWindowClose;
         try
         {
             MainWindow = new MainWindow();
+            if (uiSmoke && MainWindow is MainWindow smokeWindow)
+            {
+                smokeWindow.Loaded += (_, _) =>
+                {
+                    var exitCode = 0;
+                    try { smokeWindow.VerifyResponsiveLayout(); }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(ex);
+                        exitCode = 1;
+                    }
+                    AppLifetime.RequestExit(force: true, exitCode: exitCode);
+                };
+            }
             MainWindow.Show();
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show(UiText.Explain(ex, "프로그램을 시작하지 못했습니다."), "Personal Remote Desktop 실행 오류", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            if (uiSmoke) Console.Error.WriteLine(ex);
+            else System.Windows.MessageBox.Show(UiText.Explain(ex, "프로그램을 시작하지 못했습니다."), "Personal Remote Desktop 실행 오류", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            Environment.ExitCode = -1;
             Shutdown(-1);
         }
     }

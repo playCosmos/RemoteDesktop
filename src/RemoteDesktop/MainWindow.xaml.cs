@@ -52,6 +52,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) =>
         {
             UpdateHostLayout();
+            if (AppCommand.Has(Environment.GetCommandLineArgs(), AppCommand.UiSmoke)) return;
             EnsureTray();
             await hostSession.StartIfConfigured();
             clientSession.FocusConnectField();
@@ -139,6 +140,46 @@ public partial class MainWindow : Window
             Grid.SetColumnSpan(HostShareCard, 1);
             HostShareCard.Margin = new Thickness(0);
         }
+    }
+
+    internal void VerifyResponsiveLayout()
+    {
+        if (!IsLoaded) throw new InvalidOperationException("The WPF window did not load.");
+        var work = SystemParameters.WorkArea;
+        var wideWidth = Math.Max(MinWidth, 1180);
+        var wideHeight = Math.Max(MinHeight, 800);
+        Pages.SelectedItem = ServerTab;
+        Width = wideWidth;
+        Height = wideHeight;
+        Left = work.Left;
+        Top = work.Top;
+        UpdateLayout();
+        UpdateHostLayout();
+        UpdateLayout();
+        if (WindowLayout.StackHostPanels(ActualWidth) || Grid.GetRow(HostShareCard) != 0 || Grid.GetColumn(HostShareCard) != 2 || Grid.GetColumnSpan(HostShareCard) != 1)
+            throw new InvalidOperationException("The host page did not keep its wide two-column layout.");
+        if (HostContentGrid.ActualWidth <= 0 || HostContentGrid.ActualWidth > ActualWidth + 1)
+            throw new InvalidOperationException("The host setup cards exceed the WPF window width.");
+        var wideStacked = WindowLayout.StackHostPanels(ActualWidth);
+        if (wideStacked && (Grid.GetRow(HostShareCard) != 1 || Grid.GetColumnSpan(HostShareCard) != 3))
+            throw new InvalidOperationException("The host cards did not stack at the current width.");
+        if (!wideStacked && (Grid.GetRow(HostShareCard) != 0 || Grid.GetColumn(HostShareCard) != 2 || Grid.GetColumnSpan(HostShareCard) != 1))
+            throw new InvalidOperationException("The host cards did not restore the wide layout.");
+
+        Width = Math.Max(MinWidth, Math.Min(850, work.Width - 32));
+        Height = Math.Max(MinHeight, Math.Min(620, work.Height - 32));
+        UpdateLayout();
+        UpdateHostLayout();
+        UpdateLayout();
+        if (!WindowLayout.StackHostPanels(ActualWidth) || Grid.GetRow(HostShareCard) != 1 || Grid.GetColumnSpan(HostShareCard) != 3)
+            throw new InvalidOperationException("The host page did not switch to the narrow layout.");
+        if (HostShareCard.ActualWidth <= 0 || HostShareCard.ActualWidth > HostContentGrid.ActualWidth + 1)
+            throw new InvalidOperationException("The share card is clipped in the narrow layout.");
+
+        Pages.SelectedItem = ClientTab;
+        UpdateLayout();
+        if (ConnectionControls.ActualWidth <= 0 || ConnectionControls.ActualWidth > ClientHost.ActualWidth + 1)
+            throw new InvalidOperationException("The connection card is clipped in the narrow layout.");
     }
 
     private void EnsureTray()

@@ -17,7 +17,7 @@ public static class Program
         var app = new App();
         app.InitializeComponent();
         app.Run();
-        return 0;
+        return Environment.ExitCode;
     }
 
     static int RunOperation(Action action, Func<Exception, string> errorText)

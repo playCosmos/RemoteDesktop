@@ -58,6 +58,16 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { throw 'JAVA_HOME was not set by setup-java' }
           ./build.ps1 -Android -AndroidSdk $androidSdkPath -AndroidJdk $env:JAVA_HOME
 
+      - name: Smoke-test responsive WPF layout
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content src/RemoteDesktop/RemoteDesktop.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          $executable = Join-Path "artifacts/$version/windows-portable" 'RemoteDesktop.exe'
+          if (!(Test-Path -LiteralPath $executable)) { throw "Windows executable was not found: $executable" }
+          & $executable --ui-smoke
+          if ($LASTEXITCODE -ne 0) { throw "Responsive WPF smoke test failed with exit code $LASTEXITCODE" }
+
       - name: Upload Windows and Android build artifacts
         uses: actions/upload-artifact@v7
         with:

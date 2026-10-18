@@ -37,6 +37,7 @@ public static class AppCommand
     public const string UninstallMachine = "--uninstall-machine";
     public const string RemoveFirewall = "--remove-firewall";
     public const string WaitUi = "--wait-ui";
+    public const string UiSmoke = "--ui-smoke";
     public const string Firewall = "--firewall";
 
     public static bool Has(IEnumerable<string> args, string name)

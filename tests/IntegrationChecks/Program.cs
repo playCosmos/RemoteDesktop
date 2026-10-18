@@ -786,6 +786,7 @@ async Task SessionRevocationRace()
         var revokedBy = DateTime.UtcNow + TimeSpan.FromSeconds(1);
         while (site.Host.SessionPeer != null && DateTime.UtcNow < revokedBy) await Task.Delay(5);
         Check(site.Host.SessionPeer == null, "frame test session is revoked while request waits");
+        Check(await Task.WhenAny(disconnect, Task.Delay(300)) == disconnect, "disconnect does not wait for the capture gate");
         captureGate.Release();
         released = true;
         try

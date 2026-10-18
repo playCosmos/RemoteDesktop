@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
@@ -18,6 +19,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private readonly HostSettings settings;
     private readonly Desktop desktop;
     private readonly object gate = new();
+    private readonly object videoRetirementGate = new();
     private readonly SemaphoreSlim loginGate = new(1);
     private readonly LoginThrottle loginThrottle = new();
     private readonly SemaphoreSlim captureGate = new(1);
@@ -37,7 +39,9 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private int listenPort;
     private readonly ClipboardExchange clipboard;
     private Task clipboardCleanup = Task.CompletedTask;
+    private Task videoRetirement = Task.CompletedTask;
     private H264Session? video;
+    private int disconnectInProgress;
     public event Action<string>? Status;
     public bool HasSession { get { lock (gate) return token != null; } }
     public string? SessionPeer { get { lock (gate) return sessionPeer; } }
@@ -107,7 +111,9 @@ public sealed partial class RemoteHost : IAsyncDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
         timer = new Timer(_ =>
         {
-            lock (gate) { if (token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15)) Disconnect(UiText.SessionEndKind.TimedOut); }
+            bool expired;
+            lock (gate) expired = token != null && DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(15);
+            if (expired) _ = Task.Run(() => Disconnect(UiText.SessionEndKind.TimedOut));
             if (Interlocked.Exchange(ref uploadExpiryBusy, 1) != 0) return;
             _ = clipboard.ExpireIdleUploads(ClipboardExchange.PendingUploadIdle).ContinueWith(task =>
             {
@@ -220,26 +226,72 @@ public sealed partial class RemoteHost : IAsyncDisposable
         }
     }
     public void Disconnect(UiText.SessionEndKind reason = UiText.SessionEndKind.Left)
+        => Disconnect(reason, expectedSession: null);
+
+    private void Disconnect(UiText.SessionEndKind reason, CancellationTokenSource? expectedSession)
     {
-        lock (gate)
-        {
-            if (disposeState == 2) return;
-            var peer = sessionPeer;
-            var hadSession = token != null;
-            var oldToken = token; token = null; sessionPeer = null; sessionStarted = null; session.Cancel();
-            if (oldToken != null) clipboardCleanup = clipboard.EndSession(oldToken);
-            try { desktop.Release(); } catch (InvalidOperationException) { }
-            if (disposeState == 0) Status?.Invoke(hadSession ? UiText.SessionEnded(peer, reason, listenPort) : UiText.Listening(listenPort));
-        }
-        RetireVideo();
-    }
-    private void RetireVideo()
-    {
-        if (!captureGate.Wait(TimeSpan.FromSeconds(5))) return;
+        if (Interlocked.Exchange(ref disconnectInProgress, 1) != 0) return;
+        string? oldToken;
+        string? peer;
+        bool hadSession;
+        bool announce;
         try
         {
-            video?.Dispose();
+            lock (gate)
+            {
+                if (disposeState == 2 || (expectedSession != null && !ReferenceEquals(session, expectedSession))) return;
+                peer = sessionPeer;
+                hadSession = token != null;
+                oldToken = token;
+                token = null;
+                sessionPeer = null;
+                sessionStarted = null;
+                try { session.Cancel(); }
+                catch (AggregateException error) { Trace.TraceWarning("Session cancellation callback failed: {0}", error.GetType().Name); }
+                announce = disposeState == 0;
+            }
+        }
+        finally { Interlocked.Exchange(ref disconnectInProgress, 0); }
+
+        if (oldToken != null)
+        {
+            Task ended;
+            try { ended = clipboard.EndSession(oldToken); }
+            catch (Exception error)
+            {
+                Trace.TraceWarning("Clipboard session cleanup failed: {0}", error.GetType().Name);
+                ended = Task.CompletedTask;
+            }
+            lock (gate) clipboardCleanup = Task.WhenAll(clipboardCleanup, ended);
+        }
+        try { desktop.Release(); }
+        catch (Exception error) { Trace.TraceWarning("Input release failed: {0}", error.GetType().Name); }
+        _ = QueueRetireVideo();
+        if (announce)
+        {
+            try { Status?.Invoke(hadSession ? UiText.SessionEnded(peer, reason, listenPort) : UiText.Listening(listenPort)); }
+            catch (Exception error) { Trace.TraceWarning("Session status update failed: {0}", error.GetType().Name); }
+        }
+    }
+
+    private Task QueueRetireVideo()
+    {
+        lock (videoRetirementGate)
+        {
+            if (videoRetirement.IsCompleted) videoRetirement = Task.Run(RetireVideoUntilAvailable);
+            return videoRetirement;
+        }
+    }
+
+    private async Task RetireVideoUntilAvailable()
+    {
+        while (!await captureGate.WaitAsync(TimeSpan.FromSeconds(1))) await Task.Delay(250);
+        try
+        {
+            var retired = video;
             video = null;
+            try { retired?.Dispose(); }
+            catch (Exception error) { Trace.TraceWarning("Video session cleanup failed: {0}", error.GetType().Name); }
         }
         finally { captureGate.Release(); }
     }
@@ -248,7 +300,9 @@ public sealed partial class RemoteHost : IAsyncDisposable
         if (Interlocked.CompareExchange(ref disposeState, 1, 0) != 0) return;
         try
         {
-            timer?.Dispose();
+            var currentTimer = timer;
+            timer = null;
+            if (currentTimer != null) await currentTimer.DisposeAsync();
             SecureDesktop.Configure(false);
             Disconnect();
             var runningApp = app;
@@ -258,6 +312,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
                 try { await runningApp.StopAsync(); }
                 finally { await runningApp.DisposeAsync(); }
             }
+            await QueueRetireVideo();
             await clipboardCleanup;
         }
         finally

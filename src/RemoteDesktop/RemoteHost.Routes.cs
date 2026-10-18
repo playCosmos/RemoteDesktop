@@ -53,7 +53,13 @@ public sealed partial class RemoteHost
         });
         routes.MapPost("/v1/pake/start", (Delegate)(Func<HttpContext, Task<IResult>>)StartOpaqueLogin);
         routes.MapPost("/v1/pake/finish", (Delegate)(Func<HttpContext, Task<IResult>>)FinishOpaqueLogin);
-        routes.MapPost("/v1/logout", (HttpContext c) => { lock (gate) { if (Authorized(c)) Disconnect(); } return Results.Ok(); });
+        routes.MapPost("/v1/logout", (HttpContext c) =>
+        {
+            CancellationTokenSource? expectedSession = null;
+            lock (gate) if (Authorized(c)) expectedSession = session;
+            if (expectedSession != null) Disconnect(UiText.SessionEndKind.Left, expectedSession);
+            return Results.Ok();
+        });
         routes.MapGet("/v1/ping", () => Results.Ok(new { protocol = 1 }));
     }
 

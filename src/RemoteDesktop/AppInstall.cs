@@ -9,6 +9,27 @@ public enum InstallScope
     Machine
 }
 
+public enum ServiceFailureActionType : uint
+{
+    None = 0,
+    Restart = 1
+}
+
+public readonly record struct ServiceFailureAction(ServiceFailureActionType Type, uint DelayMilliseconds);
+
+public static class ServiceRecoveryPolicy
+{
+    public const uint ResetPeriodSeconds = 86400;
+    static readonly IReadOnlyList<ServiceFailureAction> actions = Array.AsReadOnly(new[]
+    {
+        new ServiceFailureAction(ServiceFailureActionType.Restart, 5000),
+        new ServiceFailureAction(ServiceFailureActionType.Restart, 15000),
+        new ServiceFailureAction(ServiceFailureActionType.Restart, 60000)
+    });
+
+    public static IReadOnlyList<ServiceFailureAction> Actions => actions;
+}
+
 public static class AppCommand
 {
     public const string Service = "--service";

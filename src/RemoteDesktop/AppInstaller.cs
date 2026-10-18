@@ -143,6 +143,9 @@ public static class AppInstaller
     const uint ErrorNormal = 1;
     const uint StopControl = 1;
     const uint Stopped = 1;
+    const uint StartPending = 2;
+    const uint Running = 4;
+    const uint ErrorServiceSpecific = 1066;
 
     static bool StopServiceForUpdate()
     {
@@ -193,13 +196,23 @@ public static class AppInstaller
             {
                 var created = CreateService(manager, AppInstall.ServiceName, AppInstall.ServiceDisplayName, ServiceAccess, OwnProcess, AutoStart, ErrorNormal, binary, null, 0, null, null, null);
                 if (created == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
-                CloseServiceHandle(created);
+                try
+                {
+                    try { ConfigureServiceRecovery(created); }
+                    catch
+                    {
+                        _ = DeleteService(created);
+                        throw;
+                    }
+                }
+                finally { CloseServiceHandle(created); }
                 return;
             }
             try
             {
                 if (!ChangeServiceConfig(existing, OwnProcess, AutoStart, ErrorNormal, binary, null, 0, null, null, null, AppInstall.ServiceDisplayName))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
+                ConfigureServiceRecovery(existing);
             }
             finally { CloseServiceHandle(existing); }
         }
@@ -221,10 +234,53 @@ public static class AppInstaller
                     var error = Marshal.GetLastWin32Error();
                     if (error != 1056) throw new Win32Exception(error);
                 }
+                WaitForServiceRunning(service);
             }
             finally { CloseServiceHandle(service); }
         }
         finally { CloseServiceHandle(manager); }
+    }
+
+    static void WaitForServiceRunning(nint service)
+    {
+        var until = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < until)
+        {
+            var status = new ServiceStatus();
+            if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (status.CurrentState == Running) return;
+            if (status.CurrentState == Stopped)
+            {
+                var error = status.Win32ExitCode == ErrorServiceSpecific ? status.ServiceSpecificExitCode : status.Win32ExitCode;
+                if (error == 0) error = 1066;
+                throw new Win32Exception(unchecked((int)error), "Windows service stopped before it reported ready.");
+            }
+            if (status.CurrentState != StartPending) throw new InvalidOperationException("Windows service entered an unexpected state.");
+            Thread.Sleep(200);
+        }
+        throw new TimeoutException("Windows service did not report ready within 30 seconds.");
+    }
+
+    static void ConfigureServiceRecovery(nint service)
+    {
+        var actionSize = Marshal.SizeOf<ServiceAction>();
+        var actionBuffer = Marshal.AllocHGlobal(actionSize * ServiceRecoveryPolicy.Actions.Count);
+        try
+        {
+            for (var index = 0; index < ServiceRecoveryPolicy.Actions.Count; index++)
+            {
+                var action = ServiceRecoveryPolicy.Actions[index];
+                Marshal.StructureToPtr(new ServiceAction { Type = (uint)action.Type, Delay = action.DelayMilliseconds }, IntPtr.Add(actionBuffer, index * actionSize), false);
+            }
+            var recovery = new ServiceFailureActions
+            {
+                ResetPeriod = ServiceRecoveryPolicy.ResetPeriodSeconds,
+                ActionCount = (uint)ServiceRecoveryPolicy.Actions.Count,
+                Actions = actionBuffer
+            };
+            if (!ChangeServiceConfig2(service, 2, ref recovery)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        finally { Marshal.FreeHGlobal(actionBuffer); }
     }
 
     static void StopAndDeleteService()
@@ -267,10 +323,13 @@ public static class AppInstaller
     }
 
     [StructLayout(LayoutKind.Sequential)] struct ServiceStatus { public uint ServiceType, CurrentState, ControlsAccepted, Win32ExitCode, ServiceSpecificExitCode, CheckPoint, WaitHint; }
+    [StructLayout(LayoutKind.Sequential)] struct ServiceAction { public uint Type, Delay; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct ServiceFailureActions { public uint ResetPeriod; public nint RebootMessage, Command; public uint ActionCount; public nint Actions; }
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint OpenSCManager(string? machine, string? database, uint access);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint OpenService(nint manager, string name, uint access);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint CreateService(nint manager, string name, string display, uint access, uint serviceType, uint startType, uint errorControl, string binary, string? group, nint tag, string? dependencies, string? account, string? password);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ChangeServiceConfig(nint service, uint serviceType, uint startType, uint errorControl, string binary, string? group, nint tag, string? dependencies, string? account, string? password, string display);
+    [DllImport("advapi32.dll", EntryPoint = "ChangeServiceConfig2W", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ChangeServiceConfig2(nint service, uint infoLevel, ref ServiceFailureActions info);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool StartService(nint service, int argc, nint argv);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool ControlService(nint service, uint control, ref ServiceStatus status);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool QueryServiceStatus(nint service, ref ServiceStatus status);

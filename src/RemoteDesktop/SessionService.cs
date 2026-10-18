@@ -21,6 +21,7 @@ public static class ServiceHost
     const int Running = 0x4;
     const int StopPending = 0x3;
     const int Stopped = 0x1;
+    const int ErrorServiceSpecific = 1066;
 
     delegate void ServiceMainDelegate(int argc, nint argv);
     delegate int HandlerDelegate(int control, int eventType, nint eventData, nint context);
@@ -42,10 +43,19 @@ public static class ServiceHost
     static void ServiceMain(int argc, nint argv)
     {
         statusHandle = RegisterServiceCtrlHandlerEx(AppInstall.ServiceName, HandlerCallback, 0);
-        Report(StartPending, AcceptStop | AcceptSession, 4000);
+        Report(StartPending, AcceptStop | AcceptSession, 15000);
         session = new SessionService();
-        session.Start();
-        Report(Running, AcceptStop | AcceptSession, 0);
+        try
+        {
+            session.Start();
+            Report(Running, AcceptStop | AcceptSession, 0);
+        }
+        catch (Exception)
+        {
+            try { session.Stop(); }
+            catch (Exception) { }
+            Report(Stopped, 0, 0, ErrorServiceSpecific, 1);
+        }
     }
 
     static int Handler(int control, int eventType, nint eventData, nint context)
@@ -53,16 +63,23 @@ public static class ServiceHost
         if (control == ControlStop)
         {
             Report(StopPending, 0, 4000);
-            session?.Stop();
-            Report(Stopped, 0, 0);
+            try
+            {
+                session?.Stop();
+                Report(Stopped, 0, 0);
+            }
+            catch (Exception)
+            {
+                Report(Stopped, 0, 0, ErrorServiceSpecific, 2);
+            }
         }
         else if (control == ControlSession) session?.SessionChanged(eventType);
         return 0;
     }
 
-    static void Report(int state, int accepted, int wait)
+    static void Report(int state, int accepted, int wait, int win32ExitCode = 0, int serviceSpecificExitCode = 0)
     {
-        var status = new ServiceStatus { ServiceType = OwnProcess, CurrentState = state, ControlsAccepted = accepted, WaitHint = wait };
+        var status = new ServiceStatus { ServiceType = OwnProcess, CurrentState = state, ControlsAccepted = accepted, Win32ExitCode = win32ExitCode, ServiceSpecificExitCode = serviceSpecificExitCode, WaitHint = wait };
         SetServiceStatus(statusHandle, ref status);
     }
 

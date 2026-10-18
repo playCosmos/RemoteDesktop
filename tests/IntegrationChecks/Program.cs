@@ -52,6 +52,7 @@ Check(UiText.AutostartEnabled() == "로그인하면 접속 대기를 시작합�
 Check(!AppInstall.ShowMachineInstall(InstallScope.Machine) && !AppInstall.ShowUserInstall(InstallScope.Machine) && AppInstall.ShowUninstall(InstallScope.Machine), "a machine install offers removal");
 var serviceCommand = (char)34 + Path.Combine(machineInstall, "RemoteDesktop.exe") + (char)34 + " --service";
 Check(AppInstall.ServiceCommand(Path.Combine(machineInstall, "RemoteDesktop.exe")) == serviceCommand, "the service starts the installed exe");
+Check(ServiceRecoveryPolicy.ResetPeriodSeconds == 86400 && ServiceRecoveryPolicy.Actions.SequenceEqual([new ServiceFailureAction(ServiceFailureActionType.Restart, 5000), new ServiceFailureAction(ServiceFailureActionType.Restart, 15000), new ServiceFailureAction(ServiceFailureActionType.Restart, 60000)]), "an unexpected machine-service failure receives bounded automatic restarts");
 Check(AppInstall.CanRemoveDirectory(perUserInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && AppInstall.CanRemoveDirectory(machineInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && !AppInstall.CanRemoveDirectory(@"C:\Windows", @"C:\Program Files", @"C:\Users\me\AppData\Local"), "uninstall can remove only an install folder");
 var publishedDir = Path.Combine(Path.GetTempPath(), "prd-pub-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(publishedDir);

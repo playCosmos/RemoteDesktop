@@ -60,6 +60,28 @@ public static class CursorPlacement
         if (pointerX < offsetX || pointerY < offsetY || pointerX > offsetX + drawnWidth || pointerY > offsetY + drawnHeight) return new(0, 0, 0, 0, false);
         return new(pointerX - hotX * scale, pointerY - hotY * scale, cursorWidth * scale, cursorHeight * scale, true);
     }
+
+    public static bool InView(double cursorX, double cursorY, double viewX, double viewY, double viewWidth, double viewHeight, out double normX, out double normY)
+    {
+        normX = 0;
+        normY = 0;
+        if (viewWidth <= 0 || viewHeight <= 0 || !double.IsFinite(cursorX) || !double.IsFinite(cursorY) || !double.IsFinite(viewX) || !double.IsFinite(viewY) || !double.IsFinite(viewWidth) || !double.IsFinite(viewHeight)) return false;
+        normX = (cursorX - viewX) / viewWidth;
+        normY = (cursorY - viewY) / viewHeight;
+        return normX >= 0 && normY >= 0 && normX <= 1 && normY <= 1;
+    }
+
+    public static PointerMark PlaceNormalized(double normX, double normY, int hotX, int hotY, int cursorWidth, int cursorHeight, double imageWidth, double imageHeight, double boxWidth, double boxHeight)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0 || boxWidth <= 0 || boxHeight <= 0 || cursorWidth <= 0 || cursorHeight <= 0 || !double.IsFinite(imageWidth) || !double.IsFinite(imageHeight) || !double.IsFinite(boxWidth) || !double.IsFinite(boxHeight) || !double.IsFinite(normX) || !double.IsFinite(normY) || normX < 0 || normY < 0 || normX > 1 || normY > 1)
+            return new(0, 0, 0, 0, false);
+        var scale = Math.Min(boxWidth / imageWidth, boxHeight / imageHeight);
+        var drawnWidth = imageWidth * scale;
+        var drawnHeight = imageHeight * scale;
+        var pointerX = (boxWidth - drawnWidth) / 2 + normX * drawnWidth;
+        var pointerY = (boxHeight - drawnHeight) / 2 + normY * drawnHeight;
+        return Place(pointerX, pointerY, hotX, hotY, cursorWidth, cursorHeight, imageWidth, imageHeight, boxWidth, boxHeight);
+    }
 }
 
 public sealed class Desktop

@@ -12,9 +12,23 @@ function Run([string]$exe, [string[]]$toolArgs) {
     & $exe @toolArgs
     if ($LASTEXITCODE -ne 0) { throw "$exe failed: $LASTEXITCODE" }
 }
-New-Item -ItemType Directory -Force -Path $output,"$output\classes","$output\dex" | Out-Null
-$sources = @(Get-ChildItem -LiteralPath "$androidRoot\src" -Recurse -Filter '*.java' | ForEach-Object { $_.FullName })
+$buildRoot = [System.IO.Path]::GetFullPath($output).TrimEnd('\') + '\'
+New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
+foreach ($generatedName in @('classes','checks','dex')) {
+    $generatedPath = [System.IO.Path]::GetFullPath((Join-Path $buildRoot $generatedName))
+    if (!$generatedPath.StartsWith($buildRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Android output path escaped build directory: $generatedPath" }
+    if (Test-Path -LiteralPath $generatedPath) { Remove-Item -LiteralPath $generatedPath -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $generatedPath | Out-Null
+}
+$mainSources = @(Get-ChildItem -LiteralPath "$androidRoot\src" -Recurse -Filter '*.java' | Where-Object { $_.Name -ne 'LocalCursorCheck.java' } | ForEach-Object { $_.FullName })
+$checkSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\LocalCursorCheck.java'
+$sources = @($mainSources)
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',$platform,'-d',"$output\classes") + $sources)
+$checkOutput = Join-Path $output 'checks'
+$checkClass = Join-Path $checkOutput 'dev\personal\remotedesktop'
+New-Item -ItemType Directory -Force -Path $checkClass | Out-Null
+Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($checkSource))
+Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.LocalCursorCheck")
 Run "$Jdk\bin\jar.exe" @('cf',"$output\classes.jar",'-C',"$output\classes",'.')
 Run "$buildTools\d8.bat" @('--lib',$platform,'--min-api','30','--output',"$output\dex","$output\classes.jar")
 Run "$buildTools\aapt.exe" @('package','-f','-M',"$androidRoot\AndroidManifest.xml",'-I',$platform,'-F',"$output\unsigned.apk")

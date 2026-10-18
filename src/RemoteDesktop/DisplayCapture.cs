@@ -196,7 +196,7 @@ internal sealed class DisplayCapture
         var y = (cursor.Y - view.Top) / (double)Math.Max(1, view.Height - 1);
         LastTiming = timing;
         var shot = request.LocalCursor ? CursorGlyph.Capture() : default;
-        return new CapturedFrame(bytes, timing, Math.Clamp(x, 0, 1), Math.Clamp(y, 0, 1), request.LocalCursor, shot.Visible, shot.HotspotX, shot.HotspotY, shot.Hash ?? "", shot.Png);
+        return new CapturedFrame(bytes, timing, x, y, request.LocalCursor, shot.Visible, shot.HotspotX, shot.HotspotY, shot.Hash ?? "", shot.Png);
     }
 
     private CapturedFrame? SecureReplacement(CaptureRequest request, Rectangle view)

@@ -404,6 +404,13 @@ var overText = CursorPlacement.Place(40, 70, 2, 4, 16, 16, 200, 100, 200, 200);
 var outside = CursorPlacement.Place(40, 10, 2, 4, 16, 16, 200, 100, 200, 200);
 Check(overText.Shown && Math.Abs(overText.Left - 38) < 0.01 && Math.Abs(overText.Top - 66) < 0.01 && overText.Width == 16 && overText.Height == 16, "the remote cursor keeps its hotspot on the picture");
 Check(!outside.Shown, "the remote cursor hides in the empty margin");
+Check(CursorPlacement.InView(0.25, 0.75, 0, 0, 1, 1, out var fullX, out var fullY) && fullX == 0.25 && fullY == 0.75, "a full view keeps the pointer where it is");
+Check(CursorPlacement.InView(0.25, 0.75, 0.2, 0.5, 0.5, 0.5, out var zoomX, out var zoomY) && Math.Abs(zoomX - 0.1) < 0.0001 && Math.Abs(zoomY - 0.5) < 0.0001, "a zoomed view remaps the pointer into the picture");
+Check(!CursorPlacement.InView(0.1, 0.75, 0.2, 0.5, 0.5, 0.5, out _, out _) && !CursorPlacement.InView(double.NaN, 0.5, 0, 0, 1, 1, out _, out _), "a pointer outside the zoomed view is not drawn");
+Check(!CursorPlacement.InView(0.5, 0.5, 0, 0, double.PositiveInfinity, 1, out _, out _), "an invalid viewport does not place the pointer");
+var centered = CursorPlacement.PlaceNormalized(0.5, 0.5, 2, 4, 16, 16, 200, 100, 200, 200);
+Check(centered.Shown && Math.Abs(centered.Left - 98) < 0.01 && Math.Abs(centered.Top - 96) < 0.01 && centered.Width == 16 && centered.Height == 16, "the local cursor keeps its hotspot on a letterboxed picture");
+Check(!CursorPlacement.PlaceNormalized(1.2, 0.5, 0, 0, 16, 16, 200, 100, 200, 200).Shown && !CursorPlacement.PlaceNormalized(double.NaN, 0.5, 0, 0, 16, 16, 200, 100, 200, 200).Shown, "a pointer off the picture is not drawn");
 var shot = CursorGlyph.Capture();
 Check(!shot.Visible || (shot.Png != null && shot.Png.Length > 8 && shot.Png[0] == 0x89 && shot.Png[1] == 0x50 && shot.Hash.Length == 64 && shot.Width > 0 && shot.Height > 0), "a visible remote cursor is a png");
 using (var picture = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.PixelFormat.Format32bppArgb))

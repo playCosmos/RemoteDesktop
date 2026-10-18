@@ -82,11 +82,44 @@ final class RemoteApi {
         final String codec;
         final double transferMs;
         final String secure;
-        Picture(byte[] bytes, String codec, double transferMs, String secure) {
+        final Cursor cursor;
+        Picture(byte[] bytes, String codec, double transferMs, String secure, Cursor cursor) {
             this.bytes = bytes;
             this.codec = codec == null || codec.trim().isEmpty() ? "jpeg" : codec.trim();
             this.transferMs = transferMs;
             this.secure = SecureNotice.state(secure);
+            this.cursor = cursor == null ? new Cursor(false, false, 0, 0, "", null, Double.NaN, Double.NaN) : cursor;
+        }
+    }
+    static final class Cursor {
+        final boolean local;
+        final boolean visible;
+        final int hotX;
+        final int hotY;
+        final String hash;
+        final byte[] png;
+        final double x;
+        final double y;
+        final boolean hasPosition;
+        Cursor(boolean local, boolean visible, int hotX, int hotY, String hash, byte[] png, double x, double y) {
+            this.local = local;
+            this.visible = visible;
+            this.hotX = hotX;
+            this.hotY = hotY;
+            this.hash = hash == null ? "" : hash;
+            this.png = png;
+            this.x = x;
+            this.y = y;
+            this.hasPosition = Double.isFinite(x) && Double.isFinite(y);
+        }
+        static Cursor read(HttpsURLConnection connection) {
+            String encoded = connection.getHeaderField("X-Cursor-Png");
+            byte[] png = null;
+            if (encoded != null && !encoded.isEmpty() && encoded.length() <= 24000) {
+                try { png = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT); }
+                catch (IllegalArgumentException ignored) { png = null; }
+            }
+            return new Cursor("1".equals(connection.getHeaderField("X-Cursor-Local")), "1".equals(connection.getHeaderField("X-Cursor-Visible")), headerInt(connection.getHeaderField("X-Cursor-Hot-X")), headerInt(connection.getHeaderField("X-Cursor-Hot-Y")), connection.getHeaderField("X-Cursor-Hash"), png, headerDouble(connection.getHeaderField("X-Cursor-X")), headerDouble(connection.getHeaderField("X-Cursor-Y")));
         }
     }
     Picture frame(String path) throws Exception {
@@ -96,6 +129,7 @@ final class RemoteApi {
             check(c);
             String codec = c.getHeaderField("X-Codec");
             String secure = c.getHeaderField("X-Secure-Desktop");
+            Cursor cursor = Cursor.read(c);
             double capture = headerMillis(c.getHeaderField("X-Capture-Ms"));
             double encode = headerMillis(c.getHeaderField("X-Encode-Ms"));
             double wait = headerMillis(c.getHeaderField("X-Wait-Ms"));
@@ -108,7 +142,7 @@ final class RemoteApi {
                 byte[] bytes = out.toByteArray();
                 double spent = System.currentTimeMillis() - started;
                 double transfer = bytes.length == 0 ? -1 : Math.max(0, spent - capture - encode - wait);
-                return new Picture(bytes, codec, transfer, secure);
+                return new Picture(bytes, codec, transfer, secure, cursor);
             }
         } finally { c.disconnect(); }
     }
@@ -116,6 +150,16 @@ final class RemoteApi {
         if (value == null || value.isEmpty()) return 0;
         try { return Double.parseDouble(value); }
         catch (NumberFormatException error) { return 0; }
+    }
+    private static int headerInt(String value) {
+        if (value == null || value.isEmpty()) return 0;
+        try { return Integer.parseInt(value.trim()); }
+        catch (NumberFormatException error) { return 0; }
+    }
+    private static double headerDouble(String value) {
+        if (value == null || value.isEmpty()) return Double.NaN;
+        try { return Double.parseDouble(value.trim()); }
+        catch (NumberFormatException error) { return Double.NaN; }
     }
     void login(String password) throws Exception {
         JSONObject reply = new JSONObject(new String(request("login", "POST", new JSONObject().put("password",password)), "UTF-8"));

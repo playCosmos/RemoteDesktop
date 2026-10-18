@@ -67,9 +67,18 @@ public final class MainActivity extends Activity {
     private boolean touchActive, touchMoved, longPressTriggered;
     private float touchStartX, touchStartY, touchLastX, touchLastY;
     private float cursorX=.5f, cursorY=.5f;
+    private ImageView remoteCursor;
+    private Bitmap cursorGlyph;
+    private volatile String cursorHash="";
+    private volatile boolean cursorLocal;
+    private volatile boolean cursorVisible;
+    private int cursorHotX, cursorHotY;
+    private final java.util.concurrent.atomic.AtomicLong cursorGeneration=new java.util.concurrent.atomic.AtomicLong();
+    private volatile boolean cursorTouched;
+    private float renderedViewX=0f, renderedViewY=0f, renderedViewWidth=1f, renderedViewHeight=1f;
     private static final int DIRECT_TOUCH=0, TRACKPAD=1, TRACKPAD_RIGHT_CLICK=2;
     private static final int CHROME_HIDE_MS=4500;
-    private boolean inputEnabled=true;
+    private volatile boolean inputEnabled=true;
     private int frameQuality=55;
     private int frameRate=15;
     private volatile int pacedQuality=55;
@@ -107,6 +116,7 @@ public final class MainActivity extends Activity {
                 float focusY=detector.getFocusY()/Math.max(1f,screen==null?1f:screen.getHeight());
                 float globalX=viewX+focusX*viewWidth, globalY=viewY+focusY*viewHeight;
                 viewWidth=1f/zoom; viewHeight=1f/zoom; viewX=clamp(globalX-focusX*viewWidth,0,1-viewWidth); viewY=clamp(globalY-focusY*viewHeight,0,1-viewHeight); nextFrameAt=0;
+                placeCursor();
                 return true;
             }
             @Override public void onScaleEnd(ScaleGestureDetector detector) { pinchActive=false; if(zoom<=1.01f)resetZoom(); }
@@ -129,7 +139,16 @@ public final class MainActivity extends Activity {
         screen.setScaleType(ImageView.ScaleType.FIT_CENTER);
         touchSlop=ViewConfiguration.get(this).getScaledTouchSlop();
         screen.setOnTouchListener((v,e) -> touch(e));
+        screen.addOnLayoutChangeListener((view,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom) -> placeCursor());
         root.addView(screen, new FrameLayout.LayoutParams(-1,-1));
+
+        remoteCursor=new ImageView(this);
+        remoteCursor.setScaleType(ImageView.ScaleType.FIT_XY);
+        remoteCursor.setClickable(false);
+        remoteCursor.setFocusable(false);
+        remoteCursor.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        remoteCursor.setVisibility(View.GONE);
+        root.addView(remoteCursor, new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.LEFT));
 
         health=new TextView(this);
         health.setTextColor(Color.WHITE); health.setTextSize(11); health.setPadding(dp(8),dp(4),dp(8),dp(4));
@@ -274,9 +293,13 @@ public final class MainActivity extends Activity {
                 receivedFrames++;
                 foregroundFailures=0;
                 updateHealth();
-                if(polled.keep) return;
+                final RemoteApi.Cursor cursor=polled.cursor;
+                if(polled.keep) {
+                    runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) applyCursor(polled); });
+                    return;
+                }
                 Bitmap next=polled.bitmap;
-                runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) { bitmap=next; renderedDisplay=display; screen.setImageBitmap(next); } else next.recycle(); });
+                runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) { bitmap=next; renderedDisplay=display; renderedViewX=polled.viewX; renderedViewY=polled.viewY; renderedViewWidth=polled.viewWidth; renderedViewHeight=polled.viewHeight; screen.setImageBitmap(next); applyCursor(polled); } else next.recycle(); });
             } catch(Exception e) { try { if(api!=null && remote==api) noteSessionFailure(api, e); } catch(Exception ignored) {} }
         },0,10,TimeUnit.MILLISECONDS);
     }
@@ -504,6 +527,7 @@ public final class MainActivity extends Activity {
                         sessionHost=host;
                         sessionFingerprint=fingerprint;
                         sessionPassword=pass;
+                        cursorTouched=false;
                         reconnectNeeded=false;
                         backgroundUncertain=false;
                         foregroundFailures=0;
@@ -553,6 +577,11 @@ public final class MainActivity extends Activity {
             paceSlow=0;
             paceFast=0;
             secureState="off";
+            cursorHash="";
+            cursorLocal=false;
+            cursorVisible=false;
+            cursorGeneration.incrementAndGet();
+            cursorTouched=false;
         }
         closePicture();
         if(api!=null) { api.cancelled=true; if(!control.isShutdown()) control.execute(api::logout); }
@@ -565,6 +594,8 @@ public final class MainActivity extends Activity {
             screen.resetInput();
             screen.setImageDrawable(null);
             bitmap=null;
+            if(remoteCursor!=null) { remoteCursor.setImageDrawable(null); remoteCursor.setVisibility(View.GONE); }
+            if(cursorGlyph!=null) { cursorGlyph.recycle(); cursorGlyph=null; }
             android.view.inputmethod.InputMethodManager imm=(android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
             if(screen.getWindowToken()!=null) imm.hideSoftInputFromWindow(screen.getWindowToken(),0);
         });
@@ -762,7 +793,7 @@ public final class MainActivity extends Activity {
         if(action==MotionEvent.ACTION_MOVE) {
             if(SystemClock.elapsedRealtime()-lastMove<20)return true;
             float width=Math.max(1,screen.getWidth()),height=Math.max(1,screen.getHeight());
-            moveCursor(cursorX+(e.getX()-touchLastX)/width*1.25f,cursorY+(e.getY()-touchLastY)/height*1.25f);
+            moveCursor(cursorX+(e.getX()-touchLastX)/width*renderedViewWidth*1.25f,cursorY+(e.getY()-touchLastY)/height*renderedViewHeight*1.25f);
             touchLastX=e.getX(); touchLastY=e.getY(); lastMove=SystemClock.elapsedRealtime(); return true;
         }
         if(!touchMoved && !longPressTriggered)click(0);
@@ -773,17 +804,21 @@ public final class MainActivity extends Activity {
         float width=bitmap.getWidth()*scale,height=bitmap.getHeight()*scale;
         float x=(e.getX()-(screen.getWidth()-width)/2)/width,y=(e.getY()-(screen.getHeight()-height)/2)/height;
         if(x<0 || x>1 || y<0 || y>1)return null;
-        return new float[]{viewX+x*viewWidth,viewY+y*viewHeight};
+        return new float[]{renderedViewX+x*renderedViewWidth,renderedViewY+y*renderedViewHeight};
     }
     private void panViewport(float dx,float dy) {
         float width=Math.max(1,screen.getWidth()), height=Math.max(1,screen.getHeight());
         viewX=clamp(viewX-dx/width*viewWidth,0,1-viewWidth);
         viewY=clamp(viewY-dy/height*viewHeight,0,1-viewHeight);
         nextFrameAt=0;
+        placeCursor();
     }
     private void moveCursor(float x,float y) {
+        cursorGeneration.incrementAndGet();
+        cursorTouched=true;
         cursorX=Math.max(0,Math.min(1,x)); cursorY=Math.max(0,Math.min(1,y));
         try { send(new JSONObject().put("kind","move").put("display",renderedDisplay).put("x",cursorX).put("y",cursorY)); } catch(Exception e) { report(e); }
+        placeCursor();
     }
     private void finishTouch() { touchActive=false; touchHandler.removeCallbacksAndMessages(null); }
     private void cancelTouch() { touchGeneration++; if(touchActive && touchMode==DIRECT_TOUCH)event("button",0,false); touchActive=false; touchHandler.removeCallbacksAndMessages(null); event("release",0,false); }
@@ -801,7 +836,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2, dp(40));
         lp.setMargins(dp(3),dp(2),dp(3),dp(2));
         toolbar.addView(controlButton, lp);
-        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; if(remote!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
+        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; cursorGeneration.incrementAndGet(); cursorTouched=false; nextFrameAt=0; placeCursor(); if(remote!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
     }
     private void chooseQuality() {
         String[] labels=qualityLabels(); int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
@@ -809,7 +844,7 @@ public final class MainActivity extends Activity {
     }
     private void lowBandwidth() { frameQuality=25; frameRate=5; pacedQuality=25; paceSlow=0; paceFast=0; needKey=true; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info(preferH264 && "H.264".equals(activeCodec)?"저대역폭 모드: 품질 25 · 5 FPS":"저대역폭 모드: JPEG 25 · 5 FPS"); }
     private static float clamp(float value,float min,float max) { return Math.max(min,Math.min(max,value)); }
-    private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; nextFrameAt=0; info("확대 초기화"); }
+    private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; nextFrameAt=0; placeCursor(); info("확대 초기화"); }
     private void chooseFrameRate() {
         String[] labels={"5 FPS · 저전력","10 FPS · 절약","15 FPS · 균형","30 FPS · 최대"}; int[] values={5,10,15,30}; int selected=frameRate==5?0:frameRate==10?1:frameRate==30?3:2;
         new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; paceSlow=0; paceFast=0; nextFrameAt=0; needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
@@ -822,7 +857,8 @@ public final class MainActivity extends Activity {
         String paced=asked==frameQuality?"요청과 같음":Integer.toString(asked);
         String secureShown=SecureNotice.text(secureState);
         if(secureShown==null) secureShown="일반 화면";
-        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"전송 화질: "+paced+nl+"화면: "+secureShown+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
+        String pointerShown=inputEnabled?(cursorLocal?"화면 위에 따로":"확인 중"):"영상에 포함";
+        new AlertDialog.Builder(this).setTitle("세션 정보").setMessage("대상: "+address.getText()+nl+"모니터: "+renderedDisplay+nl+"수신 해상도: "+resolution+nl+"코덱: "+activeCodec+nl+"품질: "+frameQuality+nl+"전송 화질: "+paced+nl+"화면: "+secureShown+nl+"포인터: "+pointerShown+nl+"최대 프레임 속도: "+frameRate+" FPS"+nl+"입력 제어: "+(inputEnabled?"켜짐":"꺼짐")+nl+"최근 프레임: "+lastFrameMillis+" ms").setPositiveButton("닫기",null).show();
     }
     private void updateHealth() {
         long now=SystemClock.elapsedRealtime(); if(now-healthWindow<1000)return;
@@ -846,7 +882,7 @@ public final class MainActivity extends Activity {
             String[] names=new String[list.length()],ids=new String[list.length()];
             for(int i=0;i<list.length();i++) { JSONObject d=list.getJSONObject(i); ids[i]=d.getString("id"); names[i]=d.getString("name")+" · "+d.getInt("width")+"×"+d.getInt("height"); }
             runOnUiThread(() -> { if(remote!=api)return; new AlertDialog.Builder(this).setTitle("모니터 선택").setItems(names,(dialog,index) -> {
-                if(remote!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); selectedDisplay=ids[index]; havePicture=false; needKey=true; preferences.edit().putString("display",selectedDisplay).apply();
+                if(remote!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); selectedDisplay=ids[index]; havePicture=false; needKey=true; zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; renderedViewX=renderedViewY=0f; renderedViewWidth=renderedViewHeight=1f; cursorTouched=false; if(remoteCursor!=null)remoteCursor.setVisibility(View.GONE); preferences.edit().putString("display",selectedDisplay).apply();
             }).setNegativeButton("닫기",null).show(); });
         } catch(Exception e) { report(e); } });
     }
@@ -879,14 +915,21 @@ public final class MainActivity extends Activity {
     private PolledFrame pollFrame(RemoteApi api, String display) throws Exception {
         final int epoch=generation.get();
         if(picturedSession!=api) { picturedSession=api; needKey=true; }
-        String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",viewX,viewY,viewWidth,viewHeight);
+        final float frameViewX=viewX, frameViewY=viewY, frameViewWidth=viewWidth, frameViewHeight=viewHeight;
+        final long frameCursorGeneration=cursorGeneration.get();
+        String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",frameViewX,frameViewY,frameViewWidth,frameViewHeight);
         boolean video=preferH264;
         requestedQuality=Math.max(25,Math.min(pacedQuality,frameQuality));
-        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+frameRate+"&view="+view+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
+        String cursorQuery="";
+        if(inputEnabled) {
+            cursorQuery="&cursor=local";
+            if(cursorHash!=null && cursorHash.length()>0) cursorQuery+="&shape="+java.net.URLEncoder.encode(cursorHash,"UTF-8");
+        }
+        String path="frame?display="+java.net.URLEncoder.encode(display,"UTF-8")+"&quality="+requestedQuality+"&fps="+frameRate+"&view="+view+cursorQuery+(havePicture?"&cached=1":"")+(video?"&codec=h264"+(needKey?"&key=1":""):"");
         RemoteApi.Picture picture=api.frame(path);
         lastTransferMs=picture.transferMs;
         noteSecure(api, epoch, picture.secure);
-        if(picture.bytes.length==0) return havePicture?new PolledFrame(null,true):null;
+        if(picture.bytes.length==0) return havePicture?new PolledFrame(null,true,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration):null;
         if(video && "h264".equalsIgnoreCase(picture.codec)) {
             Bitmap decoded;
             H264Picture decoder=null;
@@ -904,7 +947,7 @@ public final class MainActivity extends Activity {
                     needKey=false;
                     havePicture=true;
                 }
-                return new PolledFrame(decoded,false);
+                return new PolledFrame(decoded,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
             } catch(Exception error) {
                 boolean current;
                 synchronized(sessionGate) {
@@ -931,7 +974,7 @@ public final class MainActivity extends Activity {
             needKey=false;
             havePicture=true;
         }
-        return new PolledFrame(jpeg,false);
+        return new PolledFrame(jpeg,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
     }
     private void closePicture() {
         synchronized(pictureGate) {
@@ -957,6 +1000,54 @@ public final class MainActivity extends Activity {
         secureBanner.setText(message);
         secureBanner.setVisibility(View.VISIBLE);
     }
+    private void applyCursor(RemoteApi.Cursor cursor) {
+        if(cursor==null || remoteCursor==null) return;
+        cursorLocal=cursor.local;
+        cursorVisible=cursor.visible;
+        cursorHotX=cursor.hotX;
+        cursorHotY=cursor.hotY;
+        if(cursor.png!=null && cursor.png.length>8 && cursor.hash.length()>0 && !cursor.hash.equals(cursorHash)) {
+            BitmapFactory.Options bounds=new BitmapFactory.Options();
+            bounds.inJustDecodeBounds=true;
+            BitmapFactory.decodeByteArray(cursor.png,0,cursor.png.length,bounds);
+            Bitmap decoded=(bounds.outWidth>0 && bounds.outWidth<=256 && bounds.outHeight>0 && bounds.outHeight<=256)?BitmapFactory.decodeByteArray(cursor.png,0,cursor.png.length):null;
+            if(decoded!=null) {
+                Bitmap previous=cursorGlyph;
+                cursorGlyph=decoded;
+                cursorHash=cursor.hash;
+                remoteCursor.setImageBitmap(decoded);
+                if(previous!=null) previous.recycle();
+            }
+        }
+        placeCursor();
+    }
+    private void applyCursor(PolledFrame frame) {
+        if(frame==null || frame.cursor==null) return;
+        if(inputEnabled && frame.cursor.local && frame.cursor.hasPosition && !cursorTouched && cursorGeneration.get()==frame.cursorGeneration) {
+            cursorX=clamp((float)(frame.viewX+frame.cursor.x*frame.viewWidth),0,1);
+            cursorY=clamp((float)(frame.viewY+frame.cursor.y*frame.viewHeight),0,1);
+        }
+        applyCursor(frame.cursor);
+    }
+    private void placeCursor() {
+        if(remoteCursor==null) return;
+        if(remote==null || !inputEnabled || !cursorLocal || !cursorVisible || cursorGlyph==null || bitmap==null || screen==null) {
+            remoteCursor.setVisibility(View.GONE);
+            return;
+        }
+        float[] norm=LocalCursor.inView(cursorX,cursorY,renderedViewX,renderedViewY,renderedViewWidth,renderedViewHeight);
+        if(norm==null) { remoteCursor.setVisibility(View.GONE); return; }
+        LocalCursor.Mark mark=LocalCursor.place(norm[0],norm[1],cursorHotX,cursorHotY,cursorGlyph.getWidth(),cursorGlyph.getHeight(),bitmap.getWidth(),bitmap.getHeight(),screen.getWidth(),screen.getHeight());
+        if(!mark.shown) { remoteCursor.setVisibility(View.GONE); return; }
+        FrameLayout.LayoutParams lp=(FrameLayout.LayoutParams)remoteCursor.getLayoutParams();
+        lp.gravity=Gravity.TOP | Gravity.LEFT;
+        lp.leftMargin=Math.round(mark.left);
+        lp.topMargin=Math.round(mark.top);
+        lp.width=Math.max(1, Math.round(mark.width));
+        lp.height=Math.max(1, Math.round(mark.height));
+        remoteCursor.setLayoutParams(lp);
+        remoteCursor.setVisibility(View.VISIBLE);
+    }
     private String[] qualityLabels() {
         if(preferH264 && "H.264".equals(activeCodec)) return new String[]{"저대역폭 · 30","균형 · 55","고화질 · 75"};
         return new String[]{"저대역폭 · JPEG 30","균형 · JPEG 55","고화질 · JPEG 75"};
@@ -964,6 +1055,9 @@ public final class MainActivity extends Activity {
     private static final class PolledFrame {
         final Bitmap bitmap;
         final boolean keep;
-        PolledFrame(Bitmap bitmap, boolean keep) { this.bitmap=bitmap; this.keep=keep; }
+        final RemoteApi.Cursor cursor;
+        final float viewX, viewY, viewWidth, viewHeight;
+        final long cursorGeneration;
+        PolledFrame(Bitmap bitmap, boolean keep, RemoteApi.Cursor cursor, float viewX, float viewY, float viewWidth, float viewHeight, long cursorGeneration) { this.bitmap=bitmap; this.keep=keep; this.cursor=cursor; this.viewX=viewX; this.viewY=viewY; this.viewWidth=viewWidth; this.viewHeight=viewHeight; this.cursorGeneration=cursorGeneration; }
     }
 }

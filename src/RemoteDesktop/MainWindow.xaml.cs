@@ -10,6 +10,7 @@ public partial class MainWindow : Window
 {
     private readonly HostSession hostSession;
     private readonly ClientSession clientSession;
+    private bool initializing = true;
     private readonly string productTitle;
     private string? attentionPeer;
     private System.Windows.Forms.NotifyIcon? tray;
@@ -21,6 +22,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
+        initializing = false;
         ClientCapsLock.Text = HostCapsLock.Text = UiText.CapsLockWarning();
         Activated += (_, _) => RefreshCapsLock();
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
@@ -304,7 +306,11 @@ public partial class MainWindow : Window
     private void ForgetRecent(object sender, RoutedEventArgs e) => clientSession.ForgetRecent(sender, e);
     private void EditPin(object sender, RoutedEventArgs e) => clientSession.EditPin(sender, e);
     private void ClearPin(object sender, RoutedEventArgs e) => clientSession.ClearPin(sender, e);
-    private void TabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => clientSession.TabChanged(e);
+    private void TabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (initializing) return;
+        clientSession.TabChanged(e);
+    }
     private void Disconnect(object sender, RoutedEventArgs e) => clientSession.Disconnect(sender, e);
     private void Move(object sender, MouseEventArgs e) => clientSession.Move(sender, e);
     private void PointerLeft(object sender, MouseEventArgs e) => clientSession.PointerLeft(sender, e);

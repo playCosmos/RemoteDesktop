@@ -109,8 +109,9 @@ public sealed class WindowsFileClipboard : IFileClipboard
         catch (ExternalException) { return false; }
     }
 
-    private static byte[] ReadImage(IDataObject data)
+    private static byte[] ReadImage(IDataObject? data)
     {
+        if (data == null) return [];
         if (data.GetDataPresent("PNG"))
         {
             var png = ReadBytes(data.GetData("PNG"));

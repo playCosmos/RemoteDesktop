@@ -15,6 +15,7 @@ final class H264Picture {
     private MediaCodec codec;
     private boolean started;
     private byte[] configuredSps;
+    private byte[] configuredPps;
     private int[] configuredSize;
     private long timestampUs;
     private int produced;
@@ -25,7 +26,8 @@ final class H264Picture {
         byte[] sps = nal(accessUnit, 7);
         byte[] pps = nal(accessUnit, 8);
         try {
-            if (sps != null && pps != null && !Arrays.equals(sps, configuredSps)) configure(sps, pps);
+            H264Configuration.Pair configuration=H264Configuration.merge(configuredSps,configuredPps,sps,pps);
+            if(configuration.complete && configuration.changed) configure(configuration.sps,configuration.pps);
             if (codec == null || !started) throw new IOException("H.264 구성 정보가 없습니다.");
             int index = codec.dequeueInputBuffer(15_000);
             if (index < 0) throw new IOException("H.264 입력 버퍼가 없습니다.");
@@ -65,6 +67,7 @@ final class H264Picture {
             codec = created;
             started = true;
             configuredSps = Arrays.copyOf(sps, sps.length);
+            configuredPps = Arrays.copyOf(pps, pps.length);
             configuredSize = size;
             produced = 0;
             created = null;
@@ -172,6 +175,7 @@ final class H264Picture {
         codec = null;
         started = false;
         configuredSps = null;
+        configuredPps = null;
         configuredSize = null;
         produced = 0;
         if (current == null) return;

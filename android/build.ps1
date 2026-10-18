@@ -20,7 +20,7 @@ foreach ($generatedName in @('classes','checks','dex')) {
     if (Test-Path -LiteralPath $generatedPath) { Remove-Item -LiteralPath $generatedPath -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $generatedPath | Out-Null
 }
-$mainSources = @(Get-ChildItem -LiteralPath "$androidRoot\src" -Recurse -Filter '*.java' | Where-Object { $_.Name -ne 'LocalCursorCheck.java' } | ForEach-Object { $_.FullName })
+$mainSources = @(Get-ChildItem -LiteralPath "$androidRoot\src" -Recurse -Filter '*.java' | Where-Object { $_.Name -notmatch 'Check\.java$' } | ForEach-Object { $_.FullName })
 $checkSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\LocalCursorCheck.java'
 $sources = @($mainSources)
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',$platform,'-d',"$output\classes") + $sources)
@@ -29,6 +29,9 @@ $checkClass = Join-Path $checkOutput 'dev\personal\remotedesktop'
 New-Item -ItemType Directory -Force -Path $checkClass | Out-Null
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($checkSource))
 Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.LocalCursorCheck")
+$h264CheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\H264ConfigurationCheck.java'
+Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($h264CheckSource))
+Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.H264ConfigurationCheck")
 Run "$Jdk\bin\jar.exe" @('cf',"$output\classes.jar",'-C',"$output\classes",'.')
 Run "$buildTools\d8.bat" @('--lib',$platform,'--min-api','30','--output',"$output\dex","$output\classes.jar")
 Run "$buildTools\aapt.exe" @('package','-f','-M',"$androidRoot\AndroidManifest.xml",'-I',$platform,'-F',"$output\unsigned.apk")

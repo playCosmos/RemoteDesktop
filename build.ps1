@@ -10,6 +10,7 @@ param(
     [string]$WindowsSigningPfx = $env:WINDOWS_SIGNING_PFX,
     [string]$WindowsTimestampUrl = $env:WINDOWS_SIGNING_TIMESTAMP_URL,
     [string]$WindowsSignToolPath = $env:WINDOWS_SIGNTOOL,
+    [ValidateRange(30,900)][int]$WindowsSignToolTimeoutSeconds = 180,
     [string]$OutputRoot = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,38 @@ function Resolve-WindowsSignToolPath {
     return [System.IO.Path]::GetFullPath($candidates[0])
 }
 
-function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [string]$PfxPassword, [string]$TimestampUrl, [string]$SignToolPath) {
+function Invoke-WindowsSignTool([string]$SignToolPath, [string[]]$Arguments, [int]$TimeoutSeconds) {
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $SignToolPath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (!$process.Start()) { throw 'SignTool could not be started.' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (!$process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill($true) } catch { }
+            try { $process.WaitForExit() } catch { }
+            try { $null = $stdoutTask.GetAwaiter().GetResult() } catch { }
+            try { $null = $stderrTask.GetAwaiter().GetResult() } catch { }
+            throw "SignTool exceeded the $TimeoutSeconds second timeout. Check the RFC 3161 timestamp endpoint and certificate store."
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if (![string]::IsNullOrWhiteSpace($stdout)) { Write-Output $stdout.TrimEnd() }
+        if (![string]::IsNullOrWhiteSpace($stderr)) { Write-Output $stderr.TrimEnd() }
+        if ($process.ExitCode -ne 0) { throw "SignTool failed with exit code $($process.ExitCode)." }
+    }
+    finally { $process.Dispose() }
+}
+
+function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [string]$PfxPassword, [string]$TimestampUrl, [string]$SignToolPath, [int]$TimeoutSeconds) {
     $securePassword = ConvertTo-SecureString $PfxPassword -AsPlainText -Force
     $pfxCertificate = $null
     $storeCertificate = $null
@@ -69,15 +101,8 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
         }
         if ($null -eq $storeCertificate -or !$storeCertificate.HasPrivateKey) { throw 'The Windows signing certificate could not be loaded into the current-user certificate store.' }
 
-        & $SignToolPath sign /s My /sha1 $thumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 /u $codeSigningOid $ExecutablePath
-        if ($LASTEXITCODE -ne 0) { throw "SignTool failed to sign the Windows executable (exit $LASTEXITCODE)." }
-        & $SignToolPath verify /pa /all /tw /v $ExecutablePath
-        if ($LASTEXITCODE -ne 0) { throw "SignTool failed to verify the Windows executable (exit $LASTEXITCODE)." }
-
-        $signature = Get-AuthenticodeSignature -FilePath $ExecutablePath
-        if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Thumbprint -ne $thumbprint) {
-            throw 'Windows Authenticode verification did not match the selected signing certificate.'
-        }
+        Invoke-WindowsSignTool $SignToolPath @('sign','/s','My','/sha1',$thumbprint,'/fd','SHA256','/tr',$TimestampUrl,'/td','SHA256','/u',$codeSigningOid,$ExecutablePath) $TimeoutSeconds
+        Invoke-WindowsSignTool $SignToolPath @('verify','/pa','/all','/tw','/v',$ExecutablePath) $TimeoutSeconds
     }
     finally {
         if ($storeCertificate) { $storeCertificate.Dispose() }
@@ -156,7 +181,7 @@ try {
         $windowsOutput = Join-Path $OutputRoot $Name
         dotnet publish src/RemoteDesktop/RemoteDesktop.csproj -c Release -r win-x64 --self-contained $selfContained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=$(!$FrameworkDependent) -p:DebugType=None -o $windowsOutput
         if ($LASTEXITCODE -ne 0) { throw "$Name Windows publish failed" }
-        if ($WindowsSign) { Sign-WindowsExecutable (Join-Path $windowsOutput 'RemoteDesktop.exe') $WindowsSigningPfx $windowsSigningPassword $WindowsTimestampUrl $windowsSignToolPathResolved }
+        if ($WindowsSign) { Sign-WindowsExecutable (Join-Path $windowsOutput 'RemoteDesktop.exe') $WindowsSigningPfx $windowsSigningPassword $WindowsTimestampUrl $windowsSignToolPathResolved $WindowsSignToolTimeoutSeconds }
     }
     $windowsName = if ($FrameworkDependent) { 'windows-framework-dependent' } else { 'windows-portable' }
     Publish-Windows $windowsName

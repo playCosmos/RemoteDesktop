@@ -1,8 +1,35 @@
 param(
     [string]$Sdk = "$env:LOCALAPPDATA\Android\Sdk",
-    [string]$Jdk = 'C:\Program Files\Java\jdk-25.0.4'
+    [string]$Jdk = 'C:\Program Files\Java\jdk-25.0.4',
+    [switch]$Release,
+    [string]$ReleaseKeystore = $env:ANDROID_RELEASE_KEYSTORE,
+    [string]$ReleaseAlias = $env:ANDROID_RELEASE_KEY_ALIAS,
+    [string]$ReleaseStorePassword = $env:ANDROID_RELEASE_STORE_PASSWORD,
+    [string]$ReleaseKeyPassword = $env:ANDROID_RELEASE_KEY_PASSWORD
 )
 $ErrorActionPreference = 'Stop'
+$storePasswordVariable = 'ANDROID_RELEASE_STORE_PASSWORD'
+$keyPasswordVariable = 'ANDROID_RELEASE_KEY_PASSWORD'
+$originalStorePassword = [Environment]::GetEnvironmentVariable($storePasswordVariable)
+$originalKeyPassword = [Environment]::GetEnvironmentVariable($keyPasswordVariable)
+$releaseKeystorePath = $null
+if ($Release) {
+    if ([string]::IsNullOrWhiteSpace($ReleaseKeystore) -or ![System.IO.Path]::IsPathRooted($ReleaseKeystore) -or !(Test-Path -LiteralPath $ReleaseKeystore -PathType Leaf)) {
+        throw 'Set ANDROID_RELEASE_KEYSTORE to an absolute path to an existing signing keystore outside the repository.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ReleaseAlias)) { throw 'Set ANDROID_RELEASE_KEY_ALIAS to the release key alias.' }
+    if ([string]::IsNullOrEmpty($ReleaseStorePassword)) { throw 'Set ANDROID_RELEASE_STORE_PASSWORD in the process environment.' }
+    if ([string]::IsNullOrEmpty($ReleaseKeyPassword)) { throw 'Set ANDROID_RELEASE_KEY_PASSWORD in the process environment.' }
+    $releaseKeystorePath = [System.IO.Path]::GetFullPath($ReleaseKeystore)
+    $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+    if (!$repositoryRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $repositoryRoot += [System.IO.Path]::DirectorySeparatorChar }
+    if ($releaseKeystorePath.StartsWith($repositoryRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The Android release keystore must stay outside the source repository.'
+    }
+}
+[Environment]::SetEnvironmentVariable($storePasswordVariable, $null)
+[Environment]::SetEnvironmentVariable($keyPasswordVariable, $null)
+try {
 $androidRoot = $PSScriptRoot
 $output = Join-Path $androidRoot 'build'
 $buildTools = Join-Path $Sdk 'build-tools\35.0.0'
@@ -53,3 +80,24 @@ if (!(Test-Path -LiteralPath "$output\debug.keystore")) {
 Run "$buildTools\apksigner.bat" @('sign','--ks',"$output\debug.keystore",'--ks-pass','pass:android','--out',"$output\RemoteDesktop-debug.apk","$output\aligned.apk")
 Run "$buildTools\apksigner.bat" @('verify',"$output\RemoteDesktop-debug.apk")
 Write-Output "APK: $output\RemoteDesktop-debug.apk"
+if ($Release) {
+    $releaseApk = Join-Path $output 'RemoteDesktop-release.apk'
+    try {
+        [Environment]::SetEnvironmentVariable($storePasswordVariable, $ReleaseStorePassword)
+        [Environment]::SetEnvironmentVariable($keyPasswordVariable, $ReleaseKeyPassword)
+        Run "$buildTools\apksigner.bat" @('sign','--ks',$releaseKeystorePath,'--ks-key-alias',$ReleaseAlias,'--ks-pass',"env:$storePasswordVariable",'--key-pass',"env:$keyPasswordVariable",'--out',$releaseApk,"$output\aligned.apk")
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable($storePasswordVariable, $null)
+        [Environment]::SetEnvironmentVariable($keyPasswordVariable, $null)
+    }
+    Run "$buildTools\apksigner.bat" @('verify',$releaseApk)
+    Write-Output "Release APK: $releaseApk"
+}
+}
+finally {
+    [Environment]::SetEnvironmentVariable($storePasswordVariable, $originalStorePassword)
+    [Environment]::SetEnvironmentVariable($keyPasswordVariable, $originalKeyPassword)
+    $ReleaseStorePassword = $null
+    $ReleaseKeyPassword = $null
+}

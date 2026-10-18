@@ -5,6 +5,7 @@
 - Windows 툴바를 포인터 자동 표시에서 이동 가능한 클릭 핸들로 바꾸고, 연결 시간·FPS·지연은 툴바에서 세션 정보로 옮겼습니다.
 - Windows H.264 디코더가 연속 실패하거나 서버가 JPEG로 내려가면 같은 연결에서 자동으로 JPEG로 전환하고 알립니다.
 - 모든 사용자 설치 제거는 서비스가 정지된 뒤에만 등록을 지우며, 정지 제한시간이 지나면 제거를 중단하고 기존 방화벽 규칙 복원을 시도합니다.
+- Android 빌드에서 저장소 바깥의 릴리스 키를 사용해 서명 APK를 별도로 만들 수 있습니다. 키와 비밀번호는 저장소에 포함되지 않고, 생성된 APK는 서명 검증을 거칩니다.
 
 ## 0.9.156 변경 사항
 
@@ -161,6 +162,21 @@ Android 화면에서 두 손가락으로 핀치 확대·축소할 수 있습니�
 ```
 
 Windows는 .NET SDK 10, Android는 SDK Platform 35 / Build Tools 35.0.0 / JDK가 필요합니다. 통합 빌드에서 `-AndroidSdk`로 Android SDK 경로를 지정할 수 있고, 하위 스크립트는 `android/build.ps1 -Sdk ... -Jdk ...`로도 실행할 수 있습니다.
+
+### Android 릴리스 APK 서명
+
+일반 `-Android` 빌드는 테스트용 `RemoteDesktop-debug.apk`를 만듭니다. 배포 서명 APK는 조직의 비밀 저장소에 보관한 키스토어를 사용해 별도로 만듭니다. 키스토어는 저장소 밖에 두고 백업을 유지하세요. 디버그 키는 릴리스에 사용할 수 없습니다.
+
+빌드 프로세스에 다음 환경 변수만 안전하게 주입한 뒤 `./build.ps1 -AndroidRelease`를 실행합니다. 빌드 스크립트는 컴파일 도구를 실행하는 동안 비밀번호 환경 변수를 지우고, 서명 단계에서만 `apksigner`의 `env:` 입력원으로 전달합니다. 비밀번호를 명령줄이나 저장소 파일에 직접 넣지 마세요. [`apksigner` 비밀번호 입력 옵션](https://developer.android.com/tools/apksigner)
+
+```powershell
+$env:ANDROID_RELEASE_KEYSTORE = 'C:\Secure\RemoteDesktop-release.jks'
+$env:ANDROID_RELEASE_KEY_ALIAS = 'remotedesktop'
+# ANDROID_RELEASE_STORE_PASSWORD와 ANDROID_RELEASE_KEY_PASSWORD는 CI 비밀 저장소 등에서 주입
+./build.ps1 -AndroidRelease
+```
+
+결과는 `artifacts/<버전>/android/RemoteDesktop-release.apk`이며 빌드가 서명을 검증합니다. 릴리스 키가 없으면 디버그 APK만 생성합니다.
 
 GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사(화면 캡처·H.264 포함), Windows·Android 빌드, APK 서명 검증과 실제 WPF 창의 넓은·좁은 화면 배치 smoke test를 수행하고, portable EXE와 APK를 14일간 workflow artifact로 보관합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
 

@@ -6,3 +6,7 @@
 artifacts/
 *.user
 local.properties
+*.jks
+*.keystore
+*.p12
+*.pfx

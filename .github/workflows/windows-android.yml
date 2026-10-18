@@ -58,6 +58,37 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { throw 'JAVA_HOME was not set by setup-java' }
           ./build.ps1 -Android -AndroidSdk $androidSdkPath -AndroidJdk $env:JAVA_HOME
 
+      - name: Test release APK signing with a temporary key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $androidSdkPath = $env:ANDROID_SDK_ROOT
+          if ([string]::IsNullOrWhiteSpace($androidSdkPath)) { $androidSdkPath = $env:ANDROID_HOME }
+          if ([string]::IsNullOrWhiteSpace($androidSdkPath)) { throw 'Android SDK path was not set.' }
+          if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { throw 'JAVA_HOME was not set by setup-java' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'prd-release-signing-test.jks'
+          $releaseApk = Join-Path $PWD 'android/build/RemoteDesktop-release.apk'
+          $password = [guid]::NewGuid().ToString('N') + '!A9'
+          try {
+            & (Join-Path $env:JAVA_HOME 'bin/keytool.exe') -genkeypair -noprompt -alias 'prd-ci-release-test' -keyalg RSA -keysize 2048 -validity 365 -dname 'CN=PRD CI Release Test' -keystore $keyPath -storepass $password -keypass $password
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the temporary signing key.' }
+            $env:ANDROID_RELEASE_KEYSTORE = $keyPath
+            $env:ANDROID_RELEASE_KEY_ALIAS = 'prd-ci-release-test'
+            $env:ANDROID_RELEASE_STORE_PASSWORD = $password
+            $env:ANDROID_RELEASE_KEY_PASSWORD = $password
+            & ./android/build.ps1 -Sdk $androidSdkPath -Jdk $env:JAVA_HOME -Release -ReleaseKeystore $keyPath -ReleaseAlias 'prd-ci-release-test' -ReleaseStorePassword $password -ReleaseKeyPassword $password
+            if ($LASTEXITCODE -ne 0) { throw 'The release signing build failed.' }
+            if (!(Test-Path -LiteralPath $releaseApk -PathType Leaf)) { throw 'The release APK was not produced.' }
+          }
+          finally {
+            $env:ANDROID_RELEASE_KEYSTORE = $null
+            $env:ANDROID_RELEASE_KEY_ALIAS = $null
+            $env:ANDROID_RELEASE_STORE_PASSWORD = $null
+            $env:ANDROID_RELEASE_KEY_PASSWORD = $null
+            if (Test-Path -LiteralPath $releaseApk) { Remove-Item -LiteralPath $releaseApk -Force }
+            if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
+          }
+
       - name: Smoke-test responsive WPF layout
         shell: pwsh
         run: |

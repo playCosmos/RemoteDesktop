@@ -93,6 +93,7 @@ public final class MainActivity extends Activity {
     private volatile boolean havePicture;
     private volatile boolean needKey=true;
     private volatile int h264Failures;
+    private volatile int h264FallbackFrames;
     private volatile String activeCodec="H.264";
     private TextView health;
     private int receivedFrames;
@@ -572,6 +573,7 @@ public final class MainActivity extends Activity {
             havePicture=false;
             needKey=true;
             h264Failures=0;
+            h264FallbackFrames=0;
             preferH264=true;
             activeCodec="H.264";
             picturedSession=null;
@@ -945,6 +947,7 @@ public final class MainActivity extends Activity {
                 synchronized(sessionGate) {
                     if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { decoded.recycle(); return null; }
                     h264Failures=0;
+                    h264FallbackFrames=0;
                     activeCodec="H.264";
                     needKey=false;
                     havePicture=true;
@@ -975,6 +978,13 @@ public final class MainActivity extends Activity {
             activeCodec="JPEG";
             needKey=false;
             havePicture=true;
+            h264FallbackFrames=VideoFallback.note(h264FallbackFrames,true,video,false);
+            if(VideoFallback.shouldUseJpeg(h264FallbackFrames) && preferH264) {
+                preferH264=false;
+                h264Failures=0;
+                h264FallbackFrames=0;
+                info("서버가 H.264를 제공하지 않아 JPEG로 전환했습니다.");
+            }
         }
         return new PolledFrame(jpeg,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
     }

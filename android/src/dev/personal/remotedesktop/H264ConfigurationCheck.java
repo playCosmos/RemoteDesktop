@@ -31,6 +31,12 @@ final class H264ConfigurationCheck {
         require(H264Configuration.decodeBudgetNs(15,false)==99_999_000L); checks++;
         require(H264Configuration.decodeBudgetNs(30,false)==49_999_500L); checks++;
         require(H264Configuration.decodeBudgetNs(15,true)==300_000_000L); checks++;
+        require(VideoFallback.note(0,false,true,false)==0); checks++;
+        require(VideoFallback.note(0,true,true,false)==1); checks++;
+        require(VideoFallback.note(1,true,true,false)==2); checks++;
+        require(VideoFallback.shouldUseJpeg(VideoFallback.note(2,true,true,false))); checks++;
+        require(VideoFallback.note(2,true,true,true)==0); checks++;
+        require(!VideoFallback.shouldUseJpeg(VideoFallback.note(0,true,false,false))); checks++;
         return checks;
     }
 

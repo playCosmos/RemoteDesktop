@@ -106,6 +106,58 @@ jobs:
           }
           Write-Output 'Responsive WPF layout smoke passed.'
 
+      - name: Test Windows Authenticode signing with a temporary certificate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.pfx'
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
+          $timestampUrl = 'http://timestamp.digicert.com'
+          $password = [guid]::NewGuid().ToString('N') + '!A9'
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+          $certificate = $null
+          $thumbprint = $null
+          try {
+            $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=PRD CI Code Signing Test' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(3)
+            $thumbprint = $certificate.Thumbprint
+            Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
+            Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
+            Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+            $certificate.Dispose()
+            $certificate = $null
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force
+
+            $env:WINDOWS_SIGNING_PFX = $pfxPath
+            $env:WINDOWS_SIGNING_PFX_PASSWORD = $password
+            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $timestampUrl
+            ./build.ps1 -WindowsSign -WindowsSigningPfx $pfxPath -WindowsTimestampUrl $timestampUrl -OutputRoot $outputRoot
+
+            $signedExe = Join-Path $outputRoot 'windows-portable/RemoteDesktop.exe'
+            $signature = Get-AuthenticodeSignature -FilePath $signedExe
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Thumbprint -ne $thumbprint) {
+              throw 'The portable executable did not validate with the temporary publisher certificate.'
+            }
+          }
+          finally {
+            $env:WINDOWS_SIGNING_PFX = $null
+            $env:WINDOWS_SIGNING_PFX_PASSWORD = $null
+            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $null
+            if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force }
+            if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force }
+            if ($certificate) { $certificate.Dispose() }
+            if ($securePassword) { $securePassword.Dispose() }
+            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
+            if (Test-Path -LiteralPath $certificatePath) { Remove-Item -LiteralPath $certificatePath -Force }
+            if (Test-Path -LiteralPath $outputRoot) {
+              $runnerRoot = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+              if (!$runnerRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $runnerRoot += [System.IO.Path]::DirectorySeparatorChar }
+              $resolvedOutput = [System.IO.Path]::GetFullPath($outputRoot)
+              if (!$resolvedOutput.StartsWith($runnerRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Signing test output escaped RUNNER_TEMP.' }
+              Remove-Item -LiteralPath $resolvedOutput -Recurse -Force
+            }
+          }
+
       - name: Upload Windows and Android build artifacts
         uses: actions/upload-artifact@v7
         with:

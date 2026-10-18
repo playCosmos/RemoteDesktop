@@ -168,21 +168,21 @@ jobs:
           $thumbprint = $env:WINDOWS_SIGNING_TEST_THUMBPRINT
           $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
           if ([string]::IsNullOrWhiteSpace($thumbprint) -or !(Test-Path -LiteralPath $certificatePath -PathType Leaf)) { throw 'The temporary certificate files were not prepared.' }
-          Write-Output 'Importing the temporary certificate into CurrentUser\Root without an interactive prompt.'
-          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' -Confirm:$false | Out-Null
+          $certificateUtil = Join-Path $env:WINDIR 'System32/certutil.exe'
+          & $certificateUtil -user -addstore -f Root $certificatePath
+          if ($LASTEXITCODE -ne 0) { throw "Could not trust the temporary certificate; certutil exit code: $LASTEXITCODE" }
           Write-Output 'Temporary code-signing certificate trusted for the CI verification.'
 
-      - name: Remove temporary private key to exercise PFX import
+      - name: Remove temporary certificate to exercise PFX import
         shell: pwsh
         timeout-minutes: 2
         run: |
           $ErrorActionPreference = 'Stop'
           $thumbprint = $env:WINDOWS_SIGNING_TEST_THUMBPRINT
           if ([string]::IsNullOrWhiteSpace($thumbprint)) { throw 'The temporary certificate thumbprint was not prepared.' }
-          $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
-          if (!$certificate.HasPrivateKey) { throw 'The temporary certificate has no private key before PFX import.' }
-          $certificate.Dispose()
-          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force -Confirm:$false
+          $certificateUtil = Join-Path $env:WINDIR 'System32/certutil.exe'
+          & $certificateUtil -user -delstore My $thumbprint
+          if ($LASTEXITCODE -ne 0) { throw "Could not remove the temporary certificate; certutil exit code: $LASTEXITCODE" }
           Write-Output 'Temporary certificate removed from CurrentUser\My; the build must import its PFX.'
 
       - name: Sign and verify a Windows executable with the temporary certificate
@@ -209,8 +209,13 @@ jobs:
           $thumbprintPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.thumbprint'
           $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
           $thumbprint = if (Test-Path -LiteralPath $thumbprintPath) { (Get-Content -LiteralPath $thumbprintPath -Raw).Trim() } else { $env:WINDOWS_SIGNING_TEST_THUMBPRINT }
-          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force -Confirm:$false }
-          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force -Confirm:$false }
+          $certificateUtil = Join-Path $env:WINDIR 'System32/certutil.exe'
+          if ($thumbprint) {
+            foreach ($store in @('My','Root')) {
+              & $certificateUtil -user -delstore $store $thumbprint
+              if ($LASTEXITCODE -ne 0) { Write-Warning "Could not remove the temporary certificate from CurrentUser\$store (certutil exit code: $LASTEXITCODE)." }
+            }
+          }
           if ($certificatePath -and (Test-Path -LiteralPath $certificatePath)) { Remove-Item -LiteralPath $certificatePath -Force }
           if ($pfxPath -and (Test-Path -LiteralPath $pfxPath)) { Remove-Item -LiteralPath $pfxPath -Force }
           if (Test-Path -LiteralPath $thumbprintPath) { Remove-Item -LiteralPath $thumbprintPath -Force }

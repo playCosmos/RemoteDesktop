@@ -42,9 +42,9 @@ jobs:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: false
 
-      - name: Run integration checks
+      - name: Run integration and H.264 capture checks
         shell: pwsh
-        run: dotnet run --project tests/IntegrationChecks
+        run: dotnet run --project tests/IntegrationChecks -- --capture
 
       - name: Build Windows portable and Android APK
         shell: pwsh
@@ -59,7 +59,7 @@ jobs:
           ./build.ps1 -Android -AndroidSdk $androidSdkPath -AndroidJdk $env:JAVA_HOME
 
       - name: Upload Windows and Android build artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: remote-desktop-${{ github.sha }}
           path: artifacts/**

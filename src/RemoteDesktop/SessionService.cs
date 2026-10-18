@@ -192,7 +192,8 @@ sealed class SessionService
                 activeClients.TryAdd(pipe, 0);
             }
             if (!inputClients.Wait(0)) { pipe.Dispose(); activeClients.TryRemove(pipe, out _); continue; }
-            if (expectedUiPid <= 0 || SecureDesktop.GetPipeClientProcessId(pipe) != expectedUiPid
+            var clientPid = SecureDesktop.GetPipeClientProcessId(pipe);
+            if (!SecureDesktop.AuthorizeInputClient(clientPid, expectedUiPid, WTSGetActiveConsoleSessionId(), expectedUiSession)
                 || !IsTrustedUiProcess(expectedUiPid, expectedUiSession, Environment.ProcessPath ?? ""))
             {
                 pipe.Dispose();
@@ -224,7 +225,8 @@ sealed class SessionService
                 {
                     try
                     {
-                        if (!IsTrustedUiProcess(expectedUiPid, expectedUiSession, executable)) return;
+                        if (!SecureDesktop.AuthorizeInputClient(expectedUiPid, expectedUiPid, WTSGetActiveConsoleSessionId(), expectedUiSession)
+                            || !IsTrustedUiProcess(expectedUiPid, expectedUiSession, executable)) return;
                         await pipe.ReadExactlyAsync(lengthBytes, token);
                         var length = BitConverter.ToInt32(lengthBytes);
                         if (length is < 2 or > 8192) return;
@@ -412,7 +414,14 @@ sealed class SessionService
                 session = trustedUiSession;
                 viewer = trustedViewer;
             }
-            if (viewer == null || session == 0xFFFFFFFF || WTSGetActiveConsoleSessionId() != session) continue;
+            if (viewer == null || session == 0xFFFFFFFF) continue;
+            if (WTSGetActiveConsoleSessionId() != session)
+            {
+                try { ResetInputChannel(null); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException) { }
+                SecureDesktop.ClearFrame();
+                continue;
+            }
             var executable = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executable)) continue;
             if (pid > 0 && IsTrustedUiProcess(pid, session, executable)) continue;

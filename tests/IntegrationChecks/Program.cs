@@ -116,6 +116,7 @@ async Task<(bool Authenticated, int ProcessId)> AuthenticateSecureLoopback(byte[
 var validSecurePeer = await AuthenticateSecureLoopback(secureInputKey);
 var invalidSecurePeer = await AuthenticateSecureLoopback(new byte[SecureDesktop.InputKeyLength]);
 Check(validSecurePeer.Authenticated && validSecurePeer.ProcessId == Environment.ProcessId && !invalidSecurePeer.Authenticated, $"the loopback secure input listener admits only the session process with its key (auth={validSecurePeer.Authenticated}, pid={validSecurePeer.ProcessId}, expected={Environment.ProcessId}, invalid={invalidSecurePeer.Authenticated})");
+Check(SecureDesktop.AuthorizeInputClient(50, 50, 3, 3) && !SecureDesktop.AuthorizeInputClient(51, 50, 3, 3) && !SecureDesktop.AuthorizeInputClient(50, 50, 4, 3) && !SecureDesktop.AuthorizeInputClient(50, 50, 0xFFFFFFFF, 3) && !SecureDesktop.AuthorizeInputClient(0, 0, 3, 3), "secure input stops when the client PID or active Windows session changes");
 async Task<int> GetOtherPipeClientPid()
 {
     var name = SecureDesktop.NewPipeName();

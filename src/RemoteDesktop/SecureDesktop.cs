@@ -248,6 +248,9 @@ public static class SecureDesktop
         => GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var processId) && processId is > 0 and <= int.MaxValue
             ? (int)processId : 0;
 
+    public static bool AuthorizeInputClient(int clientProcessId, int trustedProcessId, uint activeSession, uint trustedSession)
+        => clientProcessId > 0 && clientProcessId == trustedProcessId && activeSession != 0xFFFFFFFF && activeSession == trustedSession;
+
     static bool ReadEndpoint(out string pipeName, out byte[] key)
     {
         pipeName = "";

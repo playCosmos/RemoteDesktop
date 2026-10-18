@@ -21,7 +21,7 @@ final class H264Picture {
     private int produced;
     private int[] pixels;
 
-    Bitmap decode(byte[] accessUnit) throws IOException {
+    Bitmap decode(byte[] accessUnit, int fps) throws IOException {
         if (accessUnit == null || accessUnit.length < 4) throw new IOException("H.264 프레임이 비어 있습니다.");
         byte[] sps = nal(accessUnit, 7);
         byte[] pps = nal(accessUnit, 8);
@@ -37,7 +37,7 @@ final class H264Picture {
             input.put(accessUnit);
             int flags = nal(accessUnit, 5) != null ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0;
             codec.queueInputBuffer(index, 0, accessUnit.length, timestampUs, flags);
-            timestampUs += 66_000;
+            timestampUs += H264Configuration.frameDurationUs(fps);
             Bitmap bitmap = pull(produced == 0 ? 300_000_000L : 120_000_000L);
             produced++;
             return bitmap;

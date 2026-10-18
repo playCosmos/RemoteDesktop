@@ -21,6 +21,11 @@ final class H264ConfigurationCheck {
         require(!sameBytes.changed); checks++;
         H264Configuration.Pair noPair=H264Configuration.merge(null,null,spsA,null);
         require(noPair.sps==spsA && noPair.pps==null && noPair.changed && !noPair.complete); checks++;
+        require(H264Configuration.frameDurationUs(5)==200_000L); checks++;
+        require(H264Configuration.frameDurationUs(10)==100_000L); checks++;
+        require(H264Configuration.frameDurationUs(15)==66_666L); checks++;
+        require(H264Configuration.frameDurationUs(30)==33_333L); checks++;
+        require(H264Configuration.frameDurationUs(24)==66_666L); checks++;
         return checks;
     }
 

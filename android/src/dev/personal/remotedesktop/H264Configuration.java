@@ -5,6 +5,11 @@ import java.util.Arrays;
 final class H264Configuration {
     private H264Configuration() {}
 
+    static long frameDurationUs(int fps) {
+        if (fps != 5 && fps != 10 && fps != 15 && fps != 30) fps = 15;
+        return 1_000_000L / fps;
+    }
+
     static final class Pair {
         final byte[] sps;
         final byte[] pps;

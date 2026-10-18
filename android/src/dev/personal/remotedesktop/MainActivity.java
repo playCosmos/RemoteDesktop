@@ -938,7 +938,7 @@ public final class MainActivity extends Activity {
                     if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) return null;
                     if(h264Picture==null) h264Picture=new H264Picture();
                     decoder=h264Picture;
-                    decoded=decoder.decode(picture.bytes);
+                    decoded=decoder.decode(picture.bytes,frameRate);
                 }
                 synchronized(sessionGate) {
                     if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { decoded.recycle(); return null; }

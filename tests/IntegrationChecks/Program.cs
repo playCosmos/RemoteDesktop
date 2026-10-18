@@ -729,7 +729,11 @@ async Task Session()
     using (var response = await site.Http.GetAsync("frame?display=missing-monitor")) Check(response.StatusCode == HttpStatusCode.BadRequest, "missing monitor rejected before capture");
     using (var response = await site.Http.PostAsync("input", Json("{\"kind\":\"move\",\"display\":\"missing-monitor\",\"x\":0.5,\"y\":0.5}"))) Check(response.StatusCode == HttpStatusCode.BadRequest, "missing monitor rejected before pointer injection");
     using (var response = await site.Http.PostAsync("input", Json("{\"kind\":\"text\",\"text\":\"" + new string('x', 4097) + "\"}"))) Check(response.StatusCode == HttpStatusCode.BadRequest, "input text over 4096 characters rejected");
+    var authChecksBeforeInput = site.Host.AuthorizationCheckCount;
     using (var response = await site.Http.PostAsync("input", Json("{\"kind\":\"release\"}"))) Check(response.StatusCode == HttpStatusCode.OK, "release with nothing held is accepted");
+    Check(site.Host.AuthorizationCheckCount - authChecksBeforeInput == 1, "the input route reuses the middleware authentication result");
+    var inputMetrics = site.Host.InputMetrics;
+    Check(inputMetrics.Requests > 0 && inputMetrics.AuthGateAverageMs < 100 && inputMetrics.NoticeGateAverageMs < 100, "input auth and notice gate timing are measured separately from apply");
     using (var body = new StringContent(new string('x', 40000)))
     using (var response = await site.Http.PostAsync("input", body)) Check(response.StatusCode == HttpStatusCode.BadRequest, "oversized control message rejected");
     await Task.Delay(2100);

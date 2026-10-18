@@ -12,9 +12,11 @@ using System.Collections.Concurrent;
 
 namespace RemoteDesktop;
 
+public readonly record struct InputRouteMetrics(long Requests, double AuthGateAverageMs, double ApplyAverageMs, double NoticeGateAverageMs);
+
 public sealed partial class RemoteHost : IAsyncDisposable
 {
-    private static readonly object SessionCancellationItem = new();
+    private sealed record AuthenticatedRequest(string Token, CancellationTokenSource SessionSource, CancellationTokenSource RequestSource);
     public const long MaxFileBytes = 1024L * 1024 * 1024;
     private readonly HostSettings settings;
     private readonly Desktop desktop;
@@ -42,11 +44,29 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private Task videoRetirement = Task.CompletedTask;
     private H264Session? video;
     private int disconnectInProgress;
+    private long inputRequestCount;
+    private long inputAuthGateTicks;
+    private long inputApplyTicks;
+    private long inputNoticeGateTicks;
+    private long authorizationCheckCount;
     public event Action<string>? Status;
     public bool HasSession { get { lock (gate) return token != null; } }
     public string? SessionPeer { get { lock (gate) return sessionPeer; } }
     public DateTime? SessionStartedUtc { get { lock (gate) return sessionStarted; } }
     public DateTime? SessionLastSeenUtc { get { lock (gate) return token == null ? null : lastSeen; } }
+    public long AuthorizationCheckCount => Interlocked.Read(ref authorizationCheckCount);
+    public InputRouteMetrics InputMetrics
+    {
+        get
+        {
+            var requests = Interlocked.Read(ref inputRequestCount);
+            var divisor = Math.Max(1, requests);
+            return new InputRouteMetrics(requests,
+                Stopwatch.GetElapsedTime(0, Interlocked.Read(ref inputAuthGateTicks)).TotalMilliseconds / divisor,
+                Stopwatch.GetElapsedTime(0, Interlocked.Read(ref inputApplyTicks)).TotalMilliseconds / divisor,
+                Stopwatch.GetElapsedTime(0, Interlocked.Read(ref inputNoticeGateTicks)).TotalMilliseconds / divisor);
+        }
+    }
     public Task<int> ExpireIdleUploads(TimeSpan idle) => clipboard.ExpireIdleUploads(idle);
     public RemoteHost(HostSettings settings, IFileClipboard? fileClipboard = null, string? clipboardCache = null)
     {
@@ -74,14 +94,26 @@ public sealed partial class RemoteHost : IAsyncDisposable
             {
                 if (!IsPublicAuthenticationPath(context.Request.Path))
                 {
+                    var inputRequest = context.Request.Path == "/v1/input";
+                    var authorized = false;
+                    long gateTicks = 0;
                     lock (gate)
                     {
-                        if (!Authorized(context)) { context.Response.StatusCode = 401; return; }
-                        lastSeen = DateTime.UtcNow;
-                        sessionRequest = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, session.Token);
+                        var gateEntered = Stopwatch.GetTimestamp();
+                        if (Authorized(context))
+                        {
+                            lastSeen = DateTime.UtcNow;
+                            var sessionSource = session;
+                            sessionRequest = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, sessionSource.Token);
+                            context.Items["auth"] = new AuthenticatedRequest(token!, sessionSource, sessionRequest);
+                            authorized = true;
+                        }
+                        else context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        gateTicks = Stopwatch.GetTimestamp() - gateEntered;
                     }
-                    context.Items[SessionCancellationItem] = sessionRequest.Token;
-                    if (context.Request.Path != "/v1/logout") abortOnRevocation = sessionRequest.Token.Register(context.Abort);
+                    if (inputRequest) Interlocked.Add(ref inputAuthGateTicks, gateTicks);
+                    if (!authorized) return;
+                    if (context.Request.Path != "/v1/logout") abortOnRevocation = sessionRequest!.Token.Register(context.Abort);
                 }
                 await next(context);
             }
@@ -206,10 +238,15 @@ public sealed partial class RemoteHost : IAsyncDisposable
         }
         return System.Text.Json.JsonSerializer.Deserialize<T>(data.ToArray(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
     }
-    private bool Authorized(HttpContext c) => token != null && c.Request.Headers.Authorization == "Bearer " + token;
+    private bool Authorized(HttpContext c)
+    {
+        Interlocked.Increment(ref authorizationCheckCount);
+        return token != null && c.Request.Headers.Authorization == "Bearer " + token;
+    }
+    private static AuthenticatedRequest? Authenticated(HttpContext context)
+        => context.Items.TryGetValue("auth", out var value) ? value as AuthenticatedRequest : null;
     private static CancellationToken SessionRequestToken(HttpContext context)
-        => context.Items.TryGetValue(SessionCancellationItem, out var value) && value is CancellationToken requestToken
-            ? requestToken : context.RequestAborted;
+        => Authenticated(context)?.RequestSource.Token ?? context.RequestAborted;
     private static (double X, double Y, double Width, double Height) ParseViewport(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return (0, 0, 1, 1);
@@ -219,11 +256,8 @@ public sealed partial class RemoteHost : IAsyncDisposable
     }
     private (string Scope, CancellationTokenSource Cancellation) ClipboardContext(HttpContext c)
     {
-        lock (gate)
-        {
-            if (!Authorized(c)) throw new OperationCanceledException();
-            return (token!, CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, session.Token));
-        }
+        var authenticated = Authenticated(c) ?? throw new OperationCanceledException();
+        return (authenticated.Token, CancellationTokenSource.CreateLinkedTokenSource(authenticated.RequestSource.Token));
     }
     public void Disconnect(UiText.SessionEndKind reason = UiText.SessionEndKind.Left)
         => Disconnect(reason, expectedSession: null);

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
@@ -55,9 +56,8 @@ public sealed partial class RemoteHost
         routes.MapPost("/v1/pake/finish", (Delegate)(Func<HttpContext, Task<IResult>>)FinishOpaqueLogin);
         routes.MapPost("/v1/logout", (HttpContext c) =>
         {
-            CancellationTokenSource? expectedSession = null;
-            lock (gate) if (Authorized(c)) expectedSession = session;
-            if (expectedSession != null) Disconnect(UiText.SessionEndKind.Left, expectedSession);
+            var authenticated = Authenticated(c);
+            if (authenticated != null) Disconnect(UiText.SessionEndKind.Left, authenticated.SessionSource);
             return Results.Ok();
         });
         routes.MapGet("/v1/ping", () => Results.Ok(new { protocol = 1 }));
@@ -229,14 +229,35 @@ public sealed partial class RemoteHost
         });
         routes.MapPost("/v1/input", async (HttpContext c) =>
         {
+            var authenticated = Authenticated(c);
+            if (authenticated == null) return Results.Unauthorized();
             var input = await ReadSmall<InputEvent>(c) ?? throw new ArgumentException();
-            string? notice;
+            authenticated.RequestSource.Token.ThrowIfCancellationRequested();
+            var applyStarted = Stopwatch.GetTimestamp();
+            var notice = desktop.Apply(input);
+            var applyTicks = Stopwatch.GetTimestamp() - applyStarted;
+            Interlocked.Add(ref inputApplyTicks, applyTicks);
+            var requests = Interlocked.Increment(ref inputRequestCount);
+            authenticated.RequestSource.Token.ThrowIfCancellationRequested();
+            if ((requests & 255) == 0)
+            {
+                var metrics = InputMetrics;
+                Trace.TraceInformation("Input timing over {0} requests: authGate={1:0.000}ms apply={2:0.000}ms noticeGate={3:0.000}ms average.",
+                    metrics.Requests, metrics.AuthGateAverageMs, metrics.ApplyAverageMs, metrics.NoticeGateAverageMs);
+            }
+            if (string.IsNullOrEmpty(notice)) return Results.Ok();
+
+            bool currentSession;
+            long gateTicks;
             lock (gate)
             {
-                if (!Authorized(c)) return Results.Unauthorized();
-                notice = desktop.Apply(input);
+                var gateEntered = Stopwatch.GetTimestamp();
+                currentSession = token != null && ReferenceEquals(session, authenticated.SessionSource);
+                gateTicks = Stopwatch.GetTimestamp() - gateEntered;
             }
-            return string.IsNullOrEmpty(notice) ? Results.Ok() : Results.Ok(new { notice });
+            Interlocked.Add(ref inputNoticeGateTicks, gateTicks);
+            if (!currentSession) return Results.Unauthorized();
+            return Results.Ok(new { notice });
         });
     }
 }

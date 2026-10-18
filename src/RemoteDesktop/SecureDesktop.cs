@@ -136,6 +136,7 @@ public static class SecureDesktop
     public static NamedPipeServerStream CreateInputServer(string pipeName, SecurityIdentifier? viewer)
     {
         if (!IsPipeName(pipeName)) throw new ArgumentException("Invalid secure input pipe name", nameof(pipeName));
+        EnsurePipeSecurityPrivilege();
         if (!ConvertStringSecurityDescriptorToSecurityDescriptor(BuildInputPipeSddl(viewer), 1, out var descriptor, out _))
             throw new Win32Exception(Marshal.GetLastWin32Error());
         try
@@ -165,6 +166,21 @@ public static class SecureDesktop
 
     public static string BuildInputPipeSddl(SecurityIdentifier? viewer)
         => BuildInputPipeSecurity(viewer).GetSecurityDescriptorSddlForm(AccessControlSections.Access) + "S:(ML;;NW;;;ME)";
+
+    public static void EnsurePipeSecurityPrivilege()
+    {
+        if (!OpenProcessToken(GetCurrentProcess(), 0x20 | 0x8, out var token)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            if (!LookupPrivilegeValue(null, "SeSecurityPrivilege", out var luid)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var privilege = new TokenPrivileges { Count = 1, Luid = luid, Attributes = 0x2 };
+            SetLastError(0);
+            if (!AdjustTokenPrivileges(token, false, ref privilege, 0, 0, 0)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            var error = Marshal.GetLastWin32Error();
+            if (error == 1300) throw new Win32Exception(error, "SeSecurityPrivilege is not assigned to the service account.");
+        }
+        finally { CloseHandle(token); }
+    }
 
     public static bool IsPipeName(string? pipeName)
     {
@@ -446,7 +462,15 @@ public static class SecureDesktop
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetNamedPipeClientProcessId(nint pipe, out uint clientProcessId);
+    [StructLayout(LayoutKind.Sequential)] struct Luid { public uint LowPart; public int HighPart; }
+    [StructLayout(LayoutKind.Sequential)] struct TokenPrivileges { public uint Count; public Luid Luid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public nint Descriptor; public int InheritHandle; }
+    [DllImport("kernel32.dll")] static extern nint GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern void SetLastError(uint errorCode);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(nint handle);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(nint process, uint access, out nint token);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool LookupPrivilegeValue(string? systemName, string name, out Luid luid);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(nint token, bool disableAll, ref TokenPrivileges newState, int bufferLength, nint previousState, nint returnLength);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out nint descriptor, out uint size);
     [DllImport("kernel32.dll")] static extern nint LocalFree(nint memory);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint CreateNamedPipe(string name, uint openMode, uint pipeMode, uint maxInstances, uint outBufferSize, uint inBufferSize, uint defaultTimeout, ref SecurityAttributes securityAttributes);

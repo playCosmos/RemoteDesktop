@@ -95,6 +95,7 @@ sealed class SessionService
 
     public void Start()
     {
+        SecureDesktop.EnsurePipeSecurityPrivilege();
         SecureAttention.TryEnsurePolicy();
         SecureDesktop.SetViewerAccess(null);
         SecureDesktop.ClearFrame();
@@ -468,15 +469,13 @@ sealed class SessionService
     static int FindExistingUiProcess(string executable, uint session)
     {
         var expected = AppInstall.Normalize(executable);
-        var version = FileVersionInfo.GetVersionInfo(executable);
-        var titlePrefix = "Personal Remote Desktop " + version.FileMajorPart + "." + version.FileMinorPart + "." + version.FileBuildPart;
         foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executable)))
         {
             using (process)
             {
                 try
                 {
-                    if (process.HasExited || (uint)process.SessionId != session || !HasProductWindow(process.Id, titlePrefix)) continue;
+                    if (process.HasExited || (uint)process.SessionId != session) continue;
                     var image = process.MainModule?.FileName;
                     if (!string.IsNullOrWhiteSpace(image) && AppInstall.Normalize(image).Equals(expected, StringComparison.OrdinalIgnoreCase))
                         return process.Id;
@@ -487,27 +486,6 @@ sealed class SessionService
         return 0;
     }
 
-    static bool HasProductWindow(int processId, string titlePrefix)
-    {
-        var found = false;
-        var callback = new EnumWindowsCallback((window, _) =>
-        {
-            GetWindowThreadProcessId(window, out var owner);
-            if (owner != (uint)processId) return true;
-            var length = GetWindowTextLength(window);
-            if (length <= 0) return true;
-            var title = new System.Text.StringBuilder(length + 1);
-            GetWindowText(window, title, title.Capacity);
-            if (!title.ToString().Contains(titlePrefix, StringComparison.OrdinalIgnoreCase)) return true;
-            found = true;
-            return false;
-        });
-        EnumWindows(callback, 0);
-        return found;
-    }
-
-    delegate bool EnumWindowsCallback(nint window, nint parameter);
-
     static bool IsTrustedUiProcess(int processId, uint session, string executable)
     {
         if (processId <= 0 || session == 0xFFFFFFFF) return false;
@@ -517,8 +495,7 @@ sealed class SessionService
             using var process = Process.GetProcessById(processId);
             if (process.HasExited || (uint)process.SessionId != session) return false;
             var image = process.MainModule?.FileName;
-            return !string.IsNullOrWhiteSpace(image) && AppInstall.Normalize(image).Equals(expected, StringComparison.OrdinalIgnoreCase)
-                && HasProductWindow(processId, "Personal Remote Desktop ");
+            return !string.IsNullOrWhiteSpace(image) && AppInstall.Normalize(image).Equals(expected, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException) { return false; }
     }
@@ -551,10 +528,6 @@ sealed class SessionService
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetThreadDesktop(nint desktop);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
-    [DllImport("user32.dll", SetLastError = true)] static extern uint GetWindowThreadProcessId(nint window, out uint processId);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetWindowText(nint window, System.Text.StringBuilder text, int maxCount);
-    [DllImport("user32.dll", SetLastError = true)] static extern int GetWindowTextLength(nint window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(nint handle, int index, nint info, int length, out int needed);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();

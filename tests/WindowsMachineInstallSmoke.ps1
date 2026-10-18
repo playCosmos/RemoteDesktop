@@ -4,6 +4,27 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$diagnosticRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { [IO.Path]::GetTempPath() } else { $env:RUNNER_TEMP }
+$script:smokePhase = 'Initializing'
+$script:diagnosticLog = Join-Path $diagnosticRoot 'windows-machine-install-smoke.log'
+
+function Set-SmokePhase([string]$Phase) {
+    $script:smokePhase = $Phase
+    Write-Output "Machine install smoke phase: $Phase"
+    try { Add-Content -LiteralPath $script:diagnosticLog -Value "$(Get-Date -Format o) $Phase" -ErrorAction Stop }
+    catch { }
+}
+
+function Write-SmokeFailure($ErrorRecord) {
+    $failure = "Phase '$script:smokePhase' failed: $($ErrorRecord.Exception.GetType().FullName): $($ErrorRecord.Exception.Message)"
+    $actionMessage = $failure.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+    Write-Output "::error title=Windows machine install smoke::$actionMessage"
+    Write-Output $failure
+    try { Add-Content -LiteralPath $script:diagnosticLog -Value "$(Get-Date -Format o) $failure" -ErrorAction Stop }
+    catch { }
+}
+
+Set-SmokePhase 'Loading NetSecurity'
 Import-Module NetSecurity -ErrorAction Stop
 
 function Get-RegistryValueSnapshot($Hive, [string]$SubKeyPath, [string]$ValueName) {
@@ -81,46 +102,65 @@ function Remove-InstalledAppProcesses([string]$ExpectedExecutable) {
     }
 }
 
-$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$identity = $null
 try {
+    Set-SmokePhase 'Checking administrator token'
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [System.Security.Principal.WindowsPrincipal]::new($identity)
     if (!$principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'Machine install smoke requires the administrator token provided by the Windows runner.'
     }
 }
-finally { $identity.Dispose() }
+catch { Write-SmokeFailure $_; throw }
+finally { if ($identity) { $identity.Dispose() } }
 
-$source = (Resolve-Path -LiteralPath $ExecutablePath).Path
-$programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
-$machineDirectory = Join-Path $programFiles 'Remote Desktop'
-$machineExecutable = Join-Path $machineDirectory 'RemoteDesktop.exe'
+$source = $null
+$machineDirectory = $null
+$machineExecutable = $null
 $serviceName = 'PersonalRemoteDesktop'
 $firewallName = 'Personal Remote Desktop'
-$commonPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
-$shortcut = Join-Path $commonPrograms 'Remote Desktop.lnk'
+$shortcut = $null
 $runKeyPath = 'Software\Microsoft\Windows\CurrentVersion\Run'
 $policyKeyPath = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
 $installStateKeyPath = 'SOFTWARE\PersonalRemoteDesktop'
 $runValue = 'PersonalRemoteDesktop'
 $policyValue = 'SoftwareSASGeneration'
 $previousPolicyValue = 'SoftwareSASGenerationPrevious'
-
-if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'A Personal Remote Desktop service already exists on this runner.' }
-if (Test-Path -LiteralPath $machineDirectory) { throw 'The machine install directory already exists on this runner.' }
-if (Test-Path -LiteralPath $shortcut) { throw 'The machine Start Menu shortcut already exists on this runner.' }
-if (@(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
-
 $localMachine = [Microsoft.Win32.Registry]::LocalMachine
 $currentUser = [Microsoft.Win32.Registry]::CurrentUser
-$runSnapshot = Get-RegistryValueSnapshot $currentUser $runKeyPath $runValue
-$policySnapshot = Get-RegistryValueSnapshot $localMachine $policyKeyPath $policyValue
-$previousPolicySnapshot = Get-RegistryValueSnapshot $localMachine $installStateKeyPath $previousPolicyValue
+$runSnapshot = $null
+$policySnapshot = $null
+$previousPolicySnapshot = $null
+try {
+    Set-SmokePhase 'Resolving test executable and install paths'
+    $source = (Resolve-Path -LiteralPath $ExecutablePath).Path
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    $machineDirectory = Join-Path $programFiles 'Remote Desktop'
+    $machineExecutable = Join-Path $machineDirectory 'RemoteDesktop.exe'
+    $commonPrograms = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms)
+    $shortcut = Join-Path $commonPrograms 'Remote Desktop.lnk'
+
+    Set-SmokePhase 'Checking that the runner has no prior installation'
+    if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'A Personal Remote Desktop service already exists on this runner.' }
+    if (Test-Path -LiteralPath $machineDirectory) { throw 'The machine install directory already exists on this runner.' }
+    if (Test-Path -LiteralPath $shortcut) { throw 'The machine Start Menu shortcut already exists on this runner.' }
+    if (@(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
+
+    Set-SmokePhase 'Saving runner registry state'
+    $runSnapshot = Get-RegistryValueSnapshot $currentUser $runKeyPath $runValue
+    $policySnapshot = Get-RegistryValueSnapshot $localMachine $policyKeyPath $policyValue
+    $previousPolicySnapshot = Get-RegistryValueSnapshot $localMachine $installStateKeyPath $previousPolicyValue
+}
+catch { Write-SmokeFailure $_; throw }
+
 $mutationStarted = $false
 
 try {
     $mutationStarted = $true
+    Set-SmokePhase 'Installing machine service'
     Invoke-ProductCommand $source '--install-machine' 120
 
+    Set-SmokePhase 'Checking Windows service registration'
     $service = Get-Service -Name $serviceName -ErrorAction Stop
     if ([string]$service.Status -ne 'Running') {
         throw "Machine service state is $($service.Status), not Running."
@@ -131,6 +171,7 @@ try {
         throw "The service is not configured to run $machineExecutable."
     }
 
+    Set-SmokePhase 'Checking common Start Menu shortcut'
     $shell = $null
     try {
         $shell = New-Object -ComObject WScript.Shell
@@ -142,6 +183,7 @@ try {
     }
     finally { if ($shell) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } }
 
+    Set-SmokePhase 'Checking the scoped firewall rule'
     $firewallRule = Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $firewallRule -or !$firewallRule.Enabled) { throw 'The machine install did not enable its firewall rule.' }
     $applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $firewallRule
@@ -153,19 +195,26 @@ try {
         throw 'The machine firewall rule does not permit a specific TCP port.'
     }
 
+    Set-SmokePhase 'Uninstalling machine service'
     Invoke-ProductCommand $machineExecutable '--uninstall-machine' 90
 
     if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'The machine service remains after uninstall.' }
     if (Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) { throw 'The machine firewall rule remains after uninstall.' }
     if (Test-Path -LiteralPath $shortcut) { throw 'The machine shortcut remains after uninstall.' }
 
+    Set-SmokePhase 'Waiting for install executable processes and deferred directory removal'
     $deleteDeadline = [DateTime]::UtcNow.AddSeconds(35)
     while ((Test-Path -LiteralPath $machineDirectory) -and [DateTime]::UtcNow -lt $deleteDeadline) {
         Remove-InstalledAppProcesses $machineExecutable
         Start-Sleep -Milliseconds 250
     }
     if (Test-Path -LiteralPath $machineDirectory) { throw 'The machine install directory was not removed after its processes exited.' }
+    Set-SmokePhase 'Machine install/uninstall smoke passed'
     Write-Output 'Windows machine service install/uninstall smoke passed.'
+}
+catch {
+    Write-SmokeFailure $_
+    throw
 }
 finally {
     if ($mutationStarted) {

@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private bool trayExplained;
     private bool closeCleanupStarted;
     private bool closeCleanupComplete;
+    internal long InputQueueWriteFailures => clientSession.InputQueueWriteFailures;
 
     public MainWindow()
     {

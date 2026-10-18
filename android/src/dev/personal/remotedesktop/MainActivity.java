@@ -210,7 +210,8 @@ public final class MainActivity extends Activity {
             public void report(Exception error) { MainActivity.this.report(error); }
             public void connectionFailed(int attempt,Exception error) { runOnUiThread(() -> { if(session.generation()==attempt && session.remote()==null) MainActivity.this.report(error); }); }
             public void hideHealth() { runOnUiThread(() -> health.setVisibility(View.GONE)); }
-            public void inputQueueOverflow() { info("입력 지연으로 연결 종료"); disconnect(); }
+            public void inputQueueOverflow() { info("입력 지연 · 입력을 잠시 멈추면 자동 복구"); }
+            public void inputQueueRecovered() { info("입력 제어가 복구되었습니다."); }
             public int frameRate() { return MainActivity.this.frameRate; }
             public void requestFrame(RemoteApi api,String display,int requestedFps) throws Exception { MainActivity.this.requestFrame(api,display,requestedFps); }
         });

@@ -18,6 +18,8 @@ public partial class MainWindow
     private sealed class ClientSession
     {
         private readonly MainWindow window;
+        private const int InputQueueCapacity = 64;
+        private const int InputQueueWarningThreshold = 48;
         private RemoteClient? client;
         private CancellationTokenSource? connection;
         private Task? connectionTask;
@@ -29,6 +31,8 @@ public partial class MainWindow
         private Channel<byte>? inputSignal;
         private readonly object inputGate = new();
         private readonly InputBacklog inputBacklog = new();
+        private long inputQueueWriteFailures;
+        private int inputQueueThresholdWarned;
         private InputEvent? pendingMove;
         private InputEvent? pendingWheel;
         private readonly HashSet<int> pendingKeyDowns = [];
@@ -37,6 +41,7 @@ public partial class MainWindow
         private bool connectedOnce;
         public string? RemoteEndpoint => client != null || holdingPicture ? lastConnection.Address : null;
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
+        public long InputQueueWriteFailures => Interlocked.Read(ref inputQueueWriteFailures);
         public bool IsFullscreen => fullscreen != null;
         public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
@@ -508,7 +513,7 @@ public partial class MainWindow
                 RefreshRecent();
                 try { await LoadDisplays(cancel.Token); } catch { await DisconnectCore(retrying: !announceFailure); throw; }
                 connection = new();
-                inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(64) { SingleReader = true, SingleWriter = false });
+                inputs = Channel.CreateBounded<InputEvent>(new BoundedChannelOptions(InputQueueCapacity) { SingleReader = true, SingleWriter = false });
                 inputSignal = Channel.CreateBounded<byte>(new BoundedChannelOptions(1) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropWrite });
                 inputBacklog.Reset();
                 lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
@@ -756,6 +761,8 @@ public partial class MainWindow
                         lock (inputGate) pendingKeyDowns.Clear();
                         await Deliver(new("release"));
                     }
+                    if (channel.Reader.CanCount && channel.Reader.Count < InputQueueWarningThreshold)
+                        Interlocked.Exchange(ref inputQueueThresholdWarned, 0);
                 }
                 async Task Deliver(InputEvent input)
                 {
@@ -1157,19 +1164,20 @@ public partial class MainWindow
 
         private bool TryCoalesceWheel(Channel<InputEvent> channel, int delta)
         {
+            WarnIfInputQueueNearCapacity(channel);
             var sum = (long)(pendingWheel?.Code ?? 0) + delta;
             if (sum is >= -InputEvent.MaxWheelDelta and <= InputEvent.MaxWheelDelta)
             {
                 pendingWheel = sum == 0 ? null : new InputEvent("wheel", Code: (int)sum);
                 return true;
             }
-            if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) return false;
+            if (pendingMove != null && !TryWriteInput(channel, pendingMove)) return false;
             pendingMove = null;
             pendingWheel = null;
             while (sum is < -InputEvent.MaxWheelDelta or > InputEvent.MaxWheelDelta)
             {
                 var chunk = sum > 0 ? InputEvent.MaxWheelDelta : -InputEvent.MaxWheelDelta;
-                if (!channel.Writer.TryWrite(new InputEvent("wheel", Code: chunk))) return false;
+                if (!TryWriteInput(channel, new InputEvent("wheel", Code: chunk))) return false;
                 sum -= chunk;
             }
             pendingWheel = sum == 0 ? null : new InputEvent("wheel", Code: (int)sum);
@@ -1178,12 +1186,29 @@ public partial class MainWindow
 
         private bool EnqueueDiscrete(Channel<InputEvent> channel, InputEvent input)
         {
-            if (pendingMove != null && !channel.Writer.TryWrite(pendingMove)) return false;
+            WarnIfInputQueueNearCapacity(channel);
+            if (pendingMove != null && !TryWriteInput(channel, pendingMove)) return false;
             pendingMove = null;
-            if (pendingWheel != null && !channel.Writer.TryWrite(pendingWheel)) return false;
+            if (pendingWheel != null && !TryWriteInput(channel, pendingWheel)) return false;
             pendingWheel = null;
             if (input.Kind == "key" && !input.Down) pendingKeyDowns.Remove(input.Code);
-            return channel.Writer.TryWrite(input);
+            return TryWriteInput(channel, input);
+        }
+
+        private void WarnIfInputQueueNearCapacity(Channel<InputEvent> channel)
+        {
+            if (!channel.Reader.CanCount || channel.Reader.Count < InputQueueWarningThreshold) return;
+            if (Interlocked.Exchange(ref inputQueueThresholdWarned, 1) == 0)
+                System.Diagnostics.Trace.TraceWarning("Remote input queue reached {0}/{1} entries.", channel.Reader.Count, InputQueueCapacity);
+        }
+
+        private bool TryWriteInput(Channel<InputEvent> channel, InputEvent input)
+        {
+            if (channel.Writer.TryWrite(input)) return true;
+            var failures = Interlocked.Increment(ref inputQueueWriteFailures);
+            if (failures == 1 || (failures % InputQueueCapacity) == 0)
+                System.Diagnostics.Trace.TraceWarning("Remote input queue write failed; total failures={0}.", failures);
+            return false;
         }
 
         private void UpdateFrameHealth(bool changed, bool held)

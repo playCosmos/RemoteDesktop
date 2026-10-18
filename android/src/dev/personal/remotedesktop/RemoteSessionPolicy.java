@@ -5,6 +5,7 @@ final class RemoteSessionPolicy {
     enum FrameFailure { IGNORE, DEFER_UNTIL_RESUME, RETRY_FRAME, REAUTHENTICATE }
 
     static final long KEEPALIVE_INTERVAL_MS = 5000L;
+    static final long INPUT_RECOVERY_IDLE_MS = 2000L;
 
     private RemoteSessionPolicy() {}
 
@@ -14,6 +15,10 @@ final class RemoteSessionPolicy {
 
     static boolean acceptsInput(boolean connected, boolean overloaded, boolean inputEnabled, boolean release) {
         return connected && !overloaded && (inputEnabled || release);
+    }
+
+    static boolean inputQueueCanRecover(long lastInputAt, long now) {
+        return now - lastInputAt >= INPUT_RECOVERY_IDLE_MS;
     }
 
     static FrameFailure frameFailure(boolean currentSession, int statusCode, boolean resumed, int failuresBeforeThisFrame) {

@@ -14,6 +14,7 @@ public final class RemoteSessionPolicyCheck {
         check(!RemoteSessionPolicy.shouldKeepalive(true, false) && !RemoteSessionPolicy.shouldKeepalive(false, true), "keepalive pauses during recovery");
         check(RemoteSessionPolicy.acceptsInput(true, false, true, false) && RemoteSessionPolicy.acceptsInput(true, false, false, true), "input disable still permits a release event");
         check(!RemoteSessionPolicy.acceptsInput(false, false, true, false) && !RemoteSessionPolicy.acceptsInput(true, true, true, false), "disconnected or overloaded sessions reject further input");
+        check(RemoteSessionPolicy.INPUT_RECOVERY_IDLE_MS == 2000L && !RemoteSessionPolicy.inputQueueCanRecover(1000L, 2999L) && RemoteSessionPolicy.inputQueueCanRecover(1000L, 3000L), "an overloaded input queue recovers after two seconds without input");
         check(RemoteSessionPolicy.frameFailure(false, 0, true, 0) == RemoteSessionPolicy.FrameFailure.IGNORE, "a replaced session ignores its late frame failure");
         check(RemoteSessionPolicy.frameFailure(true, 401, false, 0) == RemoteSessionPolicy.FrameFailure.REAUTHENTICATE, "expired authentication recovers immediately in the background");
         check(RemoteSessionPolicy.frameFailure(true, 0, false, 0) == RemoteSessionPolicy.FrameFailure.DEFER_UNTIL_RESUME, "a background network failure waits for resume");

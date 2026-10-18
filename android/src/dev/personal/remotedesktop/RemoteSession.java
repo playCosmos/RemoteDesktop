@@ -5,6 +5,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +25,7 @@ final class RemoteSession {
         void report(Exception error);
         void hideHealth();
         void inputQueueOverflow();
+        void inputQueueRecovered();
         int frameRate();
         void requestFrame(RemoteApi api, String display, int requestedFps) throws Exception;
     }
@@ -38,11 +40,14 @@ final class RemoteSession {
     private final Object sessionGate = new Object();
     private final AtomicBoolean recovering = new AtomicBoolean();
     private final AtomicInteger generation = new AtomicInteger();
+    private final Object inputRecoveryGate = new Object();
     private volatile RemoteApi remote;
     private volatile boolean connecting;
     private volatile boolean reconnectNeeded;
     private volatile boolean backgroundUncertain;
     private volatile boolean inputOverflowed;
+    private long lastInputAt;
+    private ScheduledFuture<?> inputRecoveryTask;
     private volatile int foregroundFailures;
     private volatile String sessionPassword = "";
     private volatile String sessionHost = "";
@@ -108,7 +113,7 @@ final class RemoteSession {
                             sessionHost = host;
                             sessionFingerprint = fingerprint;
                             sessionPassword = password;
-                            inputOverflowed = false;
+                            synchronized (inputRecoveryGate) { cancelInputRecoveryLocked(); }
                             reconnectNeeded = false;
                             backgroundUncertain = false;
                             foregroundFailures = 0;
@@ -146,6 +151,7 @@ final class RemoteSession {
             foregroundFailures = 0;
             selectedDisplay = "";
         }
+        cancelInputRecovery();
         if (api != null) {
             api.cancelled = true;
             if (!control.isShutdown()) {
@@ -158,12 +164,26 @@ final class RemoteSession {
 
     void send(JSONObject event, boolean inputEnabled) {
         RemoteApi api = remote;
-        if (!RemoteSessionPolicy.acceptsInput(api != null, inputOverflowed, inputEnabled, "release".equals(event.optString("kind"))) || control.isShutdown()) return;
-        if (control.getQueue().size() > 128) {
-            inputOverflowed = true;
-            listener.inputQueueOverflow();
-            return;
+        boolean release = "release".equals(event.optString("kind"));
+        if (!RemoteSessionPolicy.acceptsInput(api != null, false, inputEnabled, release) || control.isShutdown()) return;
+        int attempt = generation.get();
+        boolean blocked;
+        boolean announceOverflow = false;
+        synchronized (inputRecoveryGate) {
+            blocked = inputOverflowed;
+            if (blocked) {
+                lastInputAt = SystemClock.elapsedRealtime();
+                scheduleInputRecoveryLocked(api, attempt);
+            } else if (control.getQueue().size() > 128 && remote == api && generation.get() == attempt) {
+                inputOverflowed = true;
+                lastInputAt = SystemClock.elapsedRealtime();
+                scheduleInputRecoveryLocked(api, attempt);
+                blocked = true;
+                announceOverflow = true;
+            }
         }
+        if (announceOverflow) listener.inputQueueOverflow();
+        if (blocked) return;
         try {
             control.execute(() -> {
                 if (remote != api) return;
@@ -173,6 +193,42 @@ final class RemoteSession {
                 } catch (Exception error) { noteSessionFailure(api, error); }
             });
         } catch (RuntimeException rejected) { if (remote == api) listener.report(rejected); }
+    }
+
+    private void scheduleInputRecoveryLocked(RemoteApi api, int attempt) {
+        if (inputRecoveryTask != null && !inputRecoveryTask.isDone()) return;
+        long idle = SystemClock.elapsedRealtime() - lastInputAt;
+        long delay = Math.max(1L, RemoteSessionPolicy.INPUT_RECOVERY_IDLE_MS - idle);
+        try { inputRecoveryTask = retryTimer.schedule(() -> recoverInputQueue(api, attempt), delay, TimeUnit.MILLISECONDS); }
+        catch (RuntimeException rejected) { inputRecoveryTask = null; }
+    }
+
+    private void recoverInputQueue(RemoteApi api, int attempt) {
+        boolean recovered = false;
+        synchronized (inputRecoveryGate) {
+            inputRecoveryTask = null;
+            if (!inputOverflowed || generation.get() != attempt || remote != api) return;
+            long now = SystemClock.elapsedRealtime();
+            if (!RemoteSessionPolicy.inputQueueCanRecover(lastInputAt, now)) {
+                scheduleInputRecoveryLocked(api, attempt);
+                return;
+            }
+            inputOverflowed = false;
+            lastInputAt = 0;
+            recovered = true;
+        }
+        if (recovered && sameSession(attempt, api)) listener.inputQueueRecovered();
+    }
+
+    private void cancelInputRecovery() {
+        synchronized (inputRecoveryGate) { cancelInputRecoveryLocked(); }
+    }
+
+    private void cancelInputRecoveryLocked() {
+        if (inputRecoveryTask != null) inputRecoveryTask.cancel(false);
+        inputRecoveryTask = null;
+        inputOverflowed = false;
+        lastInputAt = 0;
     }
 
     void keepalive() {
@@ -344,6 +400,7 @@ final class RemoteSession {
     }
 
     void shutdown() {
+        cancelInputRecovery();
         frames.shutdownNow();
         retryTimer.shutdownNow();
         control.shutdown();

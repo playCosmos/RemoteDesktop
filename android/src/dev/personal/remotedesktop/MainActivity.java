@@ -15,39 +15,25 @@ import java.io.*;
 import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
-    private final ThreadPoolExecutor control = new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new LinkedBlockingQueue<Runnable>());
     private final ExecutorService transfers = Executors.newSingleThreadExecutor();
     private final ScheduledExecutorService frames = Executors.newSingleThreadScheduledExecutor();
     private final Handler chromeHandler = new Handler(Looper.getMainLooper());
-    private volatile RemoteApi remote;
+    private RemoteSession session;
     private EditText address, pin, password;
     private TextView status;
     private int statusGeneration;
-    private final Runnable hideChrome = () -> { if (remote != null) setControlsOpen(false); };
+    private final Runnable hideChrome = () -> { if (session != null && session.remote() != null) setControlsOpen(false); };
     private final Runnable hideStatus = () -> {
         int token = statusGeneration;
         status.animate().alpha(0f).setDuration(180).withEndAction(() -> { if (token == statusGeneration) status.setVisibility(View.GONE); }).start();
     };
     private RemoteScreen screen;
     private Bitmap bitmap;
-    private volatile boolean connecting;
-    private final Object sessionGate=new Object();
-    private final java.util.concurrent.atomic.AtomicBoolean recovering=new java.util.concurrent.atomic.AtomicBoolean();
     private volatile boolean resumed;
-    private volatile boolean reconnectNeeded;
-    private volatile boolean backgroundUncertain;
     private volatile boolean suppressToggle;
-    private volatile int foregroundFailures;
-    private volatile String sessionPassword="";
-    private volatile String sessionHost="";
-    private volatile String sessionFingerprint="";
-    private long nextKeepaliveAt;
     private ClipboardFiles clipboardFiles;
     private long lastMove;
-    private final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger();
-    private volatile String selectedDisplay="";
     private String renderedDisplay="";
-    private volatile JSONArray displays=new JSONArray();
     private FrameLayout root;
     private ScrollView connectionScroll;
     private LinearLayout connectionPanel;
@@ -198,6 +184,35 @@ public final class MainActivity extends Activity {
             return true;
         });
         preferences=getPreferences(0);
+        session=new RemoteSession(new RemoteSession.Listener() {
+            public boolean resumed() { return MainActivity.this.resumed; }
+            public String preferredDisplay(String host) { return preferences.getString("address","").equals(host)?preferences.getString("display", ""):""; }
+            public void connected(String host,String fingerprint,String display,int attempt) {
+                cursorTouched=false;
+                nextFrameAt=0;
+                runOnUiThread(() -> {
+                    if(session.generation()!=attempt || session.remote()==null) return;
+                    password.setText("");
+                    connectionScroll.setVisibility(View.GONE);
+                    applySessionChrome(true);
+                    setControlsOpen(false);
+                    preferences.edit().putString("address",host).putString("pin",fingerprint).putString("display",display).apply();
+                });
+                info("연결됨 · "+touchModeDescription());
+            }
+            public void reconnected(String display,int attempt) {
+                nextFrameAt=0;
+                runOnUiThread(() -> {
+                    if(session.generation()!=attempt || session.remote()==null) return;
+                    connectionScroll.setVisibility(View.GONE);
+                    if(resumed) applySessionChrome(true);
+                });
+            }
+            public void status(String message,int holdMs) { showStatus(message,holdMs); }
+            public void report(Exception error) { MainActivity.this.report(error); }
+            public void hideHealth() { runOnUiThread(() -> health.setVisibility(View.GONE)); }
+            public void inputQueueOverflow() { info("입력 지연으로 연결 종료"); disconnect(); }
+        });
         address.setText(preferences.getString("address","")); pin.setText(preferences.getString("pin",""));
         frameQuality=Math.max(25,Math.min(90,preferences.getInt("frameQuality",55)));
         frameRate=validFrameRate(preferences.getInt("frameRate",15));
@@ -223,7 +238,7 @@ public final class MainActivity extends Activity {
         chin.addView(grip, new LinearLayout.LayoutParams(-1,-2));
         LinearLayout secondary=row(chin);
         button(secondary,"모니터", this::chooseDisplay);
-        button(secondary,"키보드", () -> { if(remote!=null){ setControlsOpen(false); screen.showKeyboard(); } });
+        button(secondary,"키보드", () -> { if(session.remote()!=null){ setControlsOpen(false); screen.showKeyboard(); } });
         touchModeButton=button(secondary,"", this::chooseTouchMode); updateTouchModeLabel();
         button(secondary,"화질", this::chooseQuality);
         button(secondary,"저대역폭", this::lowBandwidth);
@@ -263,20 +278,20 @@ public final class MainActivity extends Activity {
         showPreviousCrash(RemoteDesktopApplication.previousCrashFile());
         setControlsOpen(false);
         registerBack();
-        clipboardFiles=new ClipboardFiles(this,() -> remote,this::info,transfers);
+        clipboardFiles=new ClipboardFiles(this,() -> session.remote(),this::info,transfers);
         clipboardFiles.accept(getIntent());
         frames.scheduleWithFixedDelay(() -> {
-            final RemoteApi api=remote;
+            final RemoteApi api=session.remote();
             try {
                 if(api==null) return;
-                if(!resumed) { keepalive(api); return; }
-                if(reconnectNeeded || recovering.get()) return;
+                if(!resumed) { session.keepalive(); return; }
+                if(session.reconnectNeeded() || session.recovering()) return;
                 final int selectedRate=frameRate;
                 long now=SystemClock.elapsedRealtime();
                 if(now<nextFrameAt) return;
                 nextFrameAt=now+1000L/selectedRate;
                 clipboardFiles.syncText();
-                final String display=selectedDisplay;
+                final String display=session.selectedDisplay();
                 long started=SystemClock.elapsedRealtime();
                 PolledFrame polled=pollFrame(api, display, selectedRate);
                 if(polled==null) return;
@@ -294,16 +309,16 @@ public final class MainActivity extends Activity {
                     }
                 }
                 receivedFrames++;
-                foregroundFailures=0;
+                session.noteFrameReceived();
                 updateHealth();
                 final RemoteApi.Cursor cursor=polled.cursor;
                 if(polled.keep) {
-                    runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) applyCursor(polled); });
+                    runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) applyCursor(polled); });
                     return;
                 }
                 Bitmap next=polled.bitmap;
-                runOnUiThread(() -> { if(remote==api && selectedDisplay.equals(display) && resumed && !reconnectNeeded) { bitmap=next; renderedDisplay=display; renderedViewX=polled.viewX; renderedViewY=polled.viewY; renderedViewWidth=polled.viewWidth; renderedViewHeight=polled.viewHeight; screen.setImageBitmap(next); applyCursor(polled); } else next.recycle(); });
-            } catch(Exception e) { try { if(api!=null && remote==api) noteSessionFailure(api, e); } catch(Exception ignored) {} }
+                runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) { bitmap=next; renderedDisplay=display; renderedViewX=polled.viewX; renderedViewY=polled.viewY; renderedViewWidth=polled.viewWidth; renderedViewHeight=polled.viewHeight; screen.setImageBitmap(next); applyCursor(polled); } else next.recycle(); });
+            } catch(Exception e) { try { if(api!=null && session.remote()==api) session.noteSessionFailure(api, e); } catch(Exception ignored) {} }
         },0,10,TimeUnit.MILLISECONDS);
     }
     private void showPreviousCrash(File previousCrashFile) {
@@ -412,14 +427,14 @@ public final class MainActivity extends Activity {
             if(chin.getVisibility()==View.VISIBLE) {
                 chin.animate().alpha(0f).translationY(dp(18)).setDuration(150).withEndAction(() -> { if(token==chromeGeneration) chin.setVisibility(View.GONE); }).start();
             } else chin.setVisibility(View.GONE);
-            boolean showHandle=remote!=null && connectionScroll.getVisibility()!=View.VISIBLE;
+            boolean showHandle=session.remote()!=null && connectionScroll.getVisibility()!=View.VISIBLE;
             menuButton.setVisibility(showHandle ? View.VISIBLE : View.GONE);
             if(showHandle) { menuButton.setAlpha(0f); menuButton.animate().alpha(1f).setDuration(120).start(); }
         }
         syncSecureBanner();
     }
     private void bumpChrome() {
-        if(!controlsOpen || remote==null) return;
+        if(!controlsOpen || session.remote()==null) return;
         chromeHandler.removeCallbacks(hideChrome);
         chromeHandler.postDelayed(hideChrome, CHROME_HIDE_MS);
     }
@@ -473,30 +488,25 @@ public final class MainActivity extends Activity {
     @Override public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
         if(root!=null) root.requestApplyInsets();
-        if(remote!=null) applySessionChrome(true);
+        if(session!=null && session.remote()!=null) applySessionChrome(true);
     }
     @Override protected void onResume() {
         super.onResume();
-        if(remote!=null) applySessionChrome(true);
+        if(session!=null && session.remote()!=null) applySessionChrome(true);
     }
     @Override protected void onStart() {
         super.onStart();
         resumed=true;
-        foregroundFailures=0;
         nextFrameAt=0;
-        RemoteApi api=remote;
+        RemoteApi api=session==null?null:session.remote();
         if(api==null) return;
         applySessionChrome(true);
-        if(reconnectNeeded || backgroundUncertain) {
-            showStatus("다시 연결 중", -1);
-            health.setVisibility(View.GONE);
-            recover(api, reconnectNeeded);
-        }
+        session.onStart();
     }
     @Override protected void onStop() {
         resumed=false;
-        nextKeepaliveAt=0;
-        if(remote!=null) {
+        if(session!=null) session.onStop();
+        if(session!=null && session.remote()!=null) {
             cancelTouch();
             suppressToggle=true;
             uncheckModifiers(chin);
@@ -509,86 +519,28 @@ public final class MainActivity extends Activity {
     private int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
     private void report(Exception e) { showStatus(e.getMessage()==null ? e.toString() : e.getMessage(), 5000); }
     private void connect() {
-        if(remote!=null || connecting || recovering.get()) return;
-        connecting=true;
-        final String host=address.getText().toString(), fingerprint=pin.getText().toString(), pass=password.getText().toString();
-        info("접속 중…");
-        final int attempt=generation.get();
-        control.execute(() -> {
-            RemoteApi api=null;
-            try {
-                api=new RemoteApi(host,fingerprint);
-                api.login(pass);
-                JSONArray list=new JSONArray(new String(api.request("displays","GET",null),"UTF-8"));
-                String wanted=preferences.getString("address","").equals(host)?preferences.getString("display",""):"";
-                String display=defaultDisplay(list,wanted);
-                boolean accepted=false;
-                synchronized(sessionGate) {
-                    if(attempt==generation.get()) {
-                        displays=list;
-                        selectedDisplay=display;
-                        sessionHost=host;
-                        sessionFingerprint=fingerprint;
-                        sessionPassword=pass;
-                        cursorTouched=false;
-                        reconnectNeeded=false;
-                        backgroundUncertain=false;
-                        foregroundFailures=0;
-                        nextFrameAt=0;
-                        nextKeepaliveAt=SystemClock.elapsedRealtime()+5000L;
-                        remote=api;
-                        api=null;
-                        accepted=true;
-                    }
-                }
-                if(!accepted) { try { api.logout(); } catch(Exception ignored) {} return; }
-                runOnUiThread(() -> {
-                    if(generation.get()!=attempt || remote==null) return;
-                    password.setText("");
-                    connectionScroll.setVisibility(View.GONE);
-                    applySessionChrome(true);
-                    setControlsOpen(false);
-                    preferences.edit().putString("address",host).putString("pin",fingerprint).putString("display",selectedDisplay).apply();
-                });
-                info("연결됨 · "+touchModeDescription());
-            } catch(Exception e) {
-                if(api!=null) try { api.logout(); } catch(Exception ignored) {}
-                report(e);
-            } finally { connecting=false; }
-        });
+        session.connect(address.getText().toString(),pin.getText().toString(),password.getText().toString());
     }
     private void disconnect() {
         cancelTouch();
-        RemoteApi api;
-        synchronized(sessionGate) {
-            generation.incrementAndGet();
-            api=remote;
-            remote=null;
-            sessionPassword="";
-            sessionHost="";
-            sessionFingerprint="";
-            reconnectNeeded=false;
-            backgroundUncertain=false;
-            foregroundFailures=0;
-            havePicture=false;
-            needKey=true;
-            h264Failures=0;
-            h264FallbackFrames=0;
-            preferH264=true;
-            activeCodec="H.264";
-            picturedSession=null;
-            pacedQuality=frameQuality;
-            paceSlow=0;
-            paceFast=0;
-            secureState="off";
-            cursorHash="";
-            cursorLocal=false;
-            cursorVisible=false;
-            cursorGeneration.incrementAndGet();
-            cursorTouched=false;
-        }
+        session.disconnect();
+        havePicture=false;
+        needKey=true;
+        h264Failures=0;
+        h264FallbackFrames=0;
+        preferH264=true;
+        activeCodec="H.264";
+        picturedSession=null;
+        pacedQuality=frameQuality;
+        paceSlow=0;
+        paceFast=0;
+        secureState="off";
+        cursorHash="";
+        cursorLocal=false;
+        cursorVisible=false;
+        cursorGeneration.incrementAndGet();
+        cursorTouched=false;
         closePicture();
-        if(api!=null) { api.cancelled=true; if(!control.isShutdown()) control.execute(api::logout); }
         runOnUiThread(() -> {
             connectionScroll.setVisibility(View.VISIBLE);
             applySessionChrome(false);
@@ -604,132 +556,7 @@ public final class MainActivity extends Activity {
             if(screen.getWindowToken()!=null) imm.hideSoftInputFromWindow(screen.getWindowToken(),0);
         });
     }
-    private void send(JSONObject event) {
-        RemoteApi api=remote;
-        if(api==null || control.isShutdown() || (!inputEnabled && !"release".equals(event.optString("kind")))) return;
-        if(control.getQueue().size()>128) { info("입력 지연으로 연결 종료"); disconnect(); return; }
-        control.execute(() -> { if(remote!=api) return; try { String notice=api.input(event); if(notice!=null) info(notice); } catch(Exception e) { noteSessionFailure(api, e); } });
-    }
-    private void keepalive(RemoteApi api) {
-        if(recovering.get() || reconnectNeeded) return;
-        long now=SystemClock.elapsedRealtime();
-        if(now<nextKeepaliveAt) return;
-        nextKeepaliveAt=now+5000L;
-        try {
-            api.ping();
-            if(remote!=api) return;
-            backgroundUncertain=false;
-            foregroundFailures=0;
-        } catch(Exception e) {
-            if(remote!=api) return;
-            backgroundUncertain=true;
-            if(statusCode(e)==401) { reconnectNeeded=true; recover(api, true); }
-        }
-    }
-    private void noteSessionFailure(RemoteApi api, Exception error) {
-        if(remote!=api) return;
-        if(statusCode(error)==401) { reconnectNeeded=true; recover(api, true); return; }
-        if(!resumed) { backgroundUncertain=true; return; }
-        if(++foregroundFailures<3) return;
-        reconnectNeeded=true;
-        recover(api, true);
-    }
-    private void recover(RemoteApi failed, boolean forceLogin) {
-        if(failed==null || sessionPassword.isEmpty()) return;
-        if(!recovering.compareAndSet(false, true)) return;
-        final int attempt=generation.get();
-        if(forceLogin) {
-            showStatus("다시 연결 중", -1);
-            runOnUiThread(() -> health.setVisibility(View.GONE));
-        }
-        try { control.execute(() -> {
-            RemoteApi fresh=null;
-            try {
-                if(!sameSession(attempt, failed)) return;
-                if(!forceLogin) {
-                    try {
-                        failed.ping();
-                        if(!sameSession(attempt, failed)) return;
-                        backgroundUncertain=false;
-                        reconnectNeeded=false;
-                        foregroundFailures=0;
-                        nextFrameAt=0;
-                        showStatus("연결됨", 1200);
-                        return;
-                    } catch(Exception error) {
-                        if(!sameSession(attempt, failed)) return;
-                        if(statusCode(error)!=401 && !resumed) { backgroundUncertain=true; return; }
-                        reconnectNeeded=true;
-                        showStatus("다시 연결 중", -1);
-                        runOnUiThread(() -> health.setVisibility(View.GONE));
-                    }
-                }
-                String host=sessionHost, fingerprint=sessionFingerprint, pass=sessionPassword;
-                if(pass.isEmpty() || !sameSession(attempt, failed)) return;
-                fresh=new RemoteApi(host, fingerprint);
-                fresh.login(pass);
-                JSONArray list=new JSONArray(new String(fresh.request("displays","GET",null),"UTF-8"));
-                String display=defaultDisplay(list, selectedDisplay);
-                boolean accepted=false;
-                RemoteApi previous=null;
-                synchronized(sessionGate) {
-                    if(attempt==generation.get()) {
-                        previous=remote;
-                        displays=list;
-                        selectedDisplay=display;
-                        sessionHost=host;
-                        sessionFingerprint=fingerprint;
-                        sessionPassword=pass;
-                        remote=fresh;
-                        reconnectNeeded=false;
-                        backgroundUncertain=false;
-                        foregroundFailures=0;
-                        nextFrameAt=0;
-                        nextKeepaliveAt=SystemClock.elapsedRealtime()+5000L;
-                        fresh=null;
-                        accepted=true;
-                    }
-                }
-                if(!accepted) { fresh.logout(); return; }
-                runOnUiThread(() -> {
-                    if(generation.get()!=attempt || remote==null) return;
-                    connectionScroll.setVisibility(View.GONE);
-                    if(resumed) applySessionChrome(true);
-                });
-                showStatus("다시 연결됨", 1400);
-                if(previous!=null && previous!=remote) { previous.cancelled=true; try { previous.logout(); } catch(Exception ignored) {} }
-            } catch(Exception error) {
-                if(fresh!=null) try { fresh.logout(); } catch(Exception ignored) {}
-                if(!sameSession(attempt, failed)) return;
-                if(statusCode(error)==409) {
-                    try {
-                        failed.ping();
-                        reconnectNeeded=false;
-                        backgroundUncertain=false;
-                        foregroundFailures=0;
-                        nextFrameAt=0;
-                        showStatus("연결됨", 1200);
-                        return;
-                    } catch(Exception pingError) {
-                        if(statusCode(pingError)!=401) error=pingError;
-                    }
-                }
-                reconnectNeeded=true;
-                backgroundUncertain=true;
-                report(error);
-                chromeHandler.postDelayed(() -> {
-                    if(generation.get()==attempt && remote==failed && !sessionPassword.isEmpty()) recover(failed, true);
-                }, resumed ? 3000L : 5000L);
-            } finally { recovering.set(false); }
-        });
-        } catch(RuntimeException rejected) { recovering.set(false); if(remote==failed) report(rejected); }
-    }
-    private boolean sameSession(int attempt, RemoteApi api) {
-        synchronized(sessionGate) { return attempt==generation.get() && remote==api; }
-    }
-    private static int statusCode(Exception error) {
-        return error instanceof RemoteApi.StatusException ? ((RemoteApi.StatusException)error).code : 0;
-    }
+    private void send(JSONObject event) { session.send(event,inputEnabled); }
     private void uncheckModifiers(View view) {
         if(view instanceof ToggleButton) {
             ToggleButton toggle=(ToggleButton)view;
@@ -747,7 +574,7 @@ public final class MainActivity extends Activity {
     private void key(int code) { screen.finishComposition(); event("key",code,true); event("key",code,false); }
     private void click(int code) { event("button",code,true); event("button",code,false); }
     private boolean touch(MotionEvent e) {
-        if(remote==null || bitmap==null)return true;
+        if(session.remote()==null || bitmap==null)return true;
         if(controlsOpen && e.getActionMasked()==MotionEvent.ACTION_DOWN) { setControlsOpen(false); return true; }
         scaleDetector.onTouchEvent(e);
         if(pinchActive || e.getPointerCount()>1)return true;
@@ -840,7 +667,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2, dp(40));
         lp.setMargins(dp(3),dp(2),dp(3),dp(2));
         toolbar.addView(controlButton, lp);
-        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; cursorGeneration.incrementAndGet(); cursorTouched=false; nextFrameAt=0; placeCursor(); if(remote!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
+        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; cursorGeneration.incrementAndGet(); cursorTouched=false; nextFrameAt=0; placeCursor(); if(session.remote()!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
     }
     private void chooseQuality() {
         String[] labels=qualityLabels(); int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
@@ -867,26 +694,21 @@ public final class MainActivity extends Activity {
     private void updateHealth() {
         long now=SystemClock.elapsedRealtime(); if(now-healthWindow<1000)return;
         final float fps=receivedFrames*1000f/(now-healthWindow); receivedFrames=0; healthWindow=now;
-        runOnUiThread(() -> { if(remote==null || !resumed || reconnectNeeded) return; health.setVisibility(View.VISIBLE); health.setText(String.format(java.util.Locale.US,"%.0f fps · %d ms · %s",fps,lastFrameMillis,activeCodec)); });
+        runOnUiThread(() -> { if(session.remote()==null || !resumed || session.reconnectNeeded()) return; health.setVisibility(View.VISIBLE); health.setText(String.format(java.util.Locale.US,"%.0f fps · %d ms · %s",fps,lastFrameMillis,activeCodec)); });
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
         if(request==7 && result==RESULT_OK && data!=null && data.getData()!=null)clipboardFiles.pasteFolder(data.getData());
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); clipboardFiles.accept(intent); }
-    private static String defaultDisplay(JSONArray list,String wanted) throws Exception {
-        String primary="all";
-        for(int i=0;i<list.length();i++) { JSONObject d=list.getJSONObject(i); if(d.getString("id").equals(wanted))return wanted; if(d.getBoolean("primary"))primary=d.getString("id"); }
-        return primary;
-    }
     private void chooseDisplay() {
-        RemoteApi api=remote; if(api==null)return; screen.finishComposition();
+        RemoteApi api=session.remote(); if(api==null)return; screen.finishComposition();
         transfers.execute(() -> { try {
             JSONArray list=new JSONArray(new String(api.request("displays","GET",null),"UTF-8"));
             String[] names=new String[list.length()],ids=new String[list.length()];
             for(int i=0;i<list.length();i++) { JSONObject d=list.getJSONObject(i); ids[i]=d.getString("id"); names[i]=d.getString("name")+" · "+d.getInt("width")+"×"+d.getInt("height"); }
-            runOnUiThread(() -> { if(remote!=api)return; new AlertDialog.Builder(this).setTitle("모니터 선택").setItems(names,(dialog,index) -> {
-                if(remote!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); selectedDisplay=ids[index]; havePicture=false; needKey=true; zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; renderedViewX=renderedViewY=0f; renderedViewWidth=renderedViewHeight=1f; cursorTouched=false; if(remoteCursor!=null)remoteCursor.setVisibility(View.GONE); preferences.edit().putString("display",selectedDisplay).apply();
+            runOnUiThread(() -> { if(session.remote()!=api)return; new AlertDialog.Builder(this).setTitle("모니터 선택").setItems(names,(dialog,index) -> {
+                if(session.remote()!=api)return; cancelTouch(); bitmap=null; screen.setImageDrawable(null); session.selectDisplay(ids[index]); havePicture=false; needKey=true; zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; renderedViewX=renderedViewY=0f; renderedViewWidth=renderedViewHeight=1f; cursorTouched=false; if(remoteCursor!=null)remoteCursor.setVisibility(View.GONE); preferences.edit().putString("display",session.selectedDisplay()).apply();
             }).setNegativeButton("닫기",null).show(); });
         } catch(Exception e) { report(e); } });
     }
@@ -901,7 +723,7 @@ public final class MainActivity extends Activity {
         lastBackAt = now;
         if (leaveDialog != null && leaveDialog.isShowing()) { leaveDialog.dismiss(); return; }
         if (controlsOpen) { setControlsOpen(false); return; }
-        if (SessionBack.ask(false, remote != null)) { confirmDisconnect(); return; }
+        if (SessionBack.ask(false, session.remote() != null)) { confirmDisconnect(); return; }
         finish();
     }
     private void confirmDisconnect() {
@@ -914,10 +736,10 @@ public final class MainActivity extends Activity {
             .create();
         leaveDialog.show();
     }
-    @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(remote!=null) applySessionChrome(true); }
-    @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); control.shutdown(); super.onDestroy(); }
+    @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(session!=null && session.remote()!=null) applySessionChrome(true); }
+    @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); session.shutdown(); super.onDestroy(); }
     private PolledFrame pollFrame(RemoteApi api, String display, int requestedFps) throws Exception {
-        final int epoch=generation.get();
+        final int epoch=session.generation();
         if(picturedSession!=api) { picturedSession=api; needKey=true; }
         final float frameViewX=viewX, frameViewY=viewY, frameViewWidth=viewWidth, frameViewHeight=viewHeight;
         final long frameCursorGeneration=cursorGeneration.get();
@@ -939,32 +761,30 @@ public final class MainActivity extends Activity {
             H264Picture decoder=null;
             try {
                 synchronized(pictureGate) {
-                    if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) return null;
+                    if(!session.isCurrent(epoch,api,display)) return null;
                     if(h264Picture==null) h264Picture=new H264Picture();
                     decoder=h264Picture;
                     decoded=decoder.decode(picture.bytes,requestedFps);
                 }
-                synchronized(sessionGate) {
-                    if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { decoded.recycle(); return null; }
+                if(!session.runIfCurrent(epoch,api,display,() -> {
                     h264Failures=0;
                     h264FallbackFrames=0;
                     activeCodec="H.264";
                     needKey=false;
                     havePicture=true;
-                }
+                })) { decoded.recycle(); return null; }
                 return new PolledFrame(decoded,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
             } catch(Exception error) {
-                boolean current;
-                synchronized(sessionGate) {
-                    current=generation.get()==epoch && remote==api;
-                    if(!current) return null;
+                boolean[] current={false};
+                if(!session.runIfCurrent(epoch,api,() -> {
+                    current[0]=true;
                     needKey=true;
                     if(++h264Failures>=8) {
                         preferH264=false;
                         activeCodec="JPEG";
                         info("H.264를 사용할 수 없어 JPEG로 표시합니다.");
                     }
-                }
+                }) || !current[0]) return null;
                 synchronized(pictureGate) {
                     if(decoder!=null && h264Picture==decoder) { decoder.close(); h264Picture=null; }
                 }
@@ -973,9 +793,8 @@ public final class MainActivity extends Activity {
         }
         Bitmap jpeg=BitmapFactory.decodeByteArray(picture.bytes,0,picture.bytes.length);
         if(jpeg==null) throw new IOException("화면 디코딩 실패");
-        boolean retireDecoder=false;
-        synchronized(sessionGate) {
-            if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { jpeg.recycle(); return null; }
+        boolean[] retireDecoder={false};
+        if(!session.runIfCurrent(epoch,api,display,() -> {
             activeCodec="JPEG";
             needKey=false;
             havePicture=true;
@@ -984,11 +803,11 @@ public final class MainActivity extends Activity {
                 preferH264=false;
                 h264Failures=0;
                 h264FallbackFrames=0;
-                retireDecoder=true;
+                retireDecoder[0]=true;
                 info("서버가 H.264를 제공하지 않아 JPEG로 전환했습니다.");
             }
-        }
-        if(retireDecoder) closePicture();
+        })) { jpeg.recycle(); return null; }
+        if(retireDecoder[0]) closePicture();
         return new PolledFrame(jpeg,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
     }
     private void closePicture() {
@@ -998,17 +817,14 @@ public final class MainActivity extends Activity {
     }
     private void noteSecure(RemoteApi api, int epoch, String header) {
         String next=SecureNotice.state(header);
-        synchronized(sessionGate) {
-            if(generation.get()!=epoch || remote!=api) return;
-            if(next.equals(secureState)) return;
-            secureState=next;
-        }
-        runOnUiThread(() -> { if(generation.get()!=epoch || remote!=api) return; syncSecureBanner(); });
+        final boolean[] changed={false};
+        if(!session.runIfCurrent(epoch,api,() -> { if(!next.equals(secureState)) { secureState=next; changed[0]=true; } }) || !changed[0]) return;
+        runOnUiThread(() -> { if(!session.isCurrent(epoch,api)) return; syncSecureBanner(); });
     }
     private void syncSecureBanner() {
         if(secureBanner==null) return;
         String message=SecureNotice.text(secureState);
-        if(remote==null || !SecureNotice.visible(controlsOpen, message)) {
+        if(session.remote()==null || !SecureNotice.visible(controlsOpen, message)) {
             secureBanner.setVisibility(View.GONE);
             return;
         }
@@ -1046,7 +862,7 @@ public final class MainActivity extends Activity {
     }
     private void placeCursor() {
         if(remoteCursor==null) return;
-        if(remote==null || !inputEnabled || !cursorLocal || !cursorVisible || cursorGlyph==null || bitmap==null || screen==null) {
+        if(session.remote()==null || !inputEnabled || !cursorLocal || !cursorVisible || cursorGlyph==null || bitmap==null || screen==null) {
             remoteCursor.setVisibility(View.GONE);
             return;
         }

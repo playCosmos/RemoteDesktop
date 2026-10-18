@@ -44,6 +44,7 @@ public static class AppInstaller
     {
         HostFirewall.RemoveQuietly();
         StopAndDeleteService();
+        SecureAttention.RestorePolicy();
         var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
         if (File.Exists(shortcut)) File.Delete(shortcut);
         DeleteAfterExit(AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));

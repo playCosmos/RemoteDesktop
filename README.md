@@ -1,4 +1,4 @@
-# Personal Remote Desktop 0.9.140
+# Personal Remote Desktop 0.9.141
 
 개인용 Windows 서버·클라이언트 통합 앱과 Android 클라이언트입니다. 서버에 저장한 비밀번호로 수락 없이 접속합니다.
 
@@ -6,8 +6,8 @@
 
 ## 실행 파일
 
-- Windows 통합 실행 파일: `artifacts/0.9.140/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
-- Android: `artifacts/0.9.140/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
+- Windows 통합 실행 파일: `artifacts/0.9.141/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
+- Android: `artifacts/0.9.141/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
 
 Windows는 별도 설치 과정 없이 실행합니다. 같은 실행 파일에서 **접속 받기**와 원격 클라이언트를 모두 사용할 수 있습니다. 저장된 서버 비밀번호가 있으면 앱을 열 때 접속 대기를 시작합니다. 창을 닫으면 트레이에 남고 접속 대기는 계속됩니다. 트레이의 **종료**를 눌러야 앱이 끝납니다. 접속 대기를 시작하는 동안 같은 버튼을 다시 누르면 포트가 열리기 전에 취소됩니다.
 
@@ -23,7 +23,7 @@ Windows 클라이언트는 서버 지문 입력란을 비워 첫 연결하면 OP
 ./build.ps1 -FrameworkDependent
 ```
 
-프레임워크 종속 산출물은 `artifacts/0.9.140/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
+프레임워크 종속 산출물은 `artifacts/0.9.141/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
 
 ## 접속
 

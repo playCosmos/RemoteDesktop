@@ -168,7 +168,8 @@ jobs:
           $thumbprint = $env:WINDOWS_SIGNING_TEST_THUMBPRINT
           $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
           if ([string]::IsNullOrWhiteSpace($thumbprint) -or !(Test-Path -LiteralPath $certificatePath -PathType Leaf)) { throw 'The temporary certificate files were not prepared.' }
-          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          Write-Output 'Importing the temporary certificate into CurrentUser\Root without an interactive prompt.'
+          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' -Confirm:$false | Out-Null
           Write-Output 'Temporary code-signing certificate trusted for the CI verification.'
 
       - name: Remove temporary private key to exercise PFX import
@@ -181,7 +182,7 @@ jobs:
           $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
           if (!$certificate.HasPrivateKey) { throw 'The temporary certificate has no private key before PFX import.' }
           $certificate.Dispose()
-          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force
+          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force -Confirm:$false
           Write-Output 'Temporary certificate removed from CurrentUser\My; the build must import its PFX.'
 
       - name: Sign and verify a Windows executable with the temporary certificate
@@ -208,8 +209,8 @@ jobs:
           $thumbprintPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.thumbprint'
           $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
           $thumbprint = if (Test-Path -LiteralPath $thumbprintPath) { (Get-Content -LiteralPath $thumbprintPath -Raw).Trim() } else { $env:WINDOWS_SIGNING_TEST_THUMBPRINT }
-          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force }
-          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force }
+          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force -Confirm:$false }
+          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force -Confirm:$false }
           if ($certificatePath -and (Test-Path -LiteralPath $certificatePath)) { Remove-Item -LiteralPath $certificatePath -Force }
           if ($pfxPath -and (Test-Path -LiteralPath $pfxPath)) { Remove-Item -LiteralPath $pfxPath -Force }
           if (Test-Path -LiteralPath $thumbprintPath) { Remove-Item -LiteralPath $thumbprintPath -Force }

@@ -68,7 +68,7 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
         $storeCertificate = Get-Item -LiteralPath $storePath -ErrorAction SilentlyContinue
         if ($null -eq $storeCertificate) {
             $ownsStoreCertificate = $true
-            Import-PfxCertificate -FilePath $PfxPath -CertStoreLocation 'Cert:\CurrentUser\My' -Password $securePassword | Out-Null
+            Import-PfxCertificate -FilePath $PfxPath -CertStoreLocation 'Cert:\CurrentUser\My' -Password $securePassword -Confirm:$false | Out-Null
             $storeCertificate = Get-Item -LiteralPath $storePath -ErrorAction SilentlyContinue
         }
         if ($null -eq $storeCertificate -or !$storeCertificate.HasPrivateKey) { throw 'The Windows signing certificate could not be loaded into the current-user certificate store.' }
@@ -90,7 +90,7 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
         if ($storeCertificate) { $storeCertificate.Dispose() }
         if ($pfxCertificate) { $pfxCertificate.Dispose() }
         if ($ownsStoreCertificate -and $storePath -and (Test-Path -LiteralPath $storePath)) {
-            Remove-Item -LiteralPath $storePath -DeleteKey -Force
+            Remove-Item -LiteralPath $storePath -DeleteKey -Force -Confirm:$false
         }
         if ($securePassword) { $securePassword.Dispose() }
     }

@@ -12,12 +12,16 @@ public sealed partial class RemoteHost
         routes.MapPost("/v1/login", async (HttpContext c) =>
         {
             var source = AuthenticationSource(c);
-            if (loginThrottle.TryGetDelay(source, DateTime.UtcNow, out var retry))
+            if (!loginThrottle.TryAcquire(source, DateTime.UtcNow, out var retry))
             {
                 c.Response.Headers["Retry-After"] = Math.Max(1, (int)Math.Ceiling(retry.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
                 return Results.StatusCode(429);
             }
-            if (!await loginGate.WaitAsync(0)) return Results.StatusCode(429);
+            if (!await loginGate.WaitAsync(0))
+            {
+                loginThrottle.Complete(source);
+                return Results.StatusCode(429);
+            }
             try
             {
                 var login = await ReadSmall<Login>(c);
@@ -50,7 +54,11 @@ public sealed partial class RemoteHost
                     return Results.Ok(new { token, protocol = 1, maxFileBytes = MaxFileBytes });
                 }
             }
-            finally { loginGate.Release(); }
+            finally
+            {
+                loginGate.Release();
+                loginThrottle.Complete(source);
+            }
         });
         routes.MapPost("/v1/pake/start", (Delegate)(Func<HttpContext, Task<IResult>>)StartOpaqueLogin);
         routes.MapPost("/v1/pake/finish", (Delegate)(Func<HttpContext, Task<IResult>>)FinishOpaqueLogin);

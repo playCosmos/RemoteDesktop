@@ -24,7 +24,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private readonly Desktop desktop;
     private readonly object gate = new();
     private readonly object videoRetirementGate = new();
-    private readonly SemaphoreSlim loginGate = new(1);
+    private readonly SemaphoreSlim loginGate = new(Math.Clamp(Environment.ProcessorCount, 2, 4));
     private readonly LoginThrottle loginThrottle = new();
     private readonly SemaphoreSlim captureGate = new(1);
     private readonly SemaphoreSlim opaqueGate = new(1);

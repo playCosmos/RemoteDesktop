@@ -973,6 +973,7 @@ public final class MainActivity extends Activity {
         }
         Bitmap jpeg=BitmapFactory.decodeByteArray(picture.bytes,0,picture.bytes.length);
         if(jpeg==null) throw new IOException("화면 디코딩 실패");
+        boolean retireDecoder=false;
         synchronized(sessionGate) {
             if(generation.get()!=epoch || remote!=api || !display.equals(selectedDisplay)) { jpeg.recycle(); return null; }
             activeCodec="JPEG";
@@ -983,9 +984,11 @@ public final class MainActivity extends Activity {
                 preferH264=false;
                 h264Failures=0;
                 h264FallbackFrames=0;
+                retireDecoder=true;
                 info("서버가 H.264를 제공하지 않아 JPEG로 전환했습니다.");
             }
         }
+        if(retireDecoder) closePicture();
         return new PolledFrame(jpeg,false,picture.cursor,frameViewX,frameViewY,frameViewWidth,frameViewHeight,frameCursorGeneration);
     }
     private void closePicture() {

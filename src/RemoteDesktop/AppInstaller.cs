@@ -15,12 +15,31 @@ public static class AppInstaller
         if (!AppInstall.CanInstall(source)) throw new InvalidOperationException(UiText.InstallNeedsPublished());
         Directory.CreateDirectory(destinationDirectory);
         var destination = AppInstall.Executable(destinationDirectory);
-        for (var attempt = 0; ; attempt++)
+        var staged = destination + "." + Guid.NewGuid().ToString("N") + ".new";
+        try
         {
-            try { File.Copy(source, destination, true); break; }
-            catch (IOException ex) when (attempt < 20 && ((ex.HResult & 0xFFFF) == 32 || (ex.HResult & 0xFFFF) == 33)) { Thread.Sleep(250); }
+            File.Copy(source, staged, false);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    // The staged file is in the destination directory, so Windows can replace
+                    // the installed executable with one same-volume rename. A failed copy or
+                    // rename leaves the last working executable untouched.
+                    File.Move(staged, destination, true);
+                    break;
+                }
+                catch (IOException ex) when (attempt < 20 && ((ex.HResult & 0xFFFF) == 32 || (ex.HResult & 0xFFFF) == 33))
+                {
+                    Thread.Sleep(250);
+                }
+            }
+            return destination;
         }
-        return destination;
+        finally
+        {
+            if (File.Exists(staged)) File.Delete(staged);
+        }
     }
 
     public static string InstallPerUser(PerUserRequest request)

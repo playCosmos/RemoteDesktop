@@ -104,12 +104,23 @@ var devDir = Path.Combine(Path.GetTempPath(), "prd-dev-" + Guid.NewGuid().ToStri
 Directory.CreateDirectory(devDir);
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.exe"), "exe");
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.dll"), "dll");
-var copiedDir = Path.Combine(Path.GetTempPath(), "prd-copy-" + Guid.NewGuid().ToString("N"));
+var copiedDir = Path.Combine(AppContext.BaseDirectory, "prd-copy-" + Guid.NewGuid().ToString("N"));
+var missingExe = Path.Combine(publishedDir, "missing", "RemoteDesktop.exe");
 try
 {
     Check(AppInstall.CanInstall(publishedExe) && !AppInstall.CanInstall(Path.Combine(devDir, "RemoteDesktop.exe")) && !AppInstall.CanInstall(Path.Combine(publishedDir, "Other.exe")), "only a published RemoteDesktop.exe can be installed");
     AppInstaller.CopyExecutable(publishedExe, copiedDir);
     Check(File.Exists(Path.Combine(copiedDir, "RemoteDesktop.exe")), "install copies the published exe into the chosen folder");
+    File.WriteAllText(publishedExe, "updated executable");
+    AppInstaller.CopyExecutable(publishedExe, copiedDir);
+    Check(File.ReadAllText(Path.Combine(copiedDir, "RemoteDesktop.exe")) == "updated executable", "install atomically replaces an existing executable");
+    var failedCopyPreservedInstall = false;
+    try { AppInstaller.CopyExecutable(missingExe, copiedDir); }
+    catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
+    {
+        failedCopyPreservedInstall = File.ReadAllText(Path.Combine(copiedDir, "RemoteDesktop.exe")) == "updated executable";
+    }
+    Check(failedCopyPreservedInstall && !Directory.EnumerateFiles(copiedDir, "*.new").Any(), "a failed staged install preserves the working executable and removes its temporary file");
 }
 finally
 {

@@ -1052,7 +1052,7 @@ public partial class MainWindow
                 window.SessionAlertText.Foreground = (System.Windows.Media.Brush)window.FindResource("InkBrush");
                 return;
             }
-            var show = client != null && !toolbarOpen && UiText.SessionOnPicture(text);
+            var show = client != null && UiText.SessionOnPicture(text);
             window.SessionAlert.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
             if (!show) return;
             var problem = UiText.IsProblem(text);
@@ -2034,7 +2034,9 @@ public partial class MainWindow
                     : UiText.InputHint(false);
             window.InputHintText.Text = hint ?? "";
             window.InputHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
-            window.InputControlToggle.ToolTip = UiText.InputReleaseTip();
+            window.InputControlToggle.ToolTip = inputEnabled
+                ? "원격 입력 켜짐 · " + UiText.InputReleaseTip()
+                : "원격 입력 꺼짐 · 눌러서 다시 켜기";
             var alertLift = hint == null ? 16 : inputEnabled ? 76 : 58;
             window.SessionAlert.Margin = new Thickness(24, 16, 24, alertLift);
             window.TransferCancel.Margin = new Thickness(0, 0, 0, alertLift + 48);

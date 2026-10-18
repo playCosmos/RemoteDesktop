@@ -88,18 +88,13 @@
           </Grid>
           </StackPanel>
         </Border>
-        <Border x:Name="SessionToolbar" HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" Margin="12,10,12,0" MaxWidth="900" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="6,5">
+        <Border x:Name="SessionToolbar" HorizontalAlignment="Center" VerticalAlignment="Top" Visibility="Collapsed" Margin="12,10,12,0" MaxWidth="420" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="10" Padding="4">
           <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto"/>
-              <ColumnDefinition Width="*"/>
-              <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
             <StackPanel x:Name="SessionActions" Orientation="Horizontal">
-              <primitives:Thumb Width="24" Height="28" Cursor="SizeAll" DragDelta="SessionToolbarDragDelta" ToolTip="끌어서 메뉴 위치 이동">
+              <primitives:Thumb Width="24" Height="32" Cursor="SizeAll" DragDelta="SessionToolbarDragDelta" ToolTip="끌어서 메뉴 위치 이동">
                 <primitives:Thumb.Template>
                   <ControlTemplate TargetType="primitives:Thumb">
-                    <Border Background="Transparent" Padding="6,7">
+                    <Border Background="Transparent" Padding="6,9">
                       <Canvas Width="8" Height="12">
                         <Ellipse Width="2" Height="2" Canvas.Left="0" Canvas.Top="0" Fill="{StaticResource MutedBrush}"/>
                         <Ellipse Width="2" Height="2" Canvas.Left="5" Canvas.Top="0" Fill="{StaticResource MutedBrush}"/>
@@ -112,9 +107,9 @@
                   </ControlTemplate>
                 </primitives:Thumb.Template>
               </primitives:Thumb>
-              <ToggleButton x:Name="InputControlToggle" Content="입력 제어" IsChecked="True" IsEnabled="False" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
-              <ComboBox x:Name="DisplayList" Width="160" Visibility="Collapsed" IsEnabled="False" SelectionChanged="DisplayChanged" DisplayMemberPath="Label" Margin="8,0,0,0"/>
-              <Button x:Name="SessionMenuButton" Content="조작" IsEnabled="False" Click="OpenSessionMenu" Margin="8,0,0,0">
+              <ToggleButton x:Name="InputControlToggle" Content="⌨" Width="34" MinWidth="34" Height="32" Padding="0" IsChecked="True" IsEnabled="False" AutomationProperties.Name="원격 입력 제어" ToolTip="원격 입력 제어" Checked="InputControlChanged" Unchecked="InputControlChanged"/>
+              <ComboBox x:Name="DisplayList" Width="160" Visibility="Collapsed" IsEnabled="False" SelectionChanged="DisplayChanged" DisplayMemberPath="Label" Margin="6,0,0,0" ToolTip="원격 모니터 선택"/>
+              <Button x:Name="SessionMenuButton" Content="⋯" Width="34" MinWidth="34" Height="32" Padding="0" IsEnabled="False" Click="OpenSessionMenu" Margin="6,0,0,0" AutomationProperties.Name="세션 조작 메뉴" ToolTip="세션 조작 메뉴">
                 <Button.ContextMenu>
                   <ContextMenu x:Name="SessionMenu">
                     <MenuItem Header="화면 품질">
@@ -149,13 +144,14 @@
                   </ContextMenu>
                 </Button.ContextMenu>
               </Button>
-              <TextBlock x:Name="SessionPresetText" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" FontSize="12" MaxWidth="180" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+              <Button x:Name="FullscreenSessionButton" Width="34" MinWidth="34" Height="32" Padding="0" Margin="4,0,0,0" Click="ToggleFullscreen" AutomationProperties.Name="전체 화면" ToolTip="전체 화면 (F11)">
+                <Path Data="M1,6 L1,1 L6,1 M10,1 L15,1 L15,6 M15,10 L15,15 L10,15 M6,15 L1,15 L1,10" Stroke="{StaticResource InkBrush}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Width="16" Height="16"/>
+              </Button>
+              <Button x:Name="EndSessionButton" Content="×" Width="34" MinWidth="34" Height="32" Padding="0" IsEnabled="False" Click="Disconnect" Foreground="{StaticResource DangerBrush}" Margin="4,0,0,0" AutomationProperties.Name="연결 종료" ToolTip="연결 종료"/>
+              <Button x:Name="SessionToolbarCollapse" Content="⌃" Width="30" MinWidth="30" Height="32" Padding="0" Margin="4,0,0,0" Click="CollapseSessionToolbar" ToolTip="메뉴 접기"/>
+              <TextBlock x:Name="SessionPresetText" Visibility="Collapsed" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
             </StackPanel>
-            <TextBlock x:Name="StatusText" Grid.Column="1" Text="준비됨" Margin="14,0,10,0" MaxWidth="180" VerticalAlignment="Center" Foreground="{StaticResource InkBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-              <Button x:Name="SessionToolbarCollapse" Content="⌃" Width="32" MinWidth="32" Padding="0" Margin="0,0,8,0" Click="CollapseSessionToolbar" ToolTip="메뉴 접기"/>
-              <Button x:Name="EndSessionButton" Content="연결 종료" IsEnabled="False" Click="Disconnect" Foreground="{StaticResource DangerBrush}"/>
-            </StackPanel>
+            <TextBlock x:Name="StatusText" Visibility="Collapsed" Text="준비됨" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
           </Grid>
         </Border>
         <Border x:Name="SessionReveal" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,8,0,0" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="9" Padding="3" ToolTip="끌어서 이동 · 화살표를 눌러 세션 조작 열기">

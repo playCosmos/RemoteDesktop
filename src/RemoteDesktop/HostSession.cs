@@ -563,12 +563,12 @@ public partial class MainWindow
                 await host.StartAsync(port, certificate);
                 if (Closing || start.IsCancellationRequested)
                 {
-                    await host.DisposeAsync();
-                    host = null;
+                    var cleanupFailure = await ReleaseHostAsync();
                     if (!Closing)
                     {
                         SetHostState(HostUiState.Stopped);
                         window.HostStatus(UiText.HostStartCancelled());
+                        if (cleanupFailure != null) window.HostNotice(UiText.HostStopFailed(cleanupFailure), problem: true);
                     }
                     return;
                 }
@@ -581,17 +581,19 @@ public partial class MainWindow
             }
             catch (OperationCanceledException)
             {
-                if (host != null) { await host.DisposeAsync(); host = null; }
+                var cleanupFailure = await ReleaseHostAsync();
                 if (!Closing)
                 {
                     SetHostState(HostUiState.Stopped);
                     window.HostStatus(UiText.HostStartCancelled());
+                    if (cleanupFailure != null) window.HostNotice(UiText.HostStopFailed(cleanupFailure), problem: true);
                 }
             }
             catch (Exception ex)
             {
-                if (host != null) { await host.DisposeAsync(); host = null; }
+                var cleanupFailure = await ReleaseHostAsync();
                 window.HostStatus((automatic ? "자동 접속 대기 실패: " : "접속 대기 실패: ") + UiText.Explain(ex, "포트와 비밀번호를 확인하세요."));
+                if (cleanupFailure != null) window.HostNotice(UiText.HostStopFailed(cleanupFailure), problem: true);
                 SetHostState(HostUiState.Stopped);
                 var field = UiText.HostFailureField(ex);
                 if (field.Length > 0) MarkHostField(field);
@@ -601,6 +603,23 @@ public partial class MainWindow
                 hostStarting = false;
                 if (ReferenceEquals(hostStart, start)) hostStart = null;
                 start.Dispose();
+            }
+        }
+
+        private async Task<Exception?> ReleaseHostAsync()
+        {
+            var activeHost = host;
+            host = null;
+            if (activeHost == null) return null;
+            try
+            {
+                await activeHost.DisposeAsync();
+                return null;
+            }
+            catch (Exception error)
+            {
+                Trace.TraceError("Remote host cleanup failed: {0}", error);
+                return error;
             }
         }
 
@@ -622,10 +641,15 @@ public partial class MainWindow
             var peer = ConnectedPeer;
             SetHostState(HostUiState.Stopping);
             window.HostStatus("접속 대기를 중지하는 중…");
-            if (host != null) { await host.DisposeAsync(); host = null; }
+            var cleanupFailure = await ReleaseHostAsync();
             SetHostState(HostUiState.Stopped);
             UpdatePasswordState();
-            window.HostStatus(UiText.HostStopped(peer));
+            if (cleanupFailure == null) window.HostStatus(UiText.HostStopped(peer));
+            else
+            {
+                window.HostStatus("접속 대기 상태를 확인할 수 없습니다.");
+                window.HostNotice(UiText.HostStopFailed(cleanupFailure), problem: true);
+            }
         }
 
         public void Kick(object sender, RoutedEventArgs e) => host?.Disconnect(UiText.SessionEndKind.Kicked);

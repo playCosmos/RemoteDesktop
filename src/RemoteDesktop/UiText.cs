@@ -62,6 +62,9 @@ public static class UiText
         return name == null ? "서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다." : name + " 연결을 끊고 서버를 중지했습니다.";
     }
 
+    public static string HostStopFailed(Exception error)
+        => "접속 대기 중지 실패: " + Explain(error, "앱을 다시 시작한 뒤 상태를 확인하세요.");
+
     public static bool HostSessionEnded(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;

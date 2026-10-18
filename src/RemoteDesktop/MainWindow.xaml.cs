@@ -22,7 +22,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
-        initializing = false;
         ClientCapsLock.Text = HostCapsLock.Text = UiText.CapsLockWarning();
         Activated += (_, _) => RefreshCapsLock();
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
@@ -41,6 +40,7 @@ public partial class MainWindow : Window
         ServerTab.Visibility = Visibility.Visible;
         hostSession.Bind();
         clientSession.Bind();
+        initializing = false;
         PreviewKeyDown += clientSession.FullscreenKey;
         SourceInitialized += (_, _) =>
         {
@@ -236,14 +236,14 @@ public partial class MainWindow : Window
     private void ChangeHostPassword(object sender, RoutedEventArgs e) => hostSession.ChangeHostPassword(sender, e);
     private void SaveHostPassword(object sender, RoutedEventArgs e) => hostSession.SaveHostPassword(sender, e);
     private void HostPasswordKeyDown(object sender, KeyEventArgs e) => hostSession.HostPasswordKeyDown(sender, e);
-    private void HostPasswordRevealChanged(object sender, RoutedEventArgs e) => hostSession.HostPasswordRevealChanged(sender, e);
-    private void HostPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => hostSession.HostPasswordVisibleChanged(sender, e);
-    private void HostPasswordConfirmVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => hostSession.HostPasswordConfirmVisibleChanged(sender, e);
+    private void HostPasswordRevealChanged(object sender, RoutedEventArgs e) { if (initializing) return; hostSession.HostPasswordRevealChanged(sender, e); }
+    private void HostPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) { if (initializing) return; hostSession.HostPasswordVisibleChanged(sender, e); }
+    private void HostPasswordConfirmVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) { if (initializing) return; hostSession.HostPasswordConfirmVisibleChanged(sender, e); }
     private void StartHost(object sender, RoutedEventArgs e) => hostSession.StartHost(sender, e);
     private void StopHost(object sender, RoutedEventArgs e) => hostSession.StopHost(sender, e);
     private void Kick(object sender, RoutedEventArgs e) => hostSession.Kick(sender, e);
     private void InstallForUser(object sender, RoutedEventArgs e) => hostSession.InstallForUser(sender, e);
-    private void AutostartChanged(object sender, RoutedEventArgs e) => hostSession.AutostartChanged(sender, e);
+    private void AutostartChanged(object sender, RoutedEventArgs e) { if (initializing) return; hostSession.AutostartChanged(sender, e); }
     private void InstallForMachine(object sender, RoutedEventArgs e) => hostSession.InstallForMachine(sender, e);
     private void UninstallApp(object sender, RoutedEventArgs e) => hostSession.UninstallApp(sender, e);
     private void CopyFingerprint(object sender, RoutedEventArgs e) => hostSession.CopyFingerprint(sender, e);
@@ -300,8 +300,8 @@ public partial class MainWindow : Window
     private void Connect(object sender, RoutedEventArgs e) => clientSession.Connect(sender, e);
     private void CancelReconnect(object sender, RoutedEventArgs e) => clientSession.CancelReconnect(sender, e);
     private void ClientPasswordKeyDown(object sender, KeyEventArgs e) => clientSession.ClientPasswordKeyDown(sender, e);
-    private void ClientPasswordRevealChanged(object sender, RoutedEventArgs e) => clientSession.ClientPasswordRevealChanged(sender, e);
-    private void ClientPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) => clientSession.ClientPasswordVisibleChanged(sender, e);
+    private void ClientPasswordRevealChanged(object sender, RoutedEventArgs e) { if (initializing) return; clientSession.ClientPasswordRevealChanged(sender, e); }
+    private void ClientPasswordVisibleChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) { if (initializing) return; clientSession.ClientPasswordVisibleChanged(sender, e); }
     private void UseRecent(object sender, RoutedEventArgs e) => clientSession.UseRecent(sender, e);
     private void ForgetRecent(object sender, RoutedEventArgs e) => clientSession.ForgetRecent(sender, e);
     private void EditPin(object sender, RoutedEventArgs e) => clientSession.EditPin(sender, e);
@@ -324,8 +324,8 @@ public partial class MainWindow : Window
     private void KeyUpRemote(object sender, KeyEventArgs e) => clientSession.KeyUpRemote(sender, e);
     private void ToggleKorean(object sender, RoutedEventArgs e) => clientSession.ToggleKorean(sender, e);
     private void SendSecureAttention(object sender, RoutedEventArgs e) => clientSession.SendSecureAttention(sender, e);
-    private void InputControlChanged(object sender, RoutedEventArgs e) => clientSession.InputControlChanged(sender, e);
-    private void ClipboardAutoChanged(object sender, RoutedEventArgs e) => clientSession.ClipboardAutoChanged(sender, e);
+    private void InputControlChanged(object sender, RoutedEventArgs e) { if (initializing) return; clientSession.InputControlChanged(sender, e); }
+    private void ClipboardAutoChanged(object sender, RoutedEventArgs e) { if (initializing) return; clientSession.ClipboardAutoChanged(sender, e); }
     private void ClipboardSend(object sender, RoutedEventArgs e) => clientSession.ClipboardSend(sender, e);
     private void CancelTransfer(object sender, RoutedEventArgs e) => clientSession.CancelTransfer(sender, e);
     private void ClipboardReceive(object sender, RoutedEventArgs e) => clientSession.ClipboardReceive(sender, e);

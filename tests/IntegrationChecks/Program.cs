@@ -678,6 +678,15 @@ async Task Password()
     await using var site = await OpenHost();
     Check(Desktop.SmoothCapture, "direct host enables stutter reduction from its saved setting");
     Check(site.Certificate.HasPrivateKey, "server TLS certificate has a current-user private key");
+    var certificateTimeMethod = typeof(RemoteClient).GetMethod("IsWithinValidity", BindingFlags.Static | BindingFlags.NonPublic)!;
+    var validityNow = new DateTimeOffset(2026, 3, 8, 19, 0, 0, TimeSpan.FromHours(9));
+    var validityStartUtc = validityNow.UtcDateTime.AddMinutes(-1);
+    var validityEndUtc = validityNow.UtcDateTime.AddMinutes(1);
+    var validUtcWindow = (bool)certificateTimeMethod.Invoke(null, [validityStartUtc, validityEndUtc, validityNow])!;
+    var validLocalWindow = (bool)certificateTimeMethod.Invoke(null, [validityStartUtc.ToLocalTime(), validityEndUtc.ToLocalTime(), validityNow])!;
+    var expiredBeforeWindow = (bool)certificateTimeMethod.Invoke(null, [validityStartUtc, validityEndUtc, validityNow.AddMinutes(-2)])!;
+    var expiredAfterWindow = (bool)certificateTimeMethod.Invoke(null, [validityStartUtc, validityEndUtc, validityNow.AddMinutes(2)])!;
+    Check(validUtcWindow && validLocalWindow && !expiredBeforeWindow && !expiredAfterWindow, "certificate validity compares UTC and local DateTime representations as the same instants");
     Check(site.Settings.Verify(site.Password) && !site.Settings.Verify("wrong"), "salted password verification");
     var hostPath = Path.Combine(site.Root, "host.json");
     var persistedHost = new HostSettings { Port = 45999, SecureDesktopEnabled = false };

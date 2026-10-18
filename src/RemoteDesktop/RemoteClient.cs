@@ -18,10 +18,19 @@ public sealed class RemoteClient : IDisposable
         http = new HttpClient(new HttpClientHandler
         {
             AllowAutoRedirect = false,
-            ServerCertificateCustomValidationCallback = (_, certificate, _, _) => certificate != null && DateTime.Now >= certificate.NotBefore && DateTime.Now <= certificate.NotAfter &&
+            ServerCertificateCustomValidationCallback = (_, certificate, _, _) => certificate != null && IsWithinValidity(certificate.NotBefore, certificate.NotAfter, DateTimeOffset.UtcNow) &&
                 CryptographicOperations.FixedTimeEquals(SHA256.HashData(certificate.RawData), Convert.FromHexString(pin))
         }) { BaseAddress = uri, Timeout = TimeSpan.FromMinutes(30) };
     }
+
+    internal static bool IsWithinValidity(DateTime notBefore, DateTime notAfter, DateTimeOffset nowUtc)
+    {
+        var startUtc = new DateTimeOffset(notBefore).ToUniversalTime();
+        var endUtc = new DateTimeOffset(notAfter).ToUniversalTime();
+        var instantUtc = nowUtc.ToUniversalTime();
+        return instantUtc >= startUtc && instantUtc <= endUtc;
+    }
+
     public async Task Login(string password, CancellationToken cancellationToken = default)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

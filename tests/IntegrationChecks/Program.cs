@@ -2,12 +2,23 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.IO.Pipes;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Reflection;
 using System.Text.Json;
 using RemoteDesktop;
+
+if (args.Length == 2 && args[0] == "--secure-pipe-client")
+{
+    using var pipeClient = new NamedPipeClientStream(".", args[1], PipeDirection.InOut, PipeOptions.Asynchronous);
+    pipeClient.Connect(3000);
+    _ = pipeClient.ReadByte();
+    Environment.Exit(0);
+}
 
 System.Windows.Forms.Application.SetHighDpiMode(System.Windows.Forms.HighDpiMode.PerMonitorV2);
 var passed = 0;
@@ -78,31 +89,53 @@ Check(!SecureDesktop.TryUnpack(securePacked, secureNow.AddSeconds(5), TimeSpan.F
 Check(!SecureDesktop.TryUnpack(securePacked.AsSpan(0, 8).ToArray(), secureNow, TimeSpan.FromSeconds(2), out _), "a short secure frame is ignored");
 var secureInputKey = Enumerable.Range(0, SecureDesktop.InputKeyLength).Select(i => (byte)i).ToArray();
 var secureChallenge = Enumerable.Range(0, SecureDesktop.InputKeyLength).Select(i => (byte)(255 - i)).ToArray();
-var secureEndpointText = "45831\n" + Convert.ToBase64String(secureInputKey);
-Check(SecureDesktop.TryParseEndpoint(secureEndpointText, out var securePort, out var parsedSecureKey) && securePort == 45831 && parsedSecureKey.SequenceEqual(secureInputKey) && !SecureDesktop.TryParseEndpoint("65536\n" + Convert.ToBase64String(secureInputKey), out _, out _) && !SecureDesktop.TryParseEndpoint("45831\nnot-a-key", out _, out _), "the secure desktop channel accepts only a valid port and private key");
+var viewerSid = WindowsIdentity.GetCurrent().User!;
+var securePipeName = SecureDesktop.NewPipeName();
+var secureEndpointText = securePipeName + "\n" + Convert.ToBase64String(secureInputKey);
+Check(SecureDesktop.TryParseEndpoint(secureEndpointText, out var parsedPipeName, out var parsedSecureKey) && parsedPipeName == securePipeName && parsedSecureKey.SequenceEqual(secureInputKey) && !SecureDesktop.TryParseEndpoint("bad-pipe\n" + Convert.ToBase64String(secureInputKey), out _, out _) && !SecureDesktop.TryParseEndpoint(securePipeName + "\nnot-a-key", out _, out _), "the secure desktop channel accepts only a valid pipe name and private key");
 var secureProof = SecureDesktop.InputProof(secureInputKey, secureChallenge);
 var otherSecureChallenge = secureChallenge.Select(value => (byte)(value ^ 0xA5)).ToArray();
 Check(SecureDesktop.VerifyInputProof(secureInputKey, secureChallenge, secureProof) && !SecureDesktop.VerifyInputProof(secureInputKey, otherSecureChallenge, secureProof) && !SecureDesktop.VerifyInputProof(secureInputKey, secureChallenge, new byte[SecureDesktop.InputKeyLength]) && !SecureDesktop.VerifyInputProof(secureInputKey.AsSpan(1), secureChallenge, secureProof), "the secure desktop channel verifies a fresh keyed challenge");
-async Task<bool> AuthenticateSecureLoopback(byte[] offeredKey)
+async Task<(bool Authenticated, int ProcessId)> AuthenticateSecureLoopback(byte[] offeredKey)
 {
-    using var server = new TcpListener(IPAddress.Loopback, 0);
-    server.Start();
-    var port = ((IPEndPoint)server.LocalEndpoint).Port;
+    var pipeName = SecureDesktop.NewPipeName();
+    using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
     var serverCheck = Task.Run(async () =>
     {
-        using var accepted = await server.AcceptTcpClientAsync();
+        await server.WaitForConnectionAsync();
+        var processId = SecureDesktop.GetPipeClientProcessId(server);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-        return await SecureDesktop.AuthenticateInputServerAsync(accepted.GetStream(), secureInputKey, timeout.Token);
+        var authenticated = await SecureDesktop.AuthenticateInputServerAsync(server, secureInputKey, timeout.Token);
+        return (authenticated, processId);
     });
-    using var client = new TcpClient();
-    await client.ConnectAsync(IPAddress.Loopback, port);
-    var stream = client.GetStream();
-    stream.ReadTimeout = 1000;
-    SecureDesktop.AuthenticateInputClient(stream, offeredKey);
+    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+    client.Connect(2000);
+    SecureDesktop.AuthenticateInputClient(client, offeredKey);
     return await serverCheck;
 }
-Check(await AuthenticateSecureLoopback(secureInputKey) && !await AuthenticateSecureLoopback(new byte[SecureDesktop.InputKeyLength]), "the loopback secure input listener admits only a client holding its session key");
-var viewerSid = WindowsIdentity.GetCurrent().User!;
+var validSecurePeer = await AuthenticateSecureLoopback(secureInputKey);
+var invalidSecurePeer = await AuthenticateSecureLoopback(new byte[SecureDesktop.InputKeyLength]);
+Check(validSecurePeer.Authenticated && validSecurePeer.ProcessId == Environment.ProcessId && !invalidSecurePeer.Authenticated, $"the loopback secure input listener admits only the session process with its key (auth={validSecurePeer.Authenticated}, pid={validSecurePeer.ProcessId}, expected={Environment.ProcessId}, invalid={invalidSecurePeer.Authenticated})");
+async Task<int> GetOtherPipeClientPid()
+{
+    var name = SecureDesktop.NewPipeName();
+    using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+    var wait = server.WaitForConnectionAsync();
+    var clientProcess = Environment.ProcessPath ?? throw new InvalidOperationException("Test executable path is missing");
+    var start = new ProcessStartInfo(clientProcess) { UseShellExecute = false, CreateNoWindow = true };
+    if (Path.GetFileNameWithoutExtension(clientProcess).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        start.ArgumentList.Add(Assembly.GetEntryAssembly()?.Location ?? throw new InvalidOperationException("Test assembly path is missing"));
+    start.ArgumentList.Add("--secure-pipe-client");
+    start.ArgumentList.Add(name);
+    using var child = Process.Start(start) ?? throw new InvalidOperationException("Could not start pipe client check");
+    await wait.WaitAsync(TimeSpan.FromSeconds(5));
+    var processId = SecureDesktop.GetPipeClientProcessId(server);
+    server.Dispose();
+    if (!child.WaitForExit(5000)) { child.Kill(true); throw new TimeoutException("The test pipe client did not exit"); }
+    return processId;
+}
+var otherSecurePeerPid = await GetOtherPipeClientPid();
+Check(otherSecurePeerPid > 0 && otherSecurePeerPid != Environment.ProcessId, "Windows identifies a different same-user named-pipe client process");
 var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
 var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
 var privateSids = new HashSet<string>(StringComparer.Ordinal) { new SecurityIdentifier(WellKnownSidType.WorldSid, null).Value, new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null).Value, new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null).Value };
@@ -113,6 +146,15 @@ var secureFileRules = secureFileAcl.GetAccessRules(true, true, typeof(SecurityId
 var secureTrustedSids = new[] { systemSid, adminsSid };
 bool HasFullControl(FileSystemAccessRule[] rules, SecurityIdentifier sid) => rules.Any(rule => rule.IdentityReference.Equals(sid) && rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl);
 Check(secureDirectoryAcl.AreAccessRulesProtected && secureFileAcl.AreAccessRulesProtected && secureTrustedSids.All(sid => HasFullControl(secureDirectoryRules, sid) && HasFullControl(secureFileRules, sid)) && secureDirectoryRules.Any(rule => rule.IdentityReference.Equals(viewerSid) && (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute && (rule.FileSystemRights & FileSystemRights.Write) == 0) && secureFileRules.Any(rule => rule.IdentityReference.Equals(viewerSid) && (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute && (rule.FileSystemRights & FileSystemRights.Write) == 0) && secureDirectoryRules.All(rule => !privateSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)) && secureFileRules.All(rule => !privateSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)), "secure desktop files are readable only by SYSTEM, administrators, and the active user");
+var securePipeSecurity = SecureDesktop.BuildInputPipeSecurity(viewerSid);
+var securePipeRules = securePipeSecurity.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<PipeAccessRule>().ToArray();
+var securePipeSddl = SecureDesktop.BuildInputPipeSddl(viewerSid);
+var securePipeDescriptor = new RawSecurityDescriptor(securePipeSddl);
+var viewerPipeRule = securePipeRules.Any(rule => rule.IdentityReference.Equals(viewerSid) && (rule.PipeAccessRights & PipeAccessRights.ReadWrite) == PipeAccessRights.ReadWrite && (rule.PipeAccessRights & PipeAccessRights.CreateNewInstance) == 0);
+var serverPipeRule = securePipeRules.Any(rule => rule.IdentityReference.Equals(systemSid) && (rule.PipeAccessRights & PipeAccessRights.CreateNewInstance) != 0);
+var noBroadPipeRules = securePipeRules.All(rule => !privateSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value));
+var mediumPipeLabel = securePipeSddl.Contains("ML;;NW;;;ME", StringComparison.Ordinal) && securePipeDescriptor.SystemAcl?.Count == 1;
+Check(viewerPipeRule && serverPipeRule && noBroadPipeRules && mediumPipeLabel, "the UAC pipe admits the active user at medium integrity and reserves instance creation to SYSTEM and administrators");
 var secureMove = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("move", 0.25, 0.75)));
 var secureKey = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("key", Code: 13, Down: true)));
 Check(secureMove.Kind == "move" && secureMove.X == 0.25 && secureMove.Y == 0.75 && secureKey.Kind == "key" && secureKey.Code == 13 && secureKey.Down, "secure input keeps the pointer and the key");
@@ -370,7 +412,7 @@ Check(UiText.SessionEnded("192.168.0.2", UiText.SessionEndKind.Left, 45831) == "
 Check(UiText.HostStopped(null) == "서버 중지됨 · 저장된 비밀번호로 다시 시작할 수 있습니다." && UiText.HostStopped("192.168.0.2") == "192.168.0.2 연결을 끊고 서버를 중지했습니다.", "stopping the server names the client that was dropped");
 Check(UiText.HostSessionEnded(UiText.SessionEnded("10.0.0.8", UiText.SessionEndKind.Left, 1)) && UiText.SessionOnPicture(UiText.HostStopped("10.0.0.8")) && UiText.SessionNoticeDuration(UiText.SessionEnded("10.0.0.8", UiText.SessionEndKind.Kicked, 1)) == TimeSpan.FromSeconds(12) && !UiText.HostSessionEnded("서버에서 연결을 끊었습니다. 다시 접속하세요."), "a client leaving this pc stays on the remote picture");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", null, null) == "Personal Remote Desktop 0.9.59", "an idle window keeps the product title");
-Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 — 192.168.0.2 연결됨", "both sessions name the remote pc and the inbound client");
+Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", "192.168.0.2") == "10.0.0.8:45831 — 192.168.0.2 연결됨 — Personal Remote Desktop 0.9.59", "both sessions name the remote pc, inbound client, and product");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", "10.0.0.8:45831", null) == "10.0.0.8:45831 — Personal Remote Desktop 0.9.59", "an open remote session names the window");
 Check(UiText.WindowTitle("Personal Remote Desktop 0.9.59", null, "192.168.0.2") == "192.168.0.2 연결됨 — Personal Remote Desktop 0.9.59", "an inbound client names the window");
 Check(UiText.HostTabLabel(null) == "이 PC" && UiText.HostTabLabel("192.168.0.2") == "이 PC · 192.168.0.2", "the host tab names the connected client");

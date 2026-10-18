@@ -83,7 +83,7 @@ public static class UiText
     {
         var viewing = Blank(outbound);
         var hosting = Blank(inbound);
-        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨";
+        if (viewing != null && hosting != null) return viewing + " — " + hosting + " 연결됨 — " + product;
         if (viewing != null) return viewing + " — " + product;
         if (hosting != null) return hosting + " 연결됨 — " + product;
         return product;

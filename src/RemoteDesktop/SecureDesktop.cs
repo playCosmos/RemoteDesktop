@@ -1,10 +1,13 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.ComponentModel;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 
 namespace RemoteDesktop;
 
@@ -21,9 +24,13 @@ public static class SecureDesktop
 {
     public static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(2);
     public const int InputKeyLength = 32;
+    const uint PipeAccessDuplex = 0x00000003;
+    const uint PipeRejectRemoteClients = 0x00000008;
+    const uint FileFlagOverlapped = 0x40000000;
+    const uint FileFlagFirstPipeInstance = 0x00080000;
     public static bool OwnsDesktop { get; set; }
     static int lastView;
-    static TcpClient? forwarder;
+    static NamedPipeClientStream? forwarder;
     static readonly object forwardGate = new();
     static readonly object fileAccessGate = new();
     static long nextProbeTicks;
@@ -47,14 +54,14 @@ public static class SecureDesktop
     public static string FramePath(string commonAppData)
         => Path.Combine(commonAppData, "PersonalRemoteDesktop", "secure-desktop.bin");
 
-    public static string PortPath(string commonAppData)
-        => Path.Combine(commonAppData, "PersonalRemoteDesktop", "secure-input.port");
+    public static string PipePath(string commonAppData)
+        => Path.Combine(commonAppData, "PersonalRemoteDesktop", "secure-input.pipe");
 
     public static string FramePath()
         => FramePath(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
 
-    public static string PortPath()
-        => PortPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
+    public static string PipePath()
+        => PipePath(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData));
 
     public static byte[] Pack(DateTime utc, int width, int height, ReadOnlySpan<byte> jpeg)
     {
@@ -96,7 +103,8 @@ public static class SecureDesktop
             new DirectoryInfo(directory).SetAccessControl(BuildDirectorySecurity(viewer));
             SetFileAccess(FramePath(), viewer);
             SetFileAccess(FramePath() + ".tmp", viewer);
-            SetFileAccess(PortPath(), viewer);
+            SetFileAccess(PipePath(), viewer);
+            SetFileAccess(PipePath() + ".tmp", viewer);
         }
     }
 
@@ -123,44 +131,86 @@ public static class SecureDesktop
         }
     }
 
-    public static void WritePort(int port, ReadOnlySpan<byte> key)
+    public static string NewPipeName() => "PersonalRemoteDesktop.Input." + Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    public static NamedPipeServerStream CreateInputServer(string pipeName, SecurityIdentifier? viewer)
     {
-        if (port is < 1 or > 65535 || key.Length != InputKeyLength) throw new ArgumentException("Invalid secure input endpoint");
-        var path = PortPath();
+        if (!IsPipeName(pipeName)) throw new ArgumentException("Invalid secure input pipe name", nameof(pipeName));
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptor(BuildInputPipeSddl(viewer), 1, out var descriptor, out _))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            var attributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = descriptor };
+            var path = @"\\.\pipe\" + pipeName;
+            var handle = CreateNamedPipe(path, PipeAccessDuplex | FileFlagOverlapped | FileFlagFirstPipeInstance, PipeRejectRemoteClients, 1, 8192, 8192, 0, ref attributes);
+            if (handle == new nint(-1)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return new NamedPipeServerStream(PipeDirection.InOut, isAsync: true, isConnected: false, safePipeHandle: new SafePipeHandle(handle, ownsHandle: true));
+        }
+        finally { _ = LocalFree(descriptor); }
+    }
+
+    public static PipeSecurity BuildInputPipeSecurity(SecurityIdentifier? viewer)
+    {
+        var security = new PipeSecurity();
+        security.SetAccessRuleProtection(true, false);
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        security.AddAccessRule(new PipeAccessRule(system, PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance | PipeAccessRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(admins, PipeAccessRights.FullControl, AccessControlType.Allow));
+        if (viewer != null) security.AddAccessRule(new PipeAccessRule(viewer, PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        var accessSddl = security.GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+        security.SetSecurityDescriptorSddlForm(accessSddl + "S:(ML;;NW;;;ME)");
+        return security;
+    }
+
+    public static string BuildInputPipeSddl(SecurityIdentifier? viewer)
+        => BuildInputPipeSecurity(viewer).GetSecurityDescriptorSddlForm(AccessControlSections.Access) + "S:(ML;;NW;;;ME)";
+
+    public static bool IsPipeName(string? pipeName)
+    {
+        const string prefix = "PersonalRemoteDesktop.Input.";
+        if (pipeName is null || !pipeName.StartsWith(prefix, StringComparison.Ordinal) || pipeName.Length != prefix.Length + 32) return false;
+        return pipeName.AsSpan(prefix.Length).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0;
+    }
+
+    public static void WriteEndpoint(string pipeName, ReadOnlySpan<byte> key, SecurityIdentifier? viewer)
+    {
+        if (!IsPipeName(pipeName) || key.Length != InputKeyLength) throw new ArgumentException("Invalid secure input endpoint");
+        var path = PipePath();
         lock (fileAccessGate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, port.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + Convert.ToBase64String(key));
+            var temporary = path + ".tmp";
+            File.WriteAllText(temporary, pipeName + "\n" + Convert.ToBase64String(key));
+            File.Move(temporary, path, true);
+            SetFileAccess(path, viewer);
         }
     }
 
-    public static void ClearPort()
+    public static void ClearEndpoint()
     {
         lock (fileAccessGate)
         {
-            try { File.Delete(PortPath()); }
+            try { File.Delete(PipePath()); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            try { File.Delete(PipePath() + ".tmp"); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
 
-    public static bool TryParseEndpoint(string? text, out int port, out byte[] key)
+    public static bool TryParseEndpoint(string? text, out string pipeName, out byte[] key)
     {
-        port = 0;
+        pipeName = "";
         key = [];
         if (string.IsNullOrWhiteSpace(text)) return false;
         var lines = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (lines.Length != 2 || !int.TryParse(lines[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port) || port is < 1 or > 65535)
-        {
-            port = 0;
-            return false;
-        }
+        if (lines.Length != 2 || !IsPipeName(lines[0])) return false;
         try
         {
             key = Convert.FromBase64String(lines[1]);
-            if (key.Length == InputKeyLength) return true;
+            if (key.Length == InputKeyLength) { pipeName = lines[0]; return true; }
         }
         catch (FormatException) { }
-        port = 0;
         key = [];
         return false;
     }
@@ -194,20 +244,25 @@ public static class SecureDesktop
         stream.Write(InputProof(key, challenge));
     }
 
-    static int ReadEndpoint(out byte[] key)
+    public static int GetPipeClientProcessId(NamedPipeServerStream pipe)
+        => GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var processId) && processId is > 0 and <= int.MaxValue
+            ? (int)processId : 0;
+
+    static bool ReadEndpoint(out string pipeName, out byte[] key)
     {
+        pipeName = "";
         key = [];
         try
         {
-            return TryParseEndpoint(File.ReadAllText(PortPath()), out var port, out key) ? port : 0;
+            return TryParseEndpoint(File.ReadAllText(PipePath()), out pipeName, out key);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            return 0;
+            return false;
         }
     }
 
-    public static int ReadPort() => ReadEndpoint(out _);
+    public static int ReadPort() => ReadEndpoint(out _, out _) ? 1 : 0;
 
     public static DirectorySecurity BuildDirectorySecurity(SecurityIdentifier? viewer)
     {
@@ -322,9 +377,8 @@ public static class SecureDesktop
             {
                 if (!EnsureForwarder()) return false;
                 var length = BitConverter.GetBytes(payload.Length);
-                var stream = forwarder!.GetStream();
-                stream.Write(length);
-                stream.Write(payload);
+                forwarder!.Write(length);
+                forwarder.Write(payload);
                 return true;
             }
             catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException)
@@ -338,34 +392,24 @@ public static class SecureDesktop
 
     static bool EnsureForwarder()
     {
-        if (forwarder is { Connected: true } connected && !PeerClosed(connected)) return true;
+        if (forwarder is { SafePipeHandle.IsClosed: false }) return true;
         forwarder?.Dispose();
         forwarder = null;
-        var port = ReadEndpoint(out var key);
-        if (port == 0) return false;
-        TcpClient? client = new();
+        if (!ReadEndpoint(out var pipeName, out var key)) return false;
+        NamedPipeClientStream? client = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
-            var task = client.ConnectAsync(IPAddress.Loopback, port);
-            if (!task.Wait(200) || !client.Connected) return false;
-            var stream = client.GetStream();
-            stream.ReadTimeout = 1000;
-            AuthenticateInputClient(stream, key);
+            client.Connect(200);
+            AuthenticateInputClient(client, key);
             forwarder = client;
             client = null;
             return true;
         }
-        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException or AggregateException)
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException or TimeoutException)
         {
             return false;
         }
         finally { client?.Dispose(); }
-    }
-
-    static bool PeerClosed(TcpClient client)
-    {
-        try { return client.Client.Poll(0, SelectMode.SelectRead) && client.Available == 0; }
-        catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { return true; }
     }
 
     static bool TryReadFresh(DateTime now, out byte[]? jpeg)
@@ -398,4 +442,9 @@ public static class SecureDesktop
 
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetNamedPipeClientProcessId(nint pipe, out uint clientProcessId);
+    [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public nint Descriptor; public int InheritHandle; }
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out nint descriptor, out uint size);
+    [DllImport("kernel32.dll")] static extern nint LocalFree(nint memory);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint CreateNamedPipe(string name, uint openMode, uint pipeMode, uint maxInstances, uint outBufferSize, uint inBufferSize, uint defaultTimeout, ref SecurityAttributes securityAttributes);
 }

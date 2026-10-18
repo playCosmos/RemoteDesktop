@@ -1,6 +1,8 @@
 using System.IO;
+using System.IO.Pipes;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
@@ -79,48 +81,50 @@ sealed class SessionService
     readonly CancellationTokenSource cancel = new();
     readonly ConcurrentQueue<InputEvent> inputs = new();
     readonly InputInjector injector = new();
-    readonly SemaphoreSlim inputClients = new(8, 8);
-    readonly ConcurrentDictionary<TcpClient, byte> activeClients = new();
+    readonly SemaphoreSlim inputClients = new(1, 1);
+    readonly ConcurrentDictionary<NamedPipeServerStream, byte> activeClients = new();
     readonly object inputChannelGate = new();
     byte[] inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
-    int inputPort;
+    string inputPipeName = SecureDesktop.NewPipeName();
     int allowFramePublish;
+    int trustedUiPid;
+    uint trustedUiSession;
+    SecurityIdentifier? trustedViewer;
     Thread? desktopThread;
-    TcpListener? listener;
+    NamedPipeServerStream? pendingPipe;
 
     public void Start()
     {
         SecureAttention.TryEnsurePolicy();
         SecureDesktop.SetViewerAccess(null);
         SecureDesktop.ClearFrame();
-        SecureDesktop.ClearPort();
+        SecureDesktop.ClearEndpoint();
         Volatile.Write(ref allowFramePublish, 1);
-        listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        inputPort = ((IPEndPoint)listener.LocalEndpoint).Port;
-        SecureDesktop.WritePort(inputPort, inputKey);
+        SecureDesktop.WriteEndpoint(inputPipeName, inputKey, null);
         SecureDesktop.OwnsDesktop = true;
         _ = AcceptInputs(cancel.Token);
         desktopThread = new Thread(DesktopLoop) { IsBackground = true, Name = "Secure desktop" };
         desktopThread.SetApartmentState(ApartmentState.STA);
         desktopThread.Start();
         LaunchUi();
+        _ = MonitorUiProcess(cancel.Token);
     }
 
     public void Stop()
     {
         cancel.Cancel();
         Volatile.Write(ref allowFramePublish, 0);
-        try { listener?.Stop(); } catch (SocketException) { }
         lock (inputChannelGate)
         {
+            pendingPipe?.Dispose();
+            pendingPipe = null;
             foreach (var client in activeClients.Keys) client.Dispose();
             while (inputs.TryDequeue(out _)) { }
         }
         desktopThread?.Join(2000);
         try { SecureDesktop.SetViewerAccess(null); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
         SecureDesktop.ClearFrame();
-        SecureDesktop.ClearPort();
+        SecureDesktop.ClearEndpoint();
         SecureDesktop.OwnsDesktop = false;
     }
 
@@ -137,46 +141,95 @@ sealed class SessionService
 
     async Task AcceptInputs(CancellationToken token)
     {
-        while (!token.IsCancellationRequested && listener != null)
+        while (!token.IsCancellationRequested)
         {
-            TcpClient client;
-            try { client = await listener.AcceptTcpClientAsync(token); }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException) { return; }
-            if (!inputClients.Wait(0)) { client.Dispose(); continue; }
+            NamedPipeServerStream pipe;
+            string expectedPipeName;
+            SecurityIdentifier? expectedViewer;
             byte[] expectedKey;
+            int expectedUiPid;
+            uint expectedUiSession;
             lock (inputChannelGate)
             {
-                activeClients.TryAdd(client, 0);
+                expectedPipeName = inputPipeName;
+                expectedViewer = trustedViewer;
                 expectedKey = inputKey;
+                expectedUiPid = trustedUiPid;
+                expectedUiSession = trustedUiSession;
             }
-            _ = ReadInputs(client, expectedKey, token);
+            try { pipe = SecureDesktop.CreateInputServer(expectedPipeName, expectedViewer); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+            {
+                if (token.IsCancellationRequested) return;
+                await Task.Delay(100, token);
+                continue;
+            }
+            lock (inputChannelGate)
+            {
+                if (inputPipeName != expectedPipeName || token.IsCancellationRequested)
+                {
+                    pipe.Dispose();
+                    continue;
+                }
+                pendingPipe = pipe;
+            }
+            try { await pipe.WaitForConnectionAsync(token); }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException)
+            {
+                lock (inputChannelGate) if (ReferenceEquals(pendingPipe, pipe)) pendingPipe = null;
+                pipe.Dispose();
+                if (token.IsCancellationRequested) return;
+                continue;
+            }
+            lock (inputChannelGate)
+            {
+                if (!ReferenceEquals(pendingPipe, pipe) || inputPipeName != expectedPipeName || token.IsCancellationRequested)
+                {
+                    pipe.Dispose();
+                    continue;
+                }
+                pendingPipe = null;
+                activeClients.TryAdd(pipe, 0);
+            }
+            if (!inputClients.Wait(0)) { pipe.Dispose(); activeClients.TryRemove(pipe, out _); continue; }
+            if (expectedUiPid <= 0 || SecureDesktop.GetPipeClientProcessId(pipe) != expectedUiPid
+                || !IsTrustedUiProcess(expectedUiPid, expectedUiSession, Environment.ProcessPath ?? ""))
+            {
+                pipe.Dispose();
+                activeClients.TryRemove(pipe, out _);
+                inputClients.Release();
+                continue;
+            }
+            await ReadInputs(pipe, expectedKey, expectedUiPid, expectedUiSession, token);
         }
     }
 
-    async Task ReadInputs(TcpClient client, byte[] expectedKey, CancellationToken token)
+    async Task ReadInputs(NamedPipeServerStream pipe, byte[] expectedKey, int expectedUiPid, uint expectedUiSession, CancellationToken token)
     {
         try
         {
-            using (client)
-            using (var stream = client.GetStream())
+            using (pipe)
             {
+                var executable = Environment.ProcessPath ?? "";
+                if (!IsTrustedUiProcess(expectedUiPid, expectedUiSession, executable)) return;
                 using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                 handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(2));
                 try
                 {
-                    if (!await SecureDesktop.AuthenticateInputServerAsync(stream, expectedKey, handshakeTimeout.Token)) return;
+                    if (!await SecureDesktop.AuthenticateInputServerAsync(pipe, expectedKey, handshakeTimeout.Token)) return;
                 }
-                catch (Exception ex) when (ex is IOException or OperationCanceledException or SocketException or ObjectDisposedException) { return; }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException) { return; }
                 var lengthBytes = new byte[4];
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
-                        await stream.ReadExactlyAsync(lengthBytes, token);
+                        if (!IsTrustedUiProcess(expectedUiPid, expectedUiSession, executable)) return;
+                        await pipe.ReadExactlyAsync(lengthBytes, token);
                         var length = BitConverter.ToInt32(lengthBytes);
                         if (length is < 2 or > 8192) return;
                         var body = new byte[length];
-                        await stream.ReadExactlyAsync(body, token);
+                        await pipe.ReadExactlyAsync(body, token);
                         var input = SecureDesktop.DecodeInput(body);
                         while (inputs.Count >= 32 && inputs.TryDequeue(out _)) { }
                         inputs.Enqueue(input);
@@ -187,22 +240,30 @@ sealed class SessionService
         }
         finally
         {
-            activeClients.TryRemove(client, out _);
+            activeClients.TryRemove(pipe, out _);
             inputClients.Release();
         }
     }
 
-    void ResetInputChannel(SecurityIdentifier? viewer)
+    void ResetInputChannel(SecurityIdentifier? viewer, uint viewerSession = 0)
     {
         Volatile.Write(ref allowFramePublish, 0);
         lock (inputChannelGate)
         {
+            if (viewer == null || trustedViewer == null || !trustedViewer.Equals(viewer) || trustedUiSession != viewerSession)
+                trustedUiPid = 0;
+            trustedViewer = viewer;
+            trustedUiSession = viewer == null ? 0 : viewerSession;
+            if (trustedUiPid > 0 && !IsTrustedUiProcess(trustedUiPid, trustedUiSession, Environment.ProcessPath ?? "")) trustedUiPid = 0;
             inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
+            inputPipeName = SecureDesktop.NewPipeName();
+            pendingPipe?.Dispose();
+            pendingPipe = null;
             foreach (var client in activeClients.Keys) client.Dispose();
             while (inputs.TryDequeue(out _)) { }
             SecureDesktop.ClearFrame();
             SecureDesktop.SetViewerAccess(viewer);
-            if (inputPort is > 0 and <= 65535) SecureDesktop.WritePort(inputPort, inputKey);
+            SecureDesktop.WriteEndpoint(inputPipeName, inputKey, viewer);
         }
         Volatile.Write(ref allowFramePublish, 1);
     }
@@ -285,11 +346,19 @@ sealed class SessionService
         {
             var viewer = TokenUserSid(user);
             if (viewer == null) return;
-            try { ResetInputChannel(viewer); }
+            try { ResetInputChannel(viewer, session); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
             {
                 SecureDesktop.ClearFrame();
                 return;
+            }
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable)) return;
+            var existingUi = FindExistingUiProcess(executable, session);
+            lock (inputChannelGate)
+            {
+                if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
+                    trustedUiPid = existingUi;
             }
             if (!DuplicateTokenEx(user, 0x10000000, 0, 2, 1, out var primary)) return;
             try
@@ -297,10 +366,27 @@ sealed class SessionService
                 if (!CreateEnvironmentBlock(out var environment, primary, false)) environment = 0;
                 try
                 {
-                    var executable = Environment.ProcessPath;
-                    if (string.IsNullOrWhiteSpace(executable)) return;
                     var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>(), desktop = "winsta0" + (char)92 + "default", showWindow = 5, flags = 1 };
                     if (!CreateProcessAsUser(primary, null, AppInstall.Quoted(executable), 0, 0, false, 0x400, environment, Path.GetDirectoryName(executable), ref startup, out var process)) return;
+                    var childPid = process.ProcessId is > 0 and <= int.MaxValue ? (int)process.ProcessId : 0;
+                    var wait = WaitForSingleObject(process.Process, 300);
+                    if (childPid > 0 && wait != 0 && IsTrustedUiProcess(childPid, session, executable))
+                    {
+                        lock (inputChannelGate)
+                        {
+                            if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
+                                trustedUiPid = childPid;
+                        }
+                    }
+                    if (childPid > 0 && trustedUiPid == 0)
+                    {
+                        var candidate = FindExistingUiProcess(executable, session);
+                        lock (inputChannelGate)
+                        {
+                            if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
+                                trustedUiPid = candidate;
+                        }
+                    }
                     CloseHandle(process.Thread);
                     CloseHandle(process.Process);
                 }
@@ -309,6 +395,123 @@ sealed class SessionService
             finally { CloseHandle(primary); }
         }
         finally { CloseHandle(user); }
+    }
+
+    async Task MonitorUiProcess(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(1), token); }
+            catch (OperationCanceledException) { return; }
+            int pid;
+            uint session;
+            SecurityIdentifier? viewer;
+            lock (inputChannelGate)
+            {
+                pid = trustedUiPid;
+                session = trustedUiSession;
+                viewer = trustedViewer;
+            }
+            if (viewer == null || session == 0xFFFFFFFF || WTSGetActiveConsoleSessionId() != session) continue;
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable)) continue;
+            if (pid > 0 && IsTrustedUiProcess(pid, session, executable)) continue;
+            var channelReset = false;
+            if (pid > 0)
+            {
+                lock (inputChannelGate)
+                {
+                    if (trustedUiPid == pid && trustedUiSession == session && trustedViewer?.Equals(viewer) == true)
+                        trustedUiPid = 0;
+                }
+                try { ResetInputChannel(viewer, session); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+                {
+                    SecureDesktop.ClearFrame();
+                    continue;
+                }
+                channelReset = true;
+            }
+            if (!WTSQueryUserToken(session, out var user)) continue;
+            SecurityIdentifier? activeViewer;
+            try { activeViewer = TokenUserSid(user); }
+            finally { CloseHandle(user); }
+            if (activeViewer == null || !activeViewer.Equals(viewer)) continue;
+            var candidate = FindExistingUiProcess(executable, session);
+            if (candidate <= 0) continue;
+            if (!channelReset)
+            {
+                try { ResetInputChannel(viewer, session); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+                {
+                    SecureDesktop.ClearFrame();
+                    continue;
+                }
+            }
+            lock (inputChannelGate)
+            {
+                if (trustedUiPid == 0 && trustedUiSession == session && trustedViewer?.Equals(viewer) == true)
+                    trustedUiPid = candidate;
+            }
+        }
+    }
+
+    static int FindExistingUiProcess(string executable, uint session)
+    {
+        var expected = AppInstall.Normalize(executable);
+        var version = FileVersionInfo.GetVersionInfo(executable);
+        var titlePrefix = "Personal Remote Desktop " + version.FileMajorPart + "." + version.FileMinorPart + "." + version.FileBuildPart;
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executable)))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.HasExited || (uint)process.SessionId != session || !HasProductWindow(process.Id, titlePrefix)) continue;
+                    var image = process.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(image) && AppInstall.Normalize(image).Equals(expected, StringComparison.OrdinalIgnoreCase))
+                        return process.Id;
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException) { }
+            }
+        }
+        return 0;
+    }
+
+    static bool HasProductWindow(int processId, string titlePrefix)
+    {
+        var found = false;
+        var callback = new EnumWindowsCallback((window, _) =>
+        {
+            GetWindowThreadProcessId(window, out var owner);
+            if (owner != (uint)processId) return true;
+            var length = GetWindowTextLength(window);
+            if (length <= 0) return true;
+            var title = new System.Text.StringBuilder(length + 1);
+            GetWindowText(window, title, title.Capacity);
+            if (!title.ToString().Contains(titlePrefix, StringComparison.OrdinalIgnoreCase)) return true;
+            found = true;
+            return false;
+        });
+        EnumWindows(callback, 0);
+        return found;
+    }
+
+    delegate bool EnumWindowsCallback(nint window, nint parameter);
+
+    static bool IsTrustedUiProcess(int processId, uint session, string executable)
+    {
+        if (processId <= 0 || session == 0xFFFFFFFF) return false;
+        var expected = AppInstall.Normalize(executable);
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (process.HasExited || (uint)process.SessionId != session) return false;
+            var image = process.MainModule?.FileName;
+            return !string.IsNullOrWhiteSpace(image) && AppInstall.Normalize(image).Equals(expected, StringComparison.OrdinalIgnoreCase)
+                && HasProductWindow(processId, "Personal Remote Desktop ");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception or NotSupportedException) { return false; }
     }
 
     static SecurityIdentifier? TokenUserSid(nint token)
@@ -335,10 +538,14 @@ sealed class SessionService
         public nint reserved3, stdIn, stdOut, stdErr;
     }
     [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public nint Sid; public uint Attributes; }
-    [StructLayout(LayoutKind.Sequential)] struct ProcessHandles { public nint Process, Thread; }
+    [StructLayout(LayoutKind.Sequential)] struct ProcessHandles { public nint Process, Thread; public uint ProcessId, ThreadId; }
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetThreadDesktop(nint desktop);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
+    [DllImport("user32.dll", SetLastError = true)] static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
+    [DllImport("user32.dll", SetLastError = true)] static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetWindowText(nint window, System.Text.StringBuilder text, int maxCount);
+    [DllImport("user32.dll", SetLastError = true)] static extern int GetWindowTextLength(nint window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(nint handle, int index, nint info, int length, out int needed);
     [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
     [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();
@@ -349,4 +556,5 @@ sealed class SessionService
     [DllImport("userenv.dll", SetLastError = true)] static extern bool DestroyEnvironmentBlock(nint environment);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessAsUser(nint token, string? application, string command, nint processAttributes, nint threadAttributes, bool inherit, uint flags, nint environment, string? directory, ref StartupInfo startup, out ProcessHandles process);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(nint handle);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(nint handle, uint milliseconds);
 }

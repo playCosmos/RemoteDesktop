@@ -144,7 +144,9 @@ try {
     if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'A Personal Remote Desktop service already exists on this runner.' }
     if (Test-Path -LiteralPath $machineDirectory) { throw 'The machine install directory already exists on this runner.' }
     if (Test-Path -LiteralPath $shortcut) { throw 'The machine Start Menu shortcut already exists on this runner.' }
-    if (@(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue).Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
+$existingFirewallByName = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue)
+$existingFirewallByDisplayName = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
+if ($existingFirewallByName.Count -gt 0 -or $existingFirewallByDisplayName.Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
 
     Set-SmokePhase 'Saving runner registry state'
     $runSnapshot = Get-RegistryValueSnapshot $currentUser $runKeyPath $runValue
@@ -184,7 +186,9 @@ try {
     finally { if ($shell) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } }
 
     Set-SmokePhase 'Checking the scoped firewall rule'
-    $firewallRule = Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue | Select-Object -First 1
+    $firewallRules = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
+    if ($firewallRules.Count -eq 0) { $firewallRules = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) }
+    $firewallRule = $firewallRules | Select-Object -First 1
     if ($null -eq $firewallRule -or !$firewallRule.Enabled) { throw 'The machine install did not enable its firewall rule.' }
     $applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $firewallRule
     if (![String]::Equals([IO.Path]::GetFullPath($applicationFilter.Program), $machineExecutable, [StringComparison]::OrdinalIgnoreCase)) {
@@ -199,7 +203,9 @@ try {
     Invoke-ProductCommand $machineExecutable '--uninstall-machine' 90
 
     if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'The machine service remains after uninstall.' }
-    if (Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) { throw 'The machine firewall rule remains after uninstall.' }
+    if ((Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) -or (Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)) {
+        throw 'The machine firewall rule remains after uninstall.'
+    }
     if (Test-Path -LiteralPath $shortcut) { throw 'The machine shortcut remains after uninstall.' }
 
     Set-SmokePhase 'Waiting for install executable processes and deferred directory removal'
@@ -231,7 +237,7 @@ finally {
         try { Remove-InstalledAppProcesses $machineExecutable }
         catch { Write-Warning "Could not terminate an installed UI process during cleanup: $_" }
         try {
-            if (Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) {
+            if ((Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) -or (Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)) {
                 & (Join-Path $env:WINDIR 'System32\netsh.exe') advfirewall firewall delete rule "name=`"$firewallName`"" | Out-Null
                 if ($LASTEXITCODE -ne 0) { Write-Warning 'Could not remove the smoke-test firewall rule during cleanup.' }
             }

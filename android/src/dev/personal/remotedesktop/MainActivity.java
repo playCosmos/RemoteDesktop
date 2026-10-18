@@ -186,9 +186,8 @@ public final class MainActivity extends Activity {
         session=new RemoteSession(new RemoteSession.Listener() {
             public boolean resumed() { return MainActivity.this.resumed; }
             public String preferredDisplay(String host) { return preferences.getString("address","").equals(host)?preferences.getString("display", ""):""; }
+            public void prepareConnectedSession() { cursorTouched=false; session.requestImmediateFrame(); }
             public void connected(String host,String fingerprint,String display,int attempt) {
-                cursorTouched=false;
-                session.requestImmediateFrame();
                 runOnUiThread(() -> {
                     if(session.generation()!=attempt || session.remote()==null) return;
                     password.setText("");
@@ -196,8 +195,8 @@ public final class MainActivity extends Activity {
                     applySessionChrome(true);
                     setControlsOpen(false);
                     preferences.edit().putString("address",host).putString("pin",fingerprint).putString("display",display).apply();
+                    info("연결됨 · "+touchModeDescription());
                 });
-                info("연결됨 · "+touchModeDescription());
             }
             public void reconnected(String display,int attempt) {
                 session.requestImmediateFrame();
@@ -209,6 +208,7 @@ public final class MainActivity extends Activity {
             }
             public void status(String message,int holdMs) { showStatus(message,holdMs); }
             public void report(Exception error) { MainActivity.this.report(error); }
+            public void connectionFailed(int attempt,Exception error) { runOnUiThread(() -> { if(session.generation()==attempt && session.remote()==null) MainActivity.this.report(error); }); }
             public void hideHealth() { runOnUiThread(() -> health.setVisibility(View.GONE)); }
             public void inputQueueOverflow() { info("입력 지연으로 연결 종료"); disconnect(); }
             public int frameRate() { return MainActivity.this.frameRate; }

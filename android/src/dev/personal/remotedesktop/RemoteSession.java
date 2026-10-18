@@ -16,8 +16,10 @@ final class RemoteSession {
     interface Listener {
         boolean resumed();
         String preferredDisplay(String host);
+        void prepareConnectedSession();
         void connected(String host, String fingerprint, String display, int attempt);
         void reconnected(String display, int attempt);
+        void connectionFailed(int attempt, Exception error);
         void status(String message, int holdMs);
         void report(Exception error);
         void hideHealth();
@@ -111,6 +113,7 @@ final class RemoteSession {
                             backgroundUncertain = false;
                             foregroundFailures = 0;
                             nextKeepaliveAt = SystemClock.elapsedRealtime() + RemoteSessionPolicy.KEEPALIVE_INTERVAL_MS;
+                            listener.prepareConnectedSession();
                             remote = api;
                             api = null;
                             accepted = true;
@@ -120,12 +123,12 @@ final class RemoteSession {
                     listener.connected(host, fingerprint, display, attempt);
                 } catch (Exception error) {
                     if (api != null) try { api.logout(); } catch (Exception ignored) {}
-                    listener.report(error);
+                    listener.connectionFailed(attempt, error);
                 } finally { connecting = false; }
             });
         } catch (RuntimeException rejected) {
             connecting = false;
-            listener.report(rejected);
+            listener.connectionFailed(attempt, rejected);
         }
     }
 

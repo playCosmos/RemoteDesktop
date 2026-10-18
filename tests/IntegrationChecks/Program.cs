@@ -202,15 +202,20 @@ try
     Check(recoveryBackupRetained, "a failed service rollback retains and reports the previous executable for recovery");
 
     Directory.CreateDirectory(deleteAfterExitDirectory);
+    foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory))
+        File.Copy(file, Path.Combine(deleteAfterExitDirectory, Path.GetFileName(file)), true);
     File.WriteAllText(Path.Combine(deleteAfterExitDirectory, "test.txt"), "delete after parent exits");
     using (var parent = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--delete-test-parent 2500") { UseShellExecute = false, CreateNoWindow = true }) ?? throw new InvalidOperationException("Could not start delete-helper parent."))
     {
+        Process? executableHolder = null;
         try
         {
-            var script = AppInstaller.BuildDeleteAfterExitScript(deleteAfterExitDirectory, parent.Id, parent.StartTime.ToUniversalTime().Ticks);
+            var installedTestExecutable = Path.Combine(deleteAfterExitDirectory, Path.GetFileName(Environment.ProcessPath!));
+            var script = AppInstaller.BuildDeleteAfterExitScript(deleteAfterExitDirectory, parent.Id, parent.StartTime.ToUniversalTime().Ticks, installedTestExecutable);
             var helperStart = AppInstaller.BuildDeleteAfterExitStartInfo(script);
             helperStart.RedirectStandardOutput = true;
             helperStart.RedirectStandardError = true;
+            executableHolder = Process.Start(new ProcessStartInfo(installedTestExecutable, "--delete-test-parent 4500") { UseShellExecute = false, CreateNoWindow = true }) ?? throw new InvalidOperationException("Could not start delete-helper executable holder.");
             var waitStarted = Stopwatch.StartNew();
             using var helper = Process.Start(helperStart) ?? throw new InvalidOperationException("Could not start the uninstall folder cleanup helper.");
             var stdout = helper.StandardOutput.ReadToEndAsync();
@@ -218,11 +223,17 @@ try
             var helperExited = helper.WaitForExit(15000);
             if (!helperExited) { helper.Kill(true); helper.WaitForExit(2000); }
             _ = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
-            Check(helperExited && helper.ExitCode == 0 && parent.WaitForExit(1000) && !Directory.Exists(deleteAfterExitDirectory) && waitStarted.Elapsed >= TimeSpan.FromSeconds(2), "uninstall cleanup waits for the exact parent process and deletes a literal path safely");
+            Check(helperExited && helper.ExitCode == 0 && parent.WaitForExit(1000) && executableHolder.WaitForExit(1000)
+                && !Directory.Exists(deleteAfterExitDirectory) && waitStarted.Elapsed >= TimeSpan.FromSeconds(3), "uninstall cleanup waits for every process using the install executable and deletes a literal path safely");
         }
         finally
         {
             if (!parent.HasExited) { parent.Kill(true); parent.WaitForExit(1000); }
+            if (executableHolder != null)
+            {
+                if (!executableHolder.HasExited) { executableHolder.Kill(true); executableHolder.WaitForExit(1000); }
+                executableHolder.Dispose();
+            }
             if (Directory.Exists(deleteAfterExitDirectory)) Directory.Delete(deleteAfterExitDirectory, true);
         }
     }

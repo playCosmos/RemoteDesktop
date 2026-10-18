@@ -309,17 +309,22 @@ public static class AppInstaller
         return start;
     }
 
-    public static string BuildDeleteAfterExitScript(string directory, int parentProcessId, long parentStartTimeUtcTicks)
+    public static string BuildDeleteAfterExitScript(string directory, int parentProcessId, long parentStartTimeUtcTicks, string? processExecutablePath = null)
     {
         if (parentProcessId <= 0) throw new ArgumentOutOfRangeException(nameof(parentProcessId));
         if (parentStartTimeUtcTicks <= 0) throw new ArgumentOutOfRangeException(nameof(parentStartTimeUtcTicks));
         var target = "'" + Path.GetFullPath(directory).Replace("'", "''") + "'";
+        var targetExecutable = Path.GetFullPath(processExecutablePath ?? AppInstall.Executable(directory));
+        var processPath = "'" + targetExecutable.Replace("'", "''") + "'";
+        var processName = "'" + Path.GetFileNameWithoutExtension(targetExecutable).Replace("'", "''") + "'";
         return string.Join(Environment.NewLine,
         [
             "$ErrorActionPreference = 'Stop'",
             "$parentProcessId = " + parentProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "$parentStartTimeUtcTicks = [long]" + parentStartTimeUtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "$target = " + target,
+            "$targetExecutable = " + processPath,
+            "$targetProcessName = " + processName,
             "$log = Join-Path $env:TEMP 'PersonalRemoteDesktop-uninstall.log'",
             "$deadline = [DateTime]::UtcNow.AddMinutes(10)",
             "$parentGone = $false",
@@ -330,6 +335,18 @@ public static class AppInstaller
             "  Start-Sleep -Milliseconds 250",
             "}",
             "if (-not $parentGone) { Add-Content -LiteralPath $log -Value (\"$(Get-Date -Format o) timed out waiting for parent $parentProcessId before deleting $target\") -ErrorAction SilentlyContinue; exit 2 }",
+            "$processDeadline = [DateTime]::UtcNow.AddMinutes(2)",
+            "$targetProcessRunning = $false",
+            "while ([DateTime]::UtcNow -lt $processDeadline) {",
+            "  $targetProcessRunning = $false",
+            "  foreach ($candidate in [System.Diagnostics.Process]::GetProcessesByName($targetProcessName)) {",
+            "    try { $image = $candidate.MainModule.FileName; if ([String]::Equals([IO.Path]::GetFullPath($image), $targetExecutable, [StringComparison]::OrdinalIgnoreCase)) { $targetProcessRunning = $true } } catch { $targetProcessRunning = $true } finally { $candidate.Dispose() }",
+            "    if ($targetProcessRunning) { break }",
+            "  }",
+            "  if (-not $targetProcessRunning) { break }",
+            "  Start-Sleep -Milliseconds 250",
+            "}",
+            "if ($targetProcessRunning) { Add-Content -LiteralPath $log -Value (\"$(Get-Date -Format o) timed out waiting for executable $targetExecutable before deleting $target\") -ErrorAction SilentlyContinue; exit 3 }",
             "if (-not (Test-Path -LiteralPath $target)) { exit 0 }",
             "$lastError = ''",
             "for ($attempt = 0; $attempt -lt 40; $attempt++) {",

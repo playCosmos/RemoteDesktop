@@ -130,7 +130,7 @@ jobs:
         timeout-minutes: 1
         run: ./tests/WindowsSignToolTimeoutSmoke.ps1
 
-      - name: Prepare temporary Windows signing certificate
+      - name: Create and export temporary Windows signing certificate
         shell: pwsh
         timeout-minutes: 3
         run: |
@@ -149,11 +149,7 @@ jobs:
             Set-Content -LiteralPath $thumbprintPath -Value $thumbprint -NoNewline
             Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
             Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
-            Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-            $certificate.Dispose()
-            $certificate = $null
-            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force
-
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_SIGNING_TEST_THUMBPRINT=$thumbprint"
             Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_SIGNING_PFX=$pfxPath"
             Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_SIGNING_PFX_PASSWORD=$password"
             Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_TIMESTAMP_URL='
@@ -163,6 +159,30 @@ jobs:
             if ($certificate) { $certificate.Dispose() }
             if ($securePassword) { $securePassword.Dispose() }
           }
+
+      - name: Trust temporary code-signing certificate
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $thumbprint = $env:WINDOWS_SIGNING_TEST_THUMBPRINT
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
+          if ([string]::IsNullOrWhiteSpace($thumbprint) -or !(Test-Path -LiteralPath $certificatePath -PathType Leaf)) { throw 'The temporary certificate files were not prepared.' }
+          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          Write-Output 'Temporary code-signing certificate trusted for the CI verification.'
+
+      - name: Remove temporary private key to exercise PFX import
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $thumbprint = $env:WINDOWS_SIGNING_TEST_THUMBPRINT
+          if ([string]::IsNullOrWhiteSpace($thumbprint)) { throw 'The temporary certificate thumbprint was not prepared.' }
+          $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
+          if (!$certificate.HasPrivateKey) { throw 'The temporary certificate has no private key before PFX import.' }
+          $certificate.Dispose()
+          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force
+          Write-Output 'Temporary certificate removed from CurrentUser\My; the build must import its PFX.'
 
       - name: Sign and verify a Windows executable with the temporary certificate
         shell: pwsh
@@ -187,7 +207,7 @@ jobs:
           $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
           $thumbprintPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.thumbprint'
           $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
-          $thumbprint = if (Test-Path -LiteralPath $thumbprintPath) { (Get-Content -LiteralPath $thumbprintPath -Raw).Trim() } else { $null }
+          $thumbprint = if (Test-Path -LiteralPath $thumbprintPath) { (Get-Content -LiteralPath $thumbprintPath -Raw).Trim() } else { $env:WINDOWS_SIGNING_TEST_THUMBPRINT }
           if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force }
           if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force }
           if ($certificatePath -and (Test-Path -LiteralPath $certificatePath)) { Remove-Item -LiteralPath $certificatePath -Force }
@@ -203,6 +223,7 @@ jobs:
           Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_PFX='
           Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_PFX_PASSWORD='
           Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_TIMESTAMP_URL='
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_TEST_THUMBPRINT='
 
       - name: Upload Windows and Android build artifacts
         uses: actions/upload-artifact@v7

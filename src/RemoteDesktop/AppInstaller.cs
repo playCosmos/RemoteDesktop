@@ -2,6 +2,7 @@ using System.IO;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32;
 
 namespace RemoteDesktop;
@@ -279,15 +280,65 @@ public static class AppInstaller
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!AppInstall.CanRemoveDirectory(directory, programFiles, localAppData))
             throw new InvalidOperationException("설치 폴더가 아니라 지우지 않습니다.");
-        if (directory.Contains((char)34)) throw new InvalidOperationException("설치 폴더를 지우지 못했습니다.");
-        var mark = ((char)34).ToString();
-        var command = "ping 127.0.0.1 -n 4 >nul & rmdir /s /q " + mark + directory + mark;
-        Process.Start(new ProcessStartInfo("cmd.exe", "/c " + command)
+        using var parent = Process.GetCurrentProcess();
+        var script = BuildDeleteAfterExitScript(directory, parent.Id, parent.StartTime.ToUniversalTime().Ticks);
+        using var helper = Process.Start(BuildDeleteAfterExitStartInfo(script)) ?? throw new InvalidOperationException("설치 폴더 삭제 도우미를 시작하지 못했습니다.");
+    }
+
+    public static ProcessStartInfo BuildDeleteAfterExitStartInfo(string script)
+    {
+        ArgumentNullException.ThrowIfNull(script);
+        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        if (!File.Exists(powershell)) throw new FileNotFoundException("Windows PowerShell is required to finish removing the app after exit.", powershell);
+        var start = new ProcessStartInfo(powershell)
         {
-            CreateNoWindow = true,
             UseShellExecute = false,
+            CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden
-        });
+        };
+        start.ArgumentList.Add("-NoLogo");
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-ExecutionPolicy");
+        start.ArgumentList.Add("Bypass");
+        start.ArgumentList.Add("-WindowStyle");
+        start.ArgumentList.Add("Hidden");
+        start.ArgumentList.Add("-EncodedCommand");
+        start.ArgumentList.Add(encodedScript);
+        return start;
+    }
+
+    public static string BuildDeleteAfterExitScript(string directory, int parentProcessId, long parentStartTimeUtcTicks)
+    {
+        if (parentProcessId <= 0) throw new ArgumentOutOfRangeException(nameof(parentProcessId));
+        if (parentStartTimeUtcTicks <= 0) throw new ArgumentOutOfRangeException(nameof(parentStartTimeUtcTicks));
+        var target = "'" + Path.GetFullPath(directory).Replace("'", "''") + "'";
+        return string.Join(Environment.NewLine,
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "$parentProcessId = " + parentProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "$parentStartTimeUtcTicks = [long]" + parentStartTimeUtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "$target = " + target,
+            "$log = Join-Path $env:TEMP 'PersonalRemoteDesktop-uninstall.log'",
+            "$deadline = [DateTime]::UtcNow.AddMinutes(10)",
+            "$parentGone = $false",
+            "while ([DateTime]::UtcNow -lt $deadline) {",
+            "  $parent = Get-Process -Id $parentProcessId -ErrorAction SilentlyContinue",
+            "  if ($null -eq $parent) { $parentGone = $true; break }",
+            "  try { if ($parent.StartTime.ToUniversalTime().Ticks -ne $parentStartTimeUtcTicks) { $parentGone = $true; break } } catch { break }",
+            "  Start-Sleep -Milliseconds 250",
+            "}",
+            "if (-not $parentGone) { Add-Content -LiteralPath $log -Value (\"$(Get-Date -Format o) timed out waiting for parent $parentProcessId before deleting $target\") -ErrorAction SilentlyContinue; exit 2 }",
+            "if (-not (Test-Path -LiteralPath $target)) { exit 0 }",
+            "$lastError = ''",
+            "for ($attempt = 0; $attempt -lt 40; $attempt++) {",
+            "  try { Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop; exit 0 }",
+            "  catch { $lastError = $_.Exception.Message; Start-Sleep -Milliseconds 250 }",
+            "}",
+            "Add-Content -LiteralPath $log -Value (\"$(Get-Date -Format o) could not delete $target after parent exit: $lastError\") -ErrorAction SilentlyContinue",
+            "exit 1"
+        ]);
     }
 
     public static void Relaunch(string executable)

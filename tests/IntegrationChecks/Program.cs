@@ -19,6 +19,11 @@ if (args.Length == 2 && args[0] == "--secure-pipe-client")
     _ = pipeClient.ReadByte();
     Environment.Exit(0);
 }
+if (args.Length == 2 && args[0] == "--delete-test-parent")
+{
+    Thread.Sleep(int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture));
+    Environment.Exit(0);
+}
 if (args.Length == 1 && args[0] == "--hang-process-test")
     new ManualResetEventSlim().Wait();
 
@@ -111,6 +116,7 @@ var asyncCopiedDir = Path.Combine(AppContext.BaseDirectory, "prd-async-copy-" + 
 var transactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-" + Guid.NewGuid().ToString("N"));
 var freshTransactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-fresh-" + Guid.NewGuid().ToString("N"));
 var failedRollbackDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-recovery-" + Guid.NewGuid().ToString("N"));
+var deleteAfterExitDirectory = Path.Combine(AppContext.BaseDirectory, "prd-delete-O'Brien-&-%PATH%-" + Guid.NewGuid().ToString("N"));
 var missingExe = Path.Combine(publishedDir, "missing", "RemoteDesktop.exe");
 try
 {
@@ -194,6 +200,32 @@ try
         recoveryBackupRetained = backup != null && File.ReadAllText(backup) == "recoverable machine version";
     }
     Check(recoveryBackupRetained, "a failed service rollback retains and reports the previous executable for recovery");
+
+    Directory.CreateDirectory(deleteAfterExitDirectory);
+    File.WriteAllText(Path.Combine(deleteAfterExitDirectory, "test.txt"), "delete after parent exits");
+    using (var parent = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--delete-test-parent 2500") { UseShellExecute = false, CreateNoWindow = true }) ?? throw new InvalidOperationException("Could not start delete-helper parent."))
+    {
+        try
+        {
+            var script = AppInstaller.BuildDeleteAfterExitScript(deleteAfterExitDirectory, parent.Id, parent.StartTime.ToUniversalTime().Ticks);
+            var helperStart = AppInstaller.BuildDeleteAfterExitStartInfo(script);
+            helperStart.RedirectStandardOutput = true;
+            helperStart.RedirectStandardError = true;
+            var waitStarted = Stopwatch.StartNew();
+            using var helper = Process.Start(helperStart) ?? throw new InvalidOperationException("Could not start the uninstall folder cleanup helper.");
+            var stdout = helper.StandardOutput.ReadToEndAsync();
+            var stderr = helper.StandardError.ReadToEndAsync();
+            var helperExited = helper.WaitForExit(15000);
+            if (!helperExited) { helper.Kill(true); helper.WaitForExit(2000); }
+            _ = Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+            Check(helperExited && helper.ExitCode == 0 && parent.WaitForExit(1000) && !Directory.Exists(deleteAfterExitDirectory) && waitStarted.Elapsed >= TimeSpan.FromSeconds(2), "uninstall cleanup waits for the exact parent process and deletes a literal path safely");
+        }
+        finally
+        {
+            if (!parent.HasExited) { parent.Kill(true); parent.WaitForExit(1000); }
+            if (Directory.Exists(deleteAfterExitDirectory)) Directory.Delete(deleteAfterExitDirectory, true);
+        }
+    }
 }
 finally
 {
@@ -204,6 +236,7 @@ finally
     if (Directory.Exists(transactionDir)) Directory.Delete(transactionDir, true);
     if (Directory.Exists(freshTransactionDir)) Directory.Delete(freshTransactionDir, true);
     if (Directory.Exists(failedRollbackDir)) Directory.Delete(failedRollbackDir, true);
+    if (Directory.Exists(deleteAfterExitDirectory)) Directory.Delete(deleteAfterExitDirectory, true);
 }
 Check(UiText.PlacementTitle(InstallScope.Portable) == "설치하지 않고 실행 중" && UiText.PlacementTitle(InstallScope.PerUser) == "이 사용자에게 설치됨" && UiText.PlacementTitle(InstallScope.Machine) == "이 PC에 설치됨", "the host names portable, per-user, and machine installs");
 Check(UiText.PlacementBody(InstallScope.Portable, false).Contains("개발용", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Portable, true).Contains("모든 사용자", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Machine, true).Contains("보안 화면", StringComparison.Ordinal), "install copy says what portable, per-user, and machine installs do");

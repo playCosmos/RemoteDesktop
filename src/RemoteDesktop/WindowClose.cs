@@ -27,7 +27,13 @@ public static class AppLifetime
         ExitRequested = true;
         ForceExit = force;
         Environment.ExitCode = exitCode;
-        System.Windows.Application.Current?.Shutdown(exitCode);
+        var application = System.Windows.Application.Current;
+        if (application?.MainWindow is { } mainWindow)
+        {
+            try { mainWindow.Dispatcher.BeginInvoke(new Action(mainWindow.Close)); }
+            catch (InvalidOperationException) { application.Shutdown(exitCode); }
+        }
+        else application?.Shutdown(exitCode);
     }
 
     public static void NoteSystemExit()

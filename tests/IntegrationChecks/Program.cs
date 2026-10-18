@@ -535,6 +535,19 @@ Check(restoredView.Zoom == 1 && restoredView.Width == 1 && restoredView.X == 0 &
 Check(PictureZoom.Notice(restoredView) == "확대를 원래대로 되돌렸습니다." && PictureZoom.Notice(closer) == "화면을 2.0배로 확대했습니다. 휠 버튼으로 끌면 보이는 영역을 옮깁니다." && !UiText.IsProblem(PictureZoom.Notice(closer)), "zoom tells the viewer how far the picture moved");
 Check(UiText.TrayHidden(true) == "접속 대기는 계속됩니다. 아이콘을 누르면 창이 다시 열립니다." && UiText.TrayHidden(false) == "아이콘을 누르면 창이 다시 열립니다." && UiText.TrayTip(true) == "Personal Remote Desktop · 접속 대기 중" && UiText.TrayOpen() == "창 열기" && UiText.TrayExit() == "종료" && !UiText.IsProblem(UiText.TrayHidden(true)), "closing the window leaves a quiet tray hint");
 Check(WindowClose.Decide(false, false, true) == WindowClose.Result.Hide && WindowClose.Decide(true, false, true) == WindowClose.Result.Ask && WindowClose.Decide(true, true, true) == WindowClose.Result.Exit && WindowClose.Decide(true, false, false) == WindowClose.Result.Exit, "the close button hides and only exit can end a live session");
+var cleanupSequenceType = typeof(Desktop).Assembly.GetType("RemoteDesktop.ShutdownCleanup", throwOnError: true)!;
+var runCleanupSequence = cleanupSequenceType.GetMethod("RunAsync", BindingFlags.Static | BindingFlags.NonPublic)!;
+var completedCleanupSteps = new List<string>();
+var failedCleanupSteps = new List<string>();
+var injectedCleanupSteps = new (string Name, Func<Task> Cleanup)[]
+{
+    ("injected failure", () => Task.FromException(new InvalidOperationException("injected"))),
+    ("clipboard", () => { completedCleanupSteps.Add("clipboard"); return Task.CompletedTask; }),
+    ("host", async () => { await Task.Yield(); completedCleanupSteps.Add("host"); })
+};
+Action<string, Exception> recordCleanupFailure = (name, _) => failedCleanupSteps.Add(name);
+await (Task)runCleanupSequence.Invoke(null, [injectedCleanupSteps, recordCleanupFailure])!;
+Check(failedCleanupSteps.SequenceEqual(new[] { "injected failure" }) && completedCleanupSteps.SequenceEqual(new[] { "clipboard", "host" }), "a shutdown-stage exception does not skip clipboard or host disposal");
 Check(UiText.ConnectedFor(TimeSpan.FromSeconds(5)) == "연결된 지 00:05" && UiText.ConnectedFor(TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(7)) == "연결된 지 03:07", "connection duration stays in minutes and seconds");
 Check(UiText.ConnectedFor(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "연결된 지 2:04:09" && UiText.ConnectedFor(TimeSpan.FromSeconds(-3)) == "연결된 지 00:00", "long connections include hours and negative time is clamped");
 Check(UiText.NeedsAttention(true, false) && !UiText.NeedsAttention(true, true) && !UiText.NeedsAttention(false, false), "only a newly arrived client flashes an inactive window");

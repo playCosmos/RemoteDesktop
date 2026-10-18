@@ -3,6 +3,8 @@ using System.Windows.Input;
 using System.Windows.Controls;
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace RemoteDesktop;
 
@@ -17,6 +19,8 @@ public partial class MainWindow : Window
     private System.Windows.Forms.NotifyIcon? tray;
     private System.Drawing.Icon? trayIcon;
     private bool trayExplained;
+    private bool closeCleanupStarted;
+    private bool closeCleanupComplete;
 
     public MainWindow()
     {
@@ -58,37 +62,63 @@ public partial class MainWindow : Window
             clientSession.FocusConnectField();
         };
         System.Windows.Application.Current.SessionEnding += (_, _) => AppLifetime.NoteSystemExit();
-        Closing += (_, e) =>
-        {
-            var decision = WindowClose.Decide(AppLifetime.ExitRequested, AppLifetime.ForceExit, UiText.ClosePrompt(clientSession.RemoteEndpoint, hostSession.ConnectedPeer) != null);
-            if (decision == WindowClose.Result.Hide)
-            {
-                e.Cancel = true;
-                Hide();
-                EnsureTray();
-                NoteTray();
-                return;
-            }
-            if (decision == WindowClose.Result.Ask && !ConfirmClose())
-            {
-                e.Cancel = true;
-                AppLifetime.Stay();
-                return;
-            }
-            clientSession.SaveWindowPlacement();
-            hostSession.Closing = true;
-            ReleaseTray();
-        };
+        Closing += OnWindowClosing;
         Activated += (_, _) => StopAttention();
-        Closed += async (_, _) =>
-        {
-            clientSession.UninstallSystemShortcutHook();
-            clientSession.CloseFullscreen();
-            await clientSession.DisconnectClient();
-            await hostSession.DisposeAsync();
-        };
         Deactivated += (_, _) => clientSession.QueueRelease();
         Activated += (_, _) => clientSession.WindowActivationChanged();
+    }
+
+    private void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (closeCleanupComplete) return;
+        e.Cancel = true;
+        if (closeCleanupStarted) return;
+
+        var decision = WindowClose.Decide(AppLifetime.ExitRequested, AppLifetime.ForceExit, UiText.ClosePrompt(clientSession.RemoteEndpoint, hostSession.ConnectedPeer) != null);
+        if (decision == WindowClose.Result.Hide)
+        {
+            Hide();
+            EnsureTray();
+            NoteTray();
+            return;
+        }
+        if (decision == WindowClose.Result.Ask && !ConfirmClose())
+        {
+            AppLifetime.Stay();
+            return;
+        }
+
+        closeCleanupStarted = true;
+        hostSession.Closing = true;
+        Dispatcher.BeginInvoke(new Action(() => _ = FinishCloseAsync()));
+    }
+
+    private async Task FinishCloseAsync()
+    {
+        var steps = new (string Name, Func<Task> Cleanup)[]
+        {
+            ("save window placement", () => RunCloseAction(clientSession.SaveWindowPlacement)),
+            ("release tray icon", () => RunCloseAction(ReleaseTray)),
+            ("remove system shortcut hook", () => RunCloseAction(clientSession.UninstallSystemShortcutHook)),
+            ("close fullscreen window", () => RunCloseAction(clientSession.CloseFullscreen)),
+            ("disconnect client and clipboard", clientSession.DisconnectClient),
+            ("dispose host session", hostSession.DisposeAsync),
+            ("release tray icon", () => RunCloseAction(ReleaseTray))
+        };
+        try
+        {
+            await ShutdownCleanup.RunAsync(steps, (name, error) => Trace.TraceError("Shutdown stage {0} failed: {1}", name, error));
+        }
+        catch (Exception error) { Trace.TraceError("Shutdown sequence failed: {0}", error); }
+        closeCleanupComplete = true;
+        try { Close(); }
+        catch (Exception error) { Trace.TraceError("Closing the window after cleanup failed: {0}", error); }
+    }
+
+    private static Task RunCloseAction(Action action)
+    {
+        action();
+        return Task.CompletedTask;
     }
 
     internal void BringToFront()

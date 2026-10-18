@@ -21,6 +21,7 @@ public partial class MainWindow
         private RemoteHost? host;
         private bool hostStarting;
         private CancellationTokenSource? hostStart;
+        private Task? hostStartTask;
         private bool changingPassword;
         private bool suppressHostPasswordReveal;
         private System.Windows.Threading.DispatcherTimer? noticeTimer;
@@ -119,7 +120,7 @@ public partial class MainWindow
 
         public async Task StartIfConfigured()
         {
-            if (settings.HasPassword) await StartHostAsync(automatic: true);
+            if (settings.HasPassword) await StartHostTrackedAsync(automatic: true);
             else
             {
                 SetHostState(HostUiState.Stopped);
@@ -129,15 +130,34 @@ public partial class MainWindow
 
         public async Task DisposeAsync()
         {
+            Closing = true;
+            var failures = new List<Exception>();
             if (addressWatch)
             {
-                NetworkChange.NetworkAddressChanged -= NetworkChanged;
+                try { NetworkChange.NetworkAddressChanged -= NetworkChanged; }
+                catch (Exception error) { failures.Add(error); }
                 addressWatch = false;
             }
-            addressRefresh?.Stop();
-            try { hostStart?.Cancel(); } catch (ObjectDisposedException) { }
-            if (host != null) await host.DisposeAsync();
-            certificate.Dispose();
+            try { addressRefresh?.Stop(); }
+            catch (Exception error) { failures.Add(error); }
+            addressRefresh = null;
+            try { hostStart?.Cancel(); }
+            catch (Exception error) { failures.Add(error); }
+            if (hostStartTask != null)
+            {
+                try { await hostStartTask; }
+                catch (Exception error) { failures.Add(error); }
+            }
+            var activeHost = host;
+            host = null;
+            if (activeHost != null)
+            {
+                try { await activeHost.DisposeAsync(); }
+                catch (Exception error) { failures.Add(error); }
+            }
+            try { certificate.Dispose(); }
+            catch (Exception error) { failures.Add(error); }
+            if (failures.Count > 0) throw new AggregateException("Host session cleanup failed.", failures);
         }
 
         public void SmoothHostChanged(object sender, RoutedEventArgs e)
@@ -329,7 +349,7 @@ public partial class MainWindow
                 }
                 changingPassword = false;
                 UpdatePasswordState();
-                await StartHostAsync(automatic: false);
+                await StartHostTrackedAsync(automatic: false);
             }
             catch (Exception ex) { window.HostNotice(UiText.Explain(ex, "비밀번호를 저장하지 못했습니다."), problem: true); }
         }
@@ -482,7 +502,14 @@ public partial class MainWindow
                 CancelHostStart();
                 return;
             }
-            _ = StartHostAsync(automatic: false);
+            _ = StartHostTrackedAsync(automatic: false);
+        }
+
+        private Task StartHostTrackedAsync(bool automatic)
+        {
+            var task = StartHostAsync(automatic);
+            hostStartTask = task;
+            return task;
         }
 
         private void CancelHostStart()

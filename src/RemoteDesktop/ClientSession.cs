@@ -20,6 +20,8 @@ public partial class MainWindow
         private readonly MainWindow window;
         private RemoteClient? client;
         private CancellationTokenSource? connection;
+        private Task? connectionTask;
+        private Task? connectTask;
         private ClipboardSync? clipboardSync;
         private bool pasting;
         private bool suppressPasteKeyUp;
@@ -259,10 +261,45 @@ public partial class MainWindow
         public Task DisconnectClient()
         {
             suppressReconnect = true;
+            connectCancelled = true;
             sessionPassword = null;
             resumeEpoch++;
             ReleaseReconnectWait();
-            return DisconnectCore();
+            return DisconnectClientCore();
+        }
+
+        private async Task DisconnectClientCore()
+        {
+            var pendingConnect = connectTask;
+            var pendingConnection = connectionTask;
+            var pendingConnectCancel = connectCancel;
+            try { pendingConnectCancel?.Cancel(); }
+            catch (Exception) { }
+            try { connection?.Cancel(); }
+            catch (Exception) { }
+
+            var failures = new List<Exception>();
+            try { await DisconnectCore(); }
+            catch (Exception error) { failures.Add(error); }
+            if (pendingConnect != null)
+            {
+                try { await pendingConnect; }
+                catch (Exception error) { failures.Add(error); }
+            }
+            pendingConnection = connectionTask ?? pendingConnection;
+            if (pendingConnection != null)
+            {
+                try { await pendingConnection; }
+                catch (Exception error) { failures.Add(error); }
+                if (ReferenceEquals(connectionTask, pendingConnection)) connectionTask = null;
+            }
+            if (ReferenceEquals(connectCancel, pendingConnectCancel))
+            {
+                try { connectCancel?.Dispose(); }
+                catch (Exception error) { failures.Add(error); }
+                connectCancel = null;
+            }
+            if (failures.Count > 0) throw new AggregateException("Client session cleanup failed.", failures);
         }
 
         private async Task ForgetReconnectsAfterStable(CancellationToken ct)
@@ -403,7 +440,10 @@ public partial class MainWindow
             connectCancelled = false;
             reconnectAttempt = 0;
             resumeEpoch++;
-            await ConnectCore(CurrentClientPassword(), announceFailure: true);
+            var task = ConnectCore(CurrentClientPassword(), announceFailure: true);
+            connectTask = task;
+            try { await task; }
+            finally { if (ReferenceEquals(connectTask, task)) connectTask = null; }
         }
 
         private void FocusConnectProblem(string field)
@@ -487,7 +527,7 @@ public partial class MainWindow
                 if (window.IsActive) window.ScreenImage.Focus();
                 UpdateInputChrome();
                 window.RefreshIdentity();
-                _ = RunConnection(remote, connection.Token);
+                connectionTask = RunConnection(remote, connection.Token);
                 return true;
             }
             catch (Exception ex)

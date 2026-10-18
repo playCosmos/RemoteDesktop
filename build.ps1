@@ -2,6 +2,7 @@ param(
     [switch]$Android,
     [switch]$FrameworkDependent,
     [string]$AndroidSdk = '',
+    [string]$AndroidJdk = '',
     [string]$OutputRoot = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -25,6 +26,7 @@ try {
     if ($Android) {
         $androidBuildArgs = @{}
         if (![string]::IsNullOrWhiteSpace($AndroidSdk)) { $androidBuildArgs.Sdk = $AndroidSdk }
+        if (![string]::IsNullOrWhiteSpace($AndroidJdk)) { $androidBuildArgs.Jdk = $AndroidJdk }
         & "$PSScriptRoot/android/build.ps1" @androidBuildArgs
         if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
         New-Item -ItemType Directory -Force -Path (Join-Path $OutputRoot 'android') | Out-Null

@@ -1,0 +1,67 @@
+name: Windows and Android verification
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: |
+            platforms;android-35
+            build-tools;35.0.0
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+
+      - name: Run integration checks
+        shell: pwsh
+        run: dotnet run --project tests/IntegrationChecks
+
+      - name: Build Windows portable and Android APK
+        shell: pwsh
+        run: |
+          $androidSdkPath = $env:ANDROID_SDK_ROOT
+          if ([string]::IsNullOrWhiteSpace($androidSdkPath)) { $androidSdkPath = $env:ANDROID_HOME }
+          if ([string]::IsNullOrWhiteSpace($androidSdkPath)) { $androidSdkPath = Join-Path $env:USERPROFILE '.android\sdk' }
+          if (!(Test-Path -LiteralPath (Join-Path $androidSdkPath 'platforms\android-35\android.jar'))) {
+            throw "Android 35 SDK was not found at $androidSdkPath"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:JAVA_HOME)) { throw 'JAVA_HOME was not set by setup-java' }
+          ./build.ps1 -Android -AndroidSdk $androidSdkPath -AndroidJdk $env:JAVA_HOME
+
+      - name: Upload Windows and Android build artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: remote-desktop-${{ github.sha }}
+          path: artifacts/**
+          if-no-files-found: error
+          retention-days: 14

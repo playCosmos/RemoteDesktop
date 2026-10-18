@@ -148,6 +148,8 @@ Android 화면에서 두 손가락으로 핀치 확대·축소할 수 있습니�
 
 Windows는 .NET SDK 10, Android는 SDK Platform 35 / Build Tools 35.0.0 / JDK가 필요합니다. 통합 빌드에서 `-AndroidSdk`로 Android SDK 경로를 지정할 수 있고, 하위 스크립트는 `android/build.ps1 -Sdk ... -Jdk ...`로도 실행할 수 있습니다.
 
+GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사와 Windows·Android 빌드 및 Android 서명 검증을 수행하고, portable EXE와 APK를 14일간 workflow artifact로 보관합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
+
 통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. 양방향 파일·텍스트 전송, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, 모니터 캡처, H.264 실패 시 JPEG 전환, UAC 프레임 파이프·ACL·프로세스 ID·세션 인증, 끊김 줄이기 설정을 검증합니다.
 
 Windows 빌드와 Android APK 생성·서명 검증을 수행합니다. 실제 탐색기의 붙여넣기와 Android 앱 간 URI 공유·붙여넣기, 실제 IME 입력, 1GiB·장시간 전송은 별도 실기 검증이 필요합니다. 현재 환경에는 연결된 Android 기기가 없습니다. 빌드 도구의 NuGet 취약성 정보 조회 네트워크 경고와 JDK 호환 경고가 발생할 수 있습니다.

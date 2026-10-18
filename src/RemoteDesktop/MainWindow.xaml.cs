@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     private readonly ClientSession clientSession;
     private bool initializing = true;
     private readonly string productTitle;
+    private bool? stackedHostCards;
     private string? attentionPeer;
     private System.Windows.Forms.NotifyIcon? tray;
     private System.Drawing.Icon? trayIcon;
@@ -41,6 +42,7 @@ public partial class MainWindow : Window
         hostSession.Bind();
         clientSession.Bind();
         initializing = false;
+        SizeChanged += (_, _) => UpdateHostLayout();
         PreviewKeyDown += clientSession.FullscreenKey;
         SourceInitialized += (_, _) =>
         {
@@ -49,6 +51,7 @@ public partial class MainWindow : Window
         };
         Loaded += async (_, _) =>
         {
+            UpdateHostLayout();
             EnsureTray();
             await hostSession.StartIfConfigured();
             clientSession.FocusConnectField();
@@ -93,6 +96,49 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Activate();
         NoteTray();
+    }
+
+    private void UpdateHostLayout()
+    {
+        if (!IsInitialized || ActualWidth <= 0) return;
+        var stacked = WindowLayout.StackHostPanels(ActualWidth);
+        if (stackedHostCards == stacked) return;
+        stackedHostCards = stacked;
+        var columns = HostContentGrid.ColumnDefinitions;
+        if (stacked)
+        {
+            HostContentGrid.MaxWidth = 760;
+            columns[0].Width = new GridLength(1, GridUnitType.Star);
+            columns[0].MaxWidth = double.PositiveInfinity;
+            columns[1].Width = new GridLength(0);
+            columns[1].MaxWidth = 0;
+            columns[2].Width = new GridLength(0);
+            columns[2].MaxWidth = 0;
+            Grid.SetRow(HostSetupColumn, 0);
+            Grid.SetColumn(HostSetupColumn, 0);
+            Grid.SetColumnSpan(HostSetupColumn, 3);
+            Grid.SetRow(HostShareCard, 1);
+            Grid.SetColumn(HostShareCard, 0);
+            Grid.SetColumnSpan(HostShareCard, 3);
+            HostShareCard.Margin = new Thickness(0, 16, 0, 0);
+        }
+        else
+        {
+            HostContentGrid.MaxWidth = 980;
+            columns[0].Width = new GridLength(1, GridUnitType.Star);
+            columns[0].MaxWidth = 520;
+            columns[1].Width = new GridLength(20);
+            columns[1].MaxWidth = 20;
+            columns[2].Width = new GridLength(1, GridUnitType.Star);
+            columns[2].MaxWidth = 420;
+            Grid.SetRow(HostSetupColumn, 0);
+            Grid.SetColumn(HostSetupColumn, 0);
+            Grid.SetColumnSpan(HostSetupColumn, 1);
+            Grid.SetRow(HostShareCard, 0);
+            Grid.SetColumn(HostShareCard, 2);
+            Grid.SetColumnSpan(HostShareCard, 1);
+            HostShareCard.Margin = new Thickness(0);
+        }
     }
 
     private void EnsureTray()

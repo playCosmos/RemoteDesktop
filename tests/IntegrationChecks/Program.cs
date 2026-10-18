@@ -364,7 +364,9 @@ try
 finally { Directory.Delete(dropRoot, true); }
 var placed = new ClientSettings { WindowLeft = -120, WindowTop = 40, WindowWidth = 1100, WindowHeight = 720, WindowMaximized = true };
 Check(placed.TryGetWindowPlacement(-1920, 0, 3840, 1080, out var placement) && placement.Left == -120 && placement.Maximized, "window placement restores on a shifted desktop");
-Check(!new ClientSettings { WindowLeft = 5000, WindowTop = 0, WindowWidth = 1000, WindowHeight = 700 }.TryGetWindowPlacement(0, 0, 1920, 1080, out _), "off-screen window placement is ignored");
+Check(new ClientSettings { WindowLeft = 5000, WindowTop = -2000, WindowWidth = 3000, WindowHeight = 1600 }.TryGetWindowPlacement(0, 0, 1920, 1080, out var movedWindow) && movedWindow.Left == 0 && movedWindow.Top == 0 && movedWindow.Width == 1920 && movedWindow.Height == 1080, "an off-screen saved window is resized and moved back onto a display");
+var compactWindow = WindowLayout.FitToWorkArea(912, 512, 1180, 800, 920, 640);
+Check(WindowLayout.StackHostPanels(1024) && !WindowLayout.StackHostPanels(1180) && compactWindow.Width == 880 && compactWindow.Height == 480 && compactWindow.MinWidth == 880 && compactWindow.MinHeight == 480, "window layout stacks host cards and fits the work area on high-DPI screens");
 var recent = new ClientSettings();
 recent.RememberRecent("192.168.0.2:45831", "AA", "all", 75, 30);
 recent.RememberRecent("10.0.0.5:45831", "BB", "", 55, 15);

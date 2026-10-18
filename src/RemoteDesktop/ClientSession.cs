@@ -213,13 +213,24 @@ public partial class MainWindow
 
         public void ApplyWindowPlacement()
         {
-            var screen = System.Windows.Forms.SystemInformation.VirtualScreen;
-            if (!lastConnection.TryGetWindowPlacement(screen.Left, screen.Top, screen.Width, screen.Height, out var placement)) return;
+            var work = SystemParameters.WorkArea;
+            var sizing = WindowLayout.FitToWorkArea(work.Width, work.Height, window.Width, window.Height, window.MinWidth, window.MinHeight);
+            window.MinWidth = sizing.MinWidth;
+            window.MinHeight = sizing.MinHeight;
+            window.Width = sizing.Width;
+            window.Height = sizing.Height;
             window.WindowStartupLocation = WindowStartupLocation.Manual;
-            window.Left = placement.Left;
-            window.Top = placement.Top;
-            window.Width = placement.Width;
-            window.Height = placement.Height;
+            window.Left = work.Left + (work.Width - window.Width) / 2;
+            window.Top = work.Top + (work.Height - window.Height) / 2;
+            var screenLeft = SystemParameters.VirtualScreenLeft;
+            var screenTop = SystemParameters.VirtualScreenTop;
+            var screenWidth = SystemParameters.VirtualScreenWidth;
+            var screenHeight = SystemParameters.VirtualScreenHeight;
+            if (!lastConnection.TryGetWindowPlacement(screenLeft, screenTop, screenWidth, screenHeight, out var placement)) return;
+            window.Width = Math.Clamp(placement.Width, sizing.MinWidth, sizing.MaxWidth);
+            window.Height = Math.Clamp(placement.Height, sizing.MinHeight, sizing.MaxHeight);
+            window.Left = Math.Clamp(placement.Left, screenLeft, screenLeft + screenWidth - window.Width);
+            window.Top = Math.Clamp(placement.Top, screenTop, screenTop + screenHeight - window.Height);
             if (placement.Maximized) window.WindowState = WindowState.Maximized;
         }
 

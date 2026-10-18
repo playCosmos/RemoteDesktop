@@ -19,10 +19,9 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        InitializeComponent();
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
-        ClientCapsLock.Text = HostCapsLock.Text = UiText.CapsLockWarning();
+        InitializeComponent();
         Activated += (_, _) => RefreshCapsLock();
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
@@ -38,6 +37,7 @@ public partial class MainWindow : Window
         productTitle = version is null ? "Personal Remote Desktop" : "Personal Remote Desktop " + version.ToString(3);
         Title = productTitle;
         ServerTab.Visibility = Visibility.Visible;
+        ClientCapsLock.Text = HostCapsLock.Text = UiText.CapsLockWarning();
         hostSession.Bind();
         clientSession.Bind();
         initializing = false;

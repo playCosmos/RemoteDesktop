@@ -8,6 +8,7 @@ param(
     [string]$AndroidReleaseAlias = $env:ANDROID_RELEASE_KEY_ALIAS,
     [switch]$WindowsSign,
     [switch]$WindowsNoTimestamp,
+    [switch]$WindowsTestUntrustedCertificate,
     [string]$WindowsSigningPfx = $env:WINDOWS_SIGNING_PFX,
     [string]$WindowsTimestampUrl = $env:WINDOWS_SIGNING_TIMESTAMP_URL,
     [string]$WindowsSignToolPath = $env:WINDOWS_SIGNTOOL,
@@ -18,6 +19,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'scripts/SignToolProcess.ps1')
 if ($AndroidRelease) { $Android = $true }
 if ($WindowsNoTimestamp -and !$WindowsSign) { throw '-WindowsNoTimestamp requires -WindowsSign.' }
+if ($WindowsTestUntrustedCertificate -and (!$WindowsSign -or !$WindowsNoTimestamp)) { throw '-WindowsTestUntrustedCertificate requires -WindowsSign and -WindowsNoTimestamp.' }
 
 function Resolve-WindowsSignToolPath {
     if (![string]::IsNullOrWhiteSpace($WindowsSignToolPath)) {
@@ -41,7 +43,7 @@ function Resolve-WindowsSignToolPath {
     return [System.IO.Path]::GetFullPath($candidates[0])
 }
 
-function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [string]$PfxPassword, [string]$TimestampUrl, [string]$SignToolPath, [int]$TimeoutSeconds) {
+function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [string]$PfxPassword, [string]$TimestampUrl, [string]$SignToolPath, [int]$TimeoutSeconds, [bool]$AllowUntrustedTestCertificate) {
     $securePassword = ConvertTo-SecureString $PfxPassword -AsPlainText -Force
     $pfxCertificate = $null
     $storeCertificate = $null
@@ -84,7 +86,21 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
         $signArguments += @('/u',$codeSigningOid,$ExecutablePath)
         $verifyArguments += @('/v',$ExecutablePath)
         Invoke-WindowsSignTool $SignToolPath $signArguments $TimeoutSeconds
-        Invoke-WindowsSignTool $SignToolPath $verifyArguments $TimeoutSeconds
+        if ($AllowUntrustedTestCertificate) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $ExecutablePath
+            if ($null -eq $signature -or $null -eq $signature.SignerCertificate) {
+                throw 'Windows Authenticode signature has no signer certificate.'
+            }
+            $signatureStatus = [string]$signature.Status
+            if ($signatureStatus -notin @('Valid','NotTrusted')) {
+                throw "Windows Authenticode signature is invalid. Status=$signatureStatus."
+            }
+            if ($signature.SignerCertificate.Thumbprint -ne $thumbprint) {
+                throw 'Windows Authenticode signature does not use the temporary test certificate.'
+            }
+            Write-Output "Windows Authenticode signature integrity verified with the temporary certificate. Trust status=$signatureStatus."
+        }
+        else { Invoke-WindowsSignTool $SignToolPath $verifyArguments $TimeoutSeconds }
     }
     finally {
         if ($storeCertificate) { $storeCertificate.Dispose() }
@@ -166,7 +182,7 @@ try {
         $windowsOutput = Join-Path $OutputRoot $Name
         dotnet publish src/RemoteDesktop/RemoteDesktop.csproj -c Release -r win-x64 --self-contained $selfContained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=$(!$FrameworkDependent) -p:DebugType=None -o $windowsOutput
         if ($LASTEXITCODE -ne 0) { throw "$Name Windows publish failed" }
-        if ($WindowsSign) { Sign-WindowsExecutable (Join-Path $windowsOutput 'RemoteDesktop.exe') $WindowsSigningPfx $windowsSigningPassword $WindowsTimestampUrl $windowsSignToolPathResolved $WindowsSignToolTimeoutSeconds }
+        if ($WindowsSign) { Sign-WindowsExecutable (Join-Path $windowsOutput 'RemoteDesktop.exe') $WindowsSigningPfx $windowsSigningPassword $WindowsTimestampUrl $windowsSignToolPathResolved $WindowsSignToolTimeoutSeconds ([bool]$WindowsTestUntrustedCertificate) }
     }
     $windowsName = if ($FrameworkDependent) { 'windows-framework-dependent' } else { 'windows-portable' }
     Publish-Windows $windowsName

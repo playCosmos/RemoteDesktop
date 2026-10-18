@@ -14,6 +14,7 @@ public static class AppCommand
     public const string Service = "--service";
     public const string InstallMachine = "--install-machine";
     public const string UninstallMachine = "--uninstall-machine";
+    public const string RemoveFirewall = "--remove-firewall";
     public const string WaitUi = "--wait-ui";
     public const string Firewall = "--firewall";
 

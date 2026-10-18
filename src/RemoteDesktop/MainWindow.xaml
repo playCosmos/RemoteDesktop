@@ -229,7 +229,7 @@
                 <WrapPanel>
                   <Button x:Name="InstallUserButton" Content="이 사용자만 설치" Style="{StaticResource PrimaryButton}" Click="InstallForUser" Margin="0,0,8,8" ToolTip="관리자 권한 없이 시작 메뉴에 설치합니다. UAC 화면은 원격으로 보이지 않습니다."/>
                   <Button x:Name="InstallMachineButton" Content="모든 사용자에게 설치" Click="InstallForMachine" Margin="0,0,8,8" ToolTip="관리자 권한으로 설치하고 Windows 서비스가 보안 화면까지 상대 PC에 보여 줍니다."/>
-                  <Button x:Name="UninstallButton" Content="설치 제거" Click="UninstallApp" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="시작 메뉴와 자동 실행을 지웁니다. 접속 비밀번호는 남습니다."/>
+                  <Button x:Name="UninstallButton" Content="설치 제거" Click="UninstallApp" Visibility="Collapsed" Margin="0,0,8,8" ToolTip="시작 메뉴와 자동 실행, 앱이 추가한 방화벽 규칙을 지웁니다. 접속 비밀번호는 남습니다."/>
                 </WrapPanel>
               </StackPanel>
             </Border>

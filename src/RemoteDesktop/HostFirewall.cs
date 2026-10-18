@@ -68,6 +68,9 @@ public static class HostFirewall
     public static string DeleteArguments()
         => "advfirewall firewall delete rule name=" + AppInstall.Quoted(RuleName);
 
+    public static bool ShouldRemove(Observed? observed, string? executable)
+        => observed is Observed rule && rule.Present && SameProgram(rule.Program, executable);
+
     public static string AddArguments(Plan plan)
         => "advfirewall firewall add rule name=" + AppInstall.Quoted(RuleName)
             + " dir=in action=allow protocol=TCP localport=" + plan.Port.ToString(CultureInfo.InvariantCulture)
@@ -138,12 +141,14 @@ public static class HostFirewall
         }
     }
 
-    public static void RemoveQuietly()
+    public static bool HasRuleForProgram(string? executable)
+        => ShouldRemove(TryObserve(), executable);
+
+    public static bool RemoveForProgram(string? executable)
     {
-        try { RunNetsh(DeleteArguments()); }
-        catch (Exception)
-        {
-        }
+        var observed = TryObserve();
+        if (observed is null) return false;
+        return !ShouldRemove(observed, executable) || RunNetsh(DeleteArguments());
     }
 
     static int SavedPort()

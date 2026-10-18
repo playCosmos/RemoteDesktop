@@ -42,7 +42,8 @@ public static class AppInstaller
 
     public static void UninstallMachineHere()
     {
-        HostFirewall.RemoveQuietly();
+        if (!HostFirewall.RemoveForProgram(Environment.ProcessPath))
+            throw new InvalidOperationException(UiText.FirewallRemoveFailed());
         StopAndDeleteService();
         SecureAttention.RestorePolicy();
         var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));

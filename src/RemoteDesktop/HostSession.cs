@@ -765,6 +765,22 @@ public partial class MainWindow
                     AppLifetime.RequestExit(force: true);
                     return;
                 }
+                var executable = Environment.ProcessPath ?? "";
+                if (HostFirewall.HasRuleForProgram(executable))
+                {
+                    Process? elevated;
+                    try { elevated = Process.Start(new ProcessStartInfo(executable, AppCommand.RemoveFirewall) { UseShellExecute = true, Verb = "runas" }); }
+                    catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+                    {
+                        uninstallArmed = false;
+                        window.UninstallButton.Content = UiText.UninstallLabel();
+                        window.HostNotice(UiText.RemoveCancelled());
+                        return;
+                    }
+                    if (elevated == null) throw new InvalidOperationException("방화벽 규칙을 제거할 권한을 열지 못했습니다.");
+                    await Task.Run(() => elevated.WaitForExit());
+                    if (elevated.ExitCode != 0) throw new InvalidOperationException(UiText.FirewallRemoveFailed());
+                }
                 AppInstaller.ClearUserAutostart();
                 var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.Programs));
                 if (File.Exists(shortcut)) File.Delete(shortcut);

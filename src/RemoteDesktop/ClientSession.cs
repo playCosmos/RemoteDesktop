@@ -91,8 +91,10 @@ public partial class MainWindow
         private string? announcedDelivery;
         private int lastFrameBytes;
         private string? pictureCodec;
+        private bool preferH264 = true;
+        private int h264DecoderMisses;
+        private int h264JpegFrames;
         private bool needKeyframe = true;
-        private int videoMisses;
         private H264Decoder? videoDecoder;
         private readonly object videoGate = new();
         private WriteableBitmap? frameSurface;
@@ -501,6 +503,9 @@ public partial class MainWindow
                 try { await remote.Login(password, cancel.Token); } catch { remote.Dispose(); throw; }
                 if (attempt != generation) { try { await remote.Logout(); } finally { remote.Dispose(); } return false; }
                 client = remote;
+                preferH264 = true;
+                h264DecoderMisses = 0;
+                h264JpegFrames = 0;
                 connectedOnce = true;
                 sessionPassword = password;
                 ClearClientPassword();
@@ -704,7 +709,7 @@ public partial class MainWindow
                         var fetchStarted = Stopwatch.GetTimestamp();
                         var view = CurrentView();
                         var key = !viewerHasFrame || needKeyframe || !PictureZoom.Same(view, sentView);
-                        frame = await remote.FrameDetailed(ct, display, asked, frameRate, inputEnabled, viewerHasFrame, cursorHash, key, view.X, view.Y, view.Width, view.Height);
+                        frame = await remote.FrameDetailed(ct, display, asked, frameRate, inputEnabled, viewerHasFrame, cursorHash, key, view.X, view.Y, view.Width, view.Height, preferH264);
                         sentView = view;
                         data = frame.Bytes;
                         transferMs = data.Length == 0 ? -1 : Math.Max(0, Stopwatch.GetElapsedTime(fetchStarted).TotalMilliseconds - frame.CaptureMilliseconds - frame.EncodeMilliseconds - frame.WaitMilliseconds);
@@ -1403,7 +1408,6 @@ public partial class MainWindow
                 videoDecoder?.Dispose();
                 videoDecoder = null;
             }
-            videoMisses = 0;
             pictureCodec = null;
         }
 
@@ -1413,8 +1417,19 @@ public partial class MainWindow
             var decoded = await Task.Run(() => ReadPicture(data, codec));
             if (decoded.Read != PictureRead.Frame)
             {
-                if (decoded.Read == PictureRead.Failed || ++videoMisses >= 8) needKeyframe = true;
-                if (decoded.Read == PictureRead.Failed) ResetVideo();
+                if (VideoCodec.Normalize(codec) == "h264" && preferH264)
+                {
+                    h264JpegFrames = 0;
+                    h264DecoderMisses = H264FallbackPolicy.NoteDecoderMiss(h264DecoderMisses);
+                    needKeyframe = true;
+                    if (decoded.Read == PictureRead.Failed) ResetVideo();
+                    if (H264FallbackPolicy.DecoderShouldUseJpeg(h264DecoderMisses)) SwitchToJpeg();
+                }
+                else if (decoded.Read == PictureRead.Failed)
+                {
+                    needKeyframe = true;
+                    ResetVideo();
+                }
                 return;
             }
             try
@@ -1427,9 +1442,18 @@ public partial class MainWindow
                     window.ScreenImage.Source = frameSurface;
                 }
                 frameSurface.WritePixels(new Int32Rect(0, 0, frame.Width, frame.Height), frame.Pixels, frame.Stride, 0);
-                videoMisses = 0;
                 needKeyframe = false;
                 var shown = VideoCodec.Normalize(codec);
+                if (shown == "h264")
+                {
+                    h264DecoderMisses = 0;
+                    h264JpegFrames = 0;
+                }
+                else if (preferH264)
+                {
+                    h264JpegFrames = H264FallbackPolicy.NoteServerJpegFrame(h264JpegFrames);
+                    if (H264FallbackPolicy.ServerShouldUseJpeg(h264JpegFrames)) SwitchToJpeg();
+                }
                 if (pictureCodec != shown)
                 {
                     pictureCodec = shown;
@@ -1438,6 +1462,17 @@ public partial class MainWindow
                 ApplyPictureScaling();
             }
             finally { System.Buffers.ArrayPool<byte>.Shared.Return(decoded.Frame.Pixels); }
+        }
+
+        private void SwitchToJpeg()
+        {
+            if (!preferH264) return;
+            preferH264 = false;
+            h264DecoderMisses = 0;
+            h264JpegFrames = 0;
+            needKeyframe = true;
+            ResetVideo();
+            window.SessionStatus(UiText.VideoFallback());
         }
 
         private void ApplyPictureScaling()

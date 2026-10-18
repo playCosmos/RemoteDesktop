@@ -301,6 +301,9 @@ var missing = VideoCodec.Pace(75, 55, double.NaN, 15, 2, 3, true);
 Check(!missing.Changed && missing.Quality == 55 && missing.Slow == 2 && missing.Fast == 3, "a missing transfer time leaves the pace alone");
 Check(UiText.PaceShift(75, 75, 55) == "화면이 밀려 화질을 낮췄습니다. 고화질 대신 균형." && UiText.PaceShift(40, 40, 30) == "화면이 밀려 화질을 더 낮췄습니다." && UiText.PaceShift(75, 55, 75) == "화면에 여유가 생겨 화질을 고화질로 되돌렸습니다." && UiText.PaceShift(75, 40, 55) == "화면에 여유가 생겨 화질을 균형으로 올렸습니다." && UiText.PaceShift(75, 55, 55) == null && !UiText.IsProblem(UiText.PaceShift(75, 75, 55)), "a paced quality change is explained once");
 Check(VideoCodec.NeedsKeyframe(0, 15, false) && VideoCodec.NeedsKeyframe(30, 15, false) && !VideoCodec.NeedsKeyframe(10, 15, false) && VideoCodec.NeedsKeyframe(1, 15, true), "a skipped or forced picture starts a new video keyframe");
+Check(H264FallbackPolicy.NoteDecoderMiss(0) == 1 && H264FallbackPolicy.NoteDecoderMiss(7) == 8 && H264FallbackPolicy.DecoderShouldUseJpeg(8) && !H264FallbackPolicy.DecoderShouldUseJpeg(7), "a Windows decoder switches to JPEG after eight consecutive H.264 misses");
+Check(H264FallbackPolicy.NoteServerJpegFrame(0) == 1 && H264FallbackPolicy.NoteServerJpegFrame(2) == 3 && !H264FallbackPolicy.ServerShouldUseJpeg(2) && H264FallbackPolicy.ServerShouldUseJpeg(3), "a Windows client retires H.264 after three consecutive server JPEG frames");
+Check(UiText.VideoFallback() == "H.264를 사용할 수 없어 JPEG로 전환했습니다." && UiText.SessionOnPicture(UiText.VideoFallback()), "a codec fallback is reported outside the toolbar");
 using (var failedVideo = new H264Session())
 {
     var invalidJpeg = new byte[] { 0xFF, 0xD8, 0x00, 0x00 };
@@ -1172,6 +1175,8 @@ async Task Capture()
         if (follow.Bytes.Length > 0) opened = h264.TryDecode(follow.Bytes, out h264Pixels, out h264Width, out h264Height);
     }
     Check(opened && h264Width > 1 && h264Height > 1 && h264Pixels.Length == h264Width * h264Height * 4, "the h264 desktop frame decodes");
+    var jpegFallback = await client.FrameDetailed(CancellationToken.None, null, 55, 15, true, false, null, false, 0, 0, 1, 1, false);
+    Check(jpegFallback.Codec == "jpeg" && jpegFallback.Bytes.Length > 2 && jpegFallback.Bytes[0] == 0xFF && jpegFallback.Bytes[1] == 0xD8, "a client can explicitly leave H.264 and receive JPEG from the same host");
     var plain = await client.Frame(CancellationToken.None);
     Check(plain.Length > 100 && plain[0] == 0xFF && plain[1] == 0xD8, "a client that omits the codec still receives jpeg");
 }

@@ -149,6 +149,8 @@ public static class UiText
 
     public static string StaleFrame() => "화면 응답 없음";
 
+    public static string VideoFallback() => "H.264를 사용할 수 없어 JPEG로 전환했습니다.";
+
     public static bool FrameStale(TimeSpan sinceFrame) => sinceFrame >= TimeSpan.FromSeconds(3);
 
     public static string PicturePaused() => "화면 일시중지";
@@ -419,7 +421,7 @@ public static class UiText
     public static bool SessionOnPicture(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        if (IsProblem(text) || text == StaleFrame() || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (IsProblem(text) || text == StaleFrame() || text == VideoFallback() || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
         if (text == TransferCancelled() || text == InputReleased() || text == InputBacklog()) return true;
         if (text == SecureAttentionSent() || text == SecureAttentionUnavailable()) return true;
         if (text == ClipboardCleared()) return true;

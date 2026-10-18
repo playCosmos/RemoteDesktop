@@ -85,6 +85,22 @@ public static class VideoCodec
     }
 }
 
+public static class H264FallbackPolicy
+{
+    public const int DecoderMissLimit = 8;
+    public const int ServerJpegFrameLimit = 3;
+
+    public static int NoteDecoderMiss(int misses)
+        => Math.Min(DecoderMissLimit, Math.Clamp(misses, 0, DecoderMissLimit) + 1);
+
+    public static bool DecoderShouldUseJpeg(int misses) => misses >= DecoderMissLimit;
+
+    public static int NoteServerJpegFrame(int frames)
+        => Math.Min(ServerJpegFrameLimit, Math.Clamp(frames, 0, ServerJpegFrameLimit) + 1);
+
+    public static bool ServerShouldUseJpeg(int frames) => frames >= ServerJpegFrameLimit;
+}
+
 public sealed class H264Encoder : IDisposable
 {
     IMFTransform? transform;

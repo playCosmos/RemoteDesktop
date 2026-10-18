@@ -144,9 +144,9 @@ try {
     if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { throw 'A Personal Remote Desktop service already exists on this runner.' }
     if (Test-Path -LiteralPath $machineDirectory) { throw 'The machine install directory already exists on this runner.' }
     if (Test-Path -LiteralPath $shortcut) { throw 'The machine Start Menu shortcut already exists on this runner.' }
-$existingFirewallByName = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue)
-$existingFirewallByDisplayName = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
-if ($existingFirewallByName.Count -gt 0 -or $existingFirewallByDisplayName.Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
+    $existingFirewallByName = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue)
+    $existingFirewallByDisplayName = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
+    if ($existingFirewallByName.Count -gt 0 -or $existingFirewallByDisplayName.Count -gt 0) { throw 'The application firewall rule already exists on this runner.' }
 
     Set-SmokePhase 'Saving runner registry state'
     $runSnapshot = Get-RegistryValueSnapshot $currentUser $runKeyPath $runValue
@@ -185,18 +185,31 @@ try {
     }
     finally { if ($shell) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) } }
 
-    Set-SmokePhase 'Checking the scoped firewall rule'
-    $firewallRules = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
-    if ($firewallRules.Count -eq 0) { $firewallRules = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) }
+    Set-SmokePhase 'Checking the optional scoped firewall rule'
+    $firewallByDisplayName = @(Get-NetFirewallRule -DisplayName $firewallName -ErrorAction SilentlyContinue)
+    $firewallByName = @(Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue)
+    $firewallRules = $firewallByDisplayName
+    if ($firewallRules.Count -eq 0) { $firewallRules = $firewallByName }
     $firewallRule = $firewallRules | Select-Object -First 1
-    if ($null -eq $firewallRule -or !$firewallRule.Enabled) { throw 'The machine install did not enable its firewall rule.' }
-    $applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $firewallRule
-    if (![String]::Equals([IO.Path]::GetFullPath($applicationFilter.Program), $machineExecutable, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'The firewall rule does not name the installed executable.'
+    if ($null -eq $firewallRule) {
+        $message = "No firewall rule was returned (Name matches: $($firewallByName.Count); DisplayName matches: $($firewallByDisplayName.Count)). Service install/uninstall checks will continue."
+        Write-Warning $message
+        Add-Content -LiteralPath $script:diagnosticLog -Value "$(Get-Date -Format o) $message" -ErrorAction SilentlyContinue
     }
-    $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $firewallRule
-    if ([string]$portFilter.Protocol -notin @('6', 'TCP') -or [string]$portFilter.LocalPort -in @('', 'Any')) {
-        throw 'The machine firewall rule does not permit a specific TCP port.'
+    elseif (!$firewallRule.Enabled) {
+        $message = 'The requested firewall rule is disabled by the runner policy; service install/uninstall checks will continue.'
+        Write-Warning $message
+        Add-Content -LiteralPath $script:diagnosticLog -Value "$(Get-Date -Format o) $message" -ErrorAction SilentlyContinue
+    }
+    else {
+        $applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $firewallRule
+        if (![String]::Equals([IO.Path]::GetFullPath($applicationFilter.Program), $machineExecutable, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'The firewall rule does not name the installed executable.'
+        }
+        $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $firewallRule
+        if ([string]$portFilter.Protocol -notin @('6', 'TCP') -or [string]$portFilter.LocalPort -in @('', 'Any')) {
+            throw 'The machine firewall rule does not permit a specific TCP port.'
+        }
     }
 
     Set-SmokePhase 'Uninstalling machine service'

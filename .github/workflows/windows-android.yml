@@ -65,8 +65,15 @@ jobs:
           $version = [string]$project.Project.PropertyGroup.Version
           $executable = Join-Path "artifacts/$version/windows-portable" 'RemoteDesktop.exe'
           if (!(Test-Path -LiteralPath $executable)) { throw "Windows executable was not found: $executable" }
-          & $executable --ui-smoke
-          if ($LASTEXITCODE -ne 0) { throw "Responsive WPF smoke test failed with exit code $LASTEXITCODE" }
+          $stdout = Join-Path $env:RUNNER_TEMP 'wpf-ui-smoke.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'wpf-ui-smoke.stderr.log'
+          $smoke = Start-Process -FilePath $executable -ArgumentList '--ui-smoke' -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if ($smoke.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout }
+            if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+            throw "Responsive WPF smoke test failed with exit code $($smoke.ExitCode)"
+          }
+          Write-Output 'Responsive WPF layout smoke passed.'
 
       - name: Upload Windows and Android build artifacts
         uses: actions/upload-artifact@v7

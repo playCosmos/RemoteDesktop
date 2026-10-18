@@ -106,6 +106,16 @@ jobs:
           }
           Write-Output 'Responsive WPF layout smoke passed.'
 
+      - name: Smoke-test Windows machine service install and removal
+        shell: pwsh
+        timeout-minutes: 6
+        run: |
+          [xml]$project = Get-Content src/RemoteDesktop/RemoteDesktop.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          $executable = Join-Path "artifacts/$version/windows-portable" 'RemoteDesktop.exe'
+          if (!(Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Windows executable was not found: $executable" }
+          ./tests/WindowsMachineInstallSmoke.ps1 -ExecutablePath $executable
+
       - name: Test Windows Authenticode signing with a temporary certificate
         shell: pwsh
         timeout-minutes: 10

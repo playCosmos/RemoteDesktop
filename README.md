@@ -225,7 +225,7 @@ $env:WINDOWS_SIGNING_TIMESTAMP_URL = 'http://timestamp.digicert.com'
 
 빌드는 PFX 암호를 컴파일 자식 프로세스에 전달하지 않고, 서명할 때만 현재 사용자 인증서 저장소에 임시로 가져옵니다. 빌드가 가져온 인증서는 서명 후 개인 키와 함께 제거하며, 사용자 인증서는 그대로 둡니다. Windows SDK의 SignTool은 자동 검색되고, 찾지 못하면 `WINDOWS_SIGNTOOL`로 경로를 지정할 수 있습니다. 서명은 SHA-256 및 RFC 3161 타임스탬프를 사용하고, 빌드는 신뢰 체인과 서명을 확인합니다. 기본 SignTool 제한시간은 180초이며 타임스탬프 서버가 느리면 `-WindowsSignToolTimeoutSeconds`로 늘릴 수 있습니다. 실제 배포 발행자 표시를 위해서는 대상 PC가 신뢰하는 상용 코드 서명 인증서가 필요합니다.
 
-GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사(화면 캡처·H.264 포함), Windows·Android 빌드, APK 서명 검증과 실제 WPF 창의 넓은·좁은 화면 배치 smoke test를 수행하고, portable EXE와 APK를 14일간 workflow artifact로 보관합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
+GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사(화면 캡처·H.264 포함), Windows·Android 빌드, APK 서명 검증, WPF 레이아웃 검사, 실제 Windows 서비스 설치·시작·제거 smoke test를 수행하고 portable EXE와 APK를 14일간 workflow artifact로 보관합니다. Windows runner의 UAC는 꺼져 있으므로 대화형 UAC 승인 창과 잠금 화면 전환은 실제 사용자 세션에서 별도로 확인해야 합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
 
 통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. Windows CI와 로컬 `--capture` 실행은 화면 캡처, H.264 인코드·디코드와 JPEG 호환 경로까지 확인합니다. Android 검사는 커서 배치, H.264 설정, 전송 재개와 세션 복구 정책(5초 ping, 전경 3회 실패 기준, 재시도 간격, FPS 프레임 deadline)을 확인합니다. 파일·텍스트 왕복, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, UAC 프레임 파이프·ACL·프로세스 ID·세션 인증, 끊김 줄이기 설정도 검증합니다.
 

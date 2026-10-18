@@ -79,8 +79,8 @@ public final class MainActivity extends Activity {
     private static final int DIRECT_TOUCH=0, TRACKPAD=1, TRACKPAD_RIGHT_CLICK=2;
     private static final int CHROME_HIDE_MS=4500;
     private volatile boolean inputEnabled=true;
-    private int frameQuality=55;
-    private int frameRate=15;
+    private volatile int frameQuality=55;
+    private volatile int frameRate=15;
     private volatile int pacedQuality=55;
     private volatile int paceSlow;
     private volatile int paceFast;
@@ -270,23 +270,25 @@ public final class MainActivity extends Activity {
                 if(api==null) return;
                 if(!resumed) { keepalive(api); return; }
                 if(reconnectNeeded || recovering.get()) return;
+                final int selectedRate=frameRate;
                 long now=SystemClock.elapsedRealtime();
                 if(now<nextFrameAt) return;
-                nextFrameAt=now+1000L/frameRate;
+                nextFrameAt=now+1000L/selectedRate;
                 clipboardFiles.syncText();
                 final String display=selectedDisplay;
                 long started=SystemClock.elapsedRealtime();
-                PolledFrame polled=pollFrame(api, display);
+                PolledFrame polled=pollFrame(api, display, selectedRate);
                 if(polled==null) return;
                 lastFrameMillis=SystemClock.elapsedRealtime()-started;
                 if(!polled.keep) {
-                    int[] step=LinkPace.pace(frameQuality, requestedQuality, lastTransferMs, frameRate, paceSlow, paceFast, true);
+                    int selectedQuality=frameQuality;
+                    int[] step=LinkPace.pace(selectedQuality, requestedQuality, lastTransferMs, selectedRate, paceSlow, paceFast, true);
                     paceSlow=step[1];
                     paceFast=step[2];
                     if(step[3]==1) {
                         pacedQuality=step[0];
                         needKey=true;
-                        String notice=LinkPace.notice(frameQuality, requestedQuality, step[0]);
+                        String notice=LinkPace.notice(selectedQuality, requestedQuality, step[0]);
                         if(notice!=null) info(notice);
                     }
                 }
@@ -912,10 +914,9 @@ public final class MainActivity extends Activity {
     }
     @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(remote!=null) applySessionChrome(true); }
     @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); control.shutdown(); super.onDestroy(); }
-    private PolledFrame pollFrame(RemoteApi api, String display) throws Exception {
+    private PolledFrame pollFrame(RemoteApi api, String display, int requestedFps) throws Exception {
         final int epoch=generation.get();
         if(picturedSession!=api) { picturedSession=api; needKey=true; }
-        final int requestedFps=frameRate;
         final float frameViewX=viewX, frameViewY=viewY, frameViewWidth=viewWidth, frameViewHeight=viewHeight;
         final long frameCursorGeneration=cursorGeneration.get();
         String view=String.format(java.util.Locale.US,"%.5f,%.5f,%.5f,%.5f",frameViewX,frameViewY,frameViewWidth,frameViewHeight);

@@ -99,10 +99,10 @@ public partial class MainWindow : Window
         NoteTray();
     }
 
-    private void UpdateHostLayout()
+    private void UpdateHostLayout(double? viewportWidth = null)
     {
         if (!IsInitialized || ActualWidth <= 0) return;
-        var stacked = WindowLayout.StackHostPanels(ActualWidth);
+        var stacked = WindowLayout.StackHostPanels(viewportWidth ?? ActualWidth);
         if (stackedHostCards == stacked) return;
         stackedHostCards = stacked;
         var columns = HostContentGrid.ColumnDefinitions;
@@ -146,34 +146,31 @@ public partial class MainWindow : Window
     {
         if (!IsLoaded) throw new InvalidOperationException("The WPF window did not load.");
         var work = SystemParameters.WorkArea;
-        var wideWidth = Math.Max(MinWidth, 1180);
+        const double wideViewportWidth = 1180;
+        var wideWindowWidth = Math.Max(MinWidth, Math.Min(wideViewportWidth, work.Width - 32));
         var wideHeight = Math.Max(MinHeight, 800);
         Pages.SelectedItem = ServerTab;
-        MaxWidth = double.PositiveInfinity;
-        MaxHeight = double.PositiveInfinity;
-        Width = wideWidth;
+        Width = wideWindowWidth;
         Height = wideHeight;
         Left = work.Left;
         Top = work.Top;
         UpdateLayout();
-        UpdateHostLayout();
+        UpdateHostLayout(wideViewportWidth);
         UpdateLayout();
-        if (WindowLayout.StackHostPanels(ActualWidth) || Grid.GetRow(HostShareCard) != 0 || Grid.GetColumn(HostShareCard) != 2 || Grid.GetColumnSpan(HostShareCard) != 1)
+        if (WindowLayout.StackHostPanels(wideViewportWidth) || Grid.GetRow(HostShareCard) != 0 || Grid.GetColumn(HostShareCard) != 2 || Grid.GetColumnSpan(HostShareCard) != 1)
             throw new InvalidOperationException("The host page did not keep its wide two-column layout.");
         if (HostContentGrid.ActualWidth <= 0 || HostContentGrid.ActualWidth > ActualWidth + 1)
             throw new InvalidOperationException("The host setup cards exceed the WPF window width.");
-        var wideStacked = WindowLayout.StackHostPanels(ActualWidth);
-        if (wideStacked && (Grid.GetRow(HostShareCard) != 1 || Grid.GetColumnSpan(HostShareCard) != 3))
-            throw new InvalidOperationException("The host cards did not stack at the current width.");
-        if (!wideStacked && (Grid.GetRow(HostShareCard) != 0 || Grid.GetColumn(HostShareCard) != 2 || Grid.GetColumnSpan(HostShareCard) != 1))
-            throw new InvalidOperationException("The host cards did not restore the wide layout.");
+        if (HostSetupColumn.ActualWidth <= 0 || HostSetupColumn.ActualWidth > HostContentGrid.ActualWidth + 1 || HostShareCard.ActualWidth <= 0 || HostShareCard.ActualWidth > HostContentGrid.ActualWidth + 1)
+            throw new InvalidOperationException("A host card is clipped in the wide layout.");
 
-        Width = Math.Max(MinWidth, Math.Min(850, work.Width - 32));
+        var narrowWidth = Math.Max(MinWidth, Math.Min(850, work.Width - 32));
+        Width = narrowWidth;
         Height = Math.Max(MinHeight, Math.Min(620, work.Height - 32));
         UpdateLayout();
-        UpdateHostLayout();
+        UpdateHostLayout(narrowWidth);
         UpdateLayout();
-        if (!WindowLayout.StackHostPanels(ActualWidth) || Grid.GetRow(HostShareCard) != 1 || Grid.GetColumnSpan(HostShareCard) != 3)
+        if (!WindowLayout.StackHostPanels(narrowWidth) || Grid.GetRow(HostShareCard) != 1 || Grid.GetColumnSpan(HostShareCard) != 3)
             throw new InvalidOperationException("The host page did not switch to the narrow layout.");
         if (HostShareCard.ActualWidth <= 0 || HostShareCard.ActualWidth > HostContentGrid.ActualWidth + 1)
             throw new InvalidOperationException("The share card is clipped in the narrow layout.");

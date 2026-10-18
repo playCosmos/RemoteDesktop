@@ -149,6 +149,8 @@ public partial class MainWindow : Window
         var wideWidth = Math.Max(MinWidth, 1180);
         var wideHeight = Math.Max(MinHeight, 800);
         Pages.SelectedItem = ServerTab;
+        MaxWidth = double.PositiveInfinity;
+        MaxHeight = double.PositiveInfinity;
         Width = wideWidth;
         Height = wideHeight;
         Left = work.Left;

@@ -139,12 +139,6 @@ public static class UiText
             : elapsed.Minutes.ToString("00") + ":" + elapsed.Seconds.ToString("00");
     }
 
-    public static string SessionHealth(string? clock, string? detail)
-    {
-        detail = string.IsNullOrWhiteSpace(detail) ? "측정 중" : detail.Trim();
-        return string.IsNullOrWhiteSpace(clock) ? detail : clock.Trim() + " · " + detail;
-    }
-
     public static string FrameHealth(int changedFrames, double seconds, long roundTripMilliseconds, bool pictureHeld)
     {
         var latency = roundTripMilliseconds < 0 ? "—" : roundTripMilliseconds + " ms";
@@ -162,17 +156,9 @@ public static class UiText
     public static bool ViewerWatching(bool fullscreen, bool fullscreenMinimized, bool windowMinimized, bool clientTabSelected)
         => fullscreen ? !fullscreenMinimized : !windowMinimized && clientTabSelected;
 
-    public static string HealthTone(string? detail)
-    {
-        if (string.IsNullOrWhiteSpace(detail)) return "MutedBrush";
-        if (detail.Contains("응답 없음", StringComparison.Ordinal) || detail.Contains("종료", StringComparison.Ordinal)) return "DangerBrush";
-        if (detail.Contains("fps", StringComparison.Ordinal)) return "InkBrush";
-        return "MutedBrush";
-    }
-
     public static string SessionPreset(string? address, string quality, int frameRate)
     {
-        var preset = quality + " · " + frameRate + " FPS";
+        var preset = quality;
         return string.IsNullOrWhiteSpace(address) ? preset : address.Trim() + " · " + preset;
     }
 
@@ -235,15 +221,7 @@ public static class UiText
         return word + (batchim is 0 or 8 ? "로" : "으로");
     }
 
-    public static string RevealTip(string? elapsedLabel, string? inbound)
-    {
-        var duration = Blank(elapsedLabel);
-        var peer = Blank(inbound);
-        if (duration != null && peer != null) return duration + " · 이 PC에 " + peer + " 연결됨";
-        if (duration != null) return duration + " · 세션 조작 열기";
-        if (peer != null) return "이 PC에 " + peer + " 연결됨 · 세션 조작 열기";
-        return "세션 조작 열기";
-    }
+    public static string SessionHandleTip() => "끌어서 이동 · 화살표를 눌러 세션 조작 열기";
 
     public static bool NeedsAttention(bool newlyConnected, bool windowActive) => newlyConnected && !windowActive;
 
@@ -422,6 +400,7 @@ public static class UiText
     public static bool SessionNoticeHolds(string? text)
     {
         if (string.IsNullOrWhiteSpace(text) || IsProblem(text) || ReconnectNotice(text)) return true;
+        if (text == StaleFrame()) return true;
         return text.Contains('%') && !text.Contains("완료", StringComparison.Ordinal);
     }
 
@@ -440,17 +419,14 @@ public static class UiText
     public static bool SessionOnPicture(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        if (IsProblem(text) || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
-        if (text == TransferCancelled()) return true;
+        if (IsProblem(text) || text == StaleFrame() || InboundArrival(text) || HostSessionEnded(text) || ReconnectNotice(text) || text == FileDropHint(false) || text.Contains("보내는 중", StringComparison.Ordinal) || text.Contains("붙여넣", StringComparison.Ordinal)) return true;
+        if (text == TransferCancelled() || text == InputReleased() || text == InputBacklog()) return true;
         if (text == SecureAttentionSent() || text == SecureAttentionUnavailable()) return true;
         if (text == ClipboardCleared()) return true;
         if (text == ImageClipboardReady() || text == ImageClipboardReceived() || text == ImageClipboardTooLarge()) return true;
         if (text == HtmlClipboardReady() || text == HtmlClipboardReceived() || text == HtmlClipboardTooLarge()) return true;
         return text.Contains('%') && text.Contains("클립보드", StringComparison.Ordinal);
     }
-
-    public static string SessionReveal(string health, bool inputEnabled)
-        => inputEnabled || string.IsNullOrWhiteSpace(health) ? health : health.Trim() + " · 보기만";
 
     public static bool OfferMonitorChoice(int listedDisplays) => listedDisplays > 2;
 

@@ -28,6 +28,8 @@ public partial class MainWindow : Window
         hostSession = new HostSession(this);
         clientSession = new ClientSession(this);
         InitializeComponent();
+        SessionReveal.ToolTip = UiText.SessionHandleTip();
+        ClientPanel.SizeChanged += (_, _) => clientSession.SessionViewportSizeChanged();
         Activated += (_, _) => RefreshCapsLock();
         HostPort.TextChanged += (_, _) => hostSession.RefreshAddresses();
         Address.TextChanged += (_, _) => clientSession.NormalizePastedAddress();
@@ -296,7 +298,6 @@ public partial class MainWindow : Window
         ServerTab.Header = UiText.HostTabLabel(inbound);
         Title = UiText.WindowTitle(productTitle, outbound, inbound);
         clientSession.SetFullscreenTitle(UiText.FullscreenTitle(outbound, inbound));
-        SessionReveal.ToolTip = UiText.RevealTip(clientSession.ViewingLabel, inbound);
         if (departed) StopAttention();
         else if (UiText.NeedsAttention(newlyConnected, IsActive || clientSession.IsFullscreenActive)) StartAttention();
         var hostPageVisible = UiText.HostPageVisible(ServerTab.IsSelected, clientSession.IsFullscreen);
@@ -338,7 +339,7 @@ public partial class MainWindow : Window
             ? (System.Windows.Media.Brush)FindResource("DangerBrush")
             : (System.Windows.Media.Brush)FindResource("InkBrush");
         SessionAlertText.Text = text;
-        clientSession.NoteSessionStatus(problem);
+        clientSession.NoteSessionStatus();
     });
 
     private void ClientNotice(string text, bool problem = false) => Dispatcher.InvokeAsync(() =>
@@ -455,9 +456,8 @@ public partial class MainWindow : Window
     private void RemoteFocusChanged(object sender, KeyboardFocusChangedEventArgs e) => clientSession.RemoteFocusChanged(sender, e);
     private void OpenSessionMenu(object sender, RoutedEventArgs e) => clientSession.OpenSessionMenu(sender, e);
     private void RevealSessionToolbar(object sender, RoutedEventArgs e) => clientSession.RevealSessionToolbar(sender, e);
-    private void SessionToolbarActivity(object sender, System.Windows.Input.MouseEventArgs e) => clientSession.SessionToolbarActivity(sender, e);
-    private void SessionMenuClosed(object sender, RoutedEventArgs e) => clientSession.SessionMenuClosed(sender, e);
-    private void DisplayListClosed(object sender, EventArgs e) => clientSession.DisplayListClosed(sender, e);
+    private void CollapseSessionToolbar(object sender, RoutedEventArgs e) => clientSession.CollapseSessionToolbar(sender, e);
+    private void SessionToolbarDragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e) => clientSession.SessionToolbarDragDelta(sender, e);
     private void RefreshDisplays(object sender, RoutedEventArgs e) => clientSession.RefreshDisplays(sender, e);
     private void DisplayChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => clientSession.DisplayChanged(sender, e);
     private void ToggleFullscreen(object sender, RoutedEventArgs e) => clientSession.ToggleFullscreen(sender, e);

@@ -305,7 +305,7 @@ using (var failedVideo = new H264Session())
 var avcc = new byte[] { 0, 0, 0, 2, 9, 16, 0, 0, 0, 1, 5 };
 var annex = VideoCodec.ToAnnexB(avcc);
 Check(!VideoCodec.IsAnnexB(avcc) && VideoCodec.IsAnnexB(annex) && annex.Length == 4 + 2 + 4 + 1 && annex[4] == 9 && annex[10] == 5, "length-prefixed video turns into annex-b");
-Check(UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "h264") == "10.0.0.8:45831 · 균형 · 15 FPS · H.264" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "jpeg") == "10.0.0.8:45831 · 균형 · 15 FPS · JPEG" && UiText.SessionPreset(null, "균형", 15) == "균형 · 15 FPS", "the toolbar names the video codec without dropping the older preset");
+Check(UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "h264") == "10.0.0.8:45831 · 균형 · H.264" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15, null, "jpeg") == "10.0.0.8:45831 · 균형 · JPEG" && UiText.SessionPreset(null, "균형", 15) == "균형", "the toolbar omits frame rates while retaining quality and codec");
 using (var picture = new System.Drawing.Bitmap(64, 48, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
 {
     using (var graphics = System.Drawing.Graphics.FromImage(picture))
@@ -632,32 +632,31 @@ using (var picture = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.Pi
 Check(UiText.HostPresence(true, true) == "LiveBrush" && UiText.HostPresence(false, true) == "AccentBrush" && UiText.HostPresence(false, false) == "MutedBrush", "the host dot distinguishes a connected client from waiting");
 Check(!UiText.HostShowsQuiet(TimeSpan.FromSeconds(4.9)) && UiText.HostShowsQuiet(TimeSpan.FromSeconds(5)) && UiText.HostPresence(true, true, true) == "DangerBrush", "the host marks a client quiet when a new login may replace it");
 Check(UiText.ElapsedClock(TimeSpan.FromSeconds(5)) == "00:05" && UiText.ElapsedClock(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(9)) == "2:04:09", "elapsed time stays compact");
-Check(UiText.SessionHealth(null, "15 fps · 40 ms") == "15 fps · 40 ms" && UiText.SessionHealth("03:12", "15 fps · 40 ms") == "03:12 · 15 fps · 40 ms", "session health keeps the clock beside the frame rate");
 Check(UiText.FrameHealth(15, 1, 40, false) == "15 fps · 40 ms" && UiText.FrameHealth(0, 1, 40, true) == "화면 유지 · 40 ms" && UiText.FrameHealth(0, 1, -1, false) == "수신 대기 · —", "a still picture stays distinct from a missing frame");
 Check(UiText.StaleFrame() == "화면 응답 없음" && UiText.FrameStale(TimeSpan.FromSeconds(3)) && !UiText.FrameStale(TimeSpan.FromSeconds(2.9)), "a silent stream is reported after three seconds");
-Check(UiText.PicturePaused() == "화면 일시중지" && UiText.HealthTone(UiText.PicturePaused()) == "MutedBrush", "a hidden picture pauses without looking like a dropped session");
+Check(UiText.PicturePaused() == "화면 일시중지", "a hidden picture pauses without looking like a dropped session");
 Check(UiText.ViewerWatching(false, false, false, true) && !UiText.ViewerWatching(false, false, true, true) && !UiText.ViewerWatching(false, false, false, false) && UiText.ViewerWatching(true, false, true, false) && !UiText.ViewerWatching(true, true, false, true), "frames continue only while the remote picture is on screen");
-Check(UiText.HealthTone("15 fps · 40 ms") == "InkBrush" && UiText.HealthTone("화면 유지 · 40 ms") == "MutedBrush" && UiText.HealthTone("화면 응답 없음") == "DangerBrush" && UiText.HealthTone("연결 종료") == "DangerBrush", "health text color follows whether frames are arriving");
-Check(UiText.SessionPreset(null, "균형", 15) == "균형 · 15 FPS" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15) == "10.0.0.8:45831 · 균형 · 15 FPS", "the toolbar names the remote pc");
-Check(UiText.SessionPreset("10.0.0.8:45831", "고화질", 15, "저대역폭") == "10.0.0.8:45831 · 고화질 → 저대역폭 · 15 FPS" && UiText.SessionPreset(null, "고화질", 15, "고화질") == "고화질 · 15 FPS", "the toolbar shows when the stream quality was lowered");
+Check(UiText.SessionPreset(null, "균형", 15) == "균형" && UiText.SessionPreset("10.0.0.8:45831", "균형", 15) == "10.0.0.8:45831 · 균형", "the toolbar names the remote pc without a frame rate");
+Check(UiText.SessionPreset("10.0.0.8:45831", "고화질", 15, "저대역폭") == "10.0.0.8:45831 · 고화질 → 저대역폭" && UiText.SessionPreset(null, "고화질", 15, "고화질") == "고화질", "the toolbar shows when the stream quality was lowered");
 Check(UiText.QualityShift("고화질", null, "고화질") == null && UiText.QualityShift("고화질", null, "저대역폭") == "끊김을 줄이려고 화질을 낮췄습니다. 고화질 대신 저대역폭." && UiText.QualityShift("고화질", "저대역폭", "저대역폭") == null && UiText.QualityShift("고화질", "저대역폭", "고화질") == "여유가 생겨 화질을 고화질로 되돌렸습니다.", "quality changes are announced once");
 Check(UiText.QualityRestored("균형") == "여유가 생겨 화질을 균형으로 되돌렸습니다." && UiText.QualityRestored("저대역폭") == "여유가 생겨 화질을 저대역폭으로 되돌렸습니다.", "restored quality uses the right Korean particle");
-Check(UiText.RevealTip(null, null) == "세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", null) == "연결된 지 03:12 · 세션 조작 열기" && UiText.RevealTip("연결된 지 03:12", "192.168.0.2") == "연결된 지 03:12 · 이 PC에 192.168.0.2 연결됨", "the hidden toolbar button explains the session");
+Check(UiText.SessionHandleTip() == "끌어서 이동 · 화살표를 눌러 세션 조작 열기", "the compact handle explains how to move and open the toolbar");
 Check(UiText.IsProblem("클립보드 보내기 실패: 다시 시도하세요.") && UiText.IsProblem("클립보드 동기화 오류: 다시 시도하세요.") && UiText.IsProblem("붙여넣기 중단: 다시 시도하세요."), "session failures stay visible");
 Check(UiText.IsProblem("접속 대기 실패: 이 포트는 이미 사용 중입니다.") && UiText.IsProblem("모니터 목록을 가져오지 못했습니다.") && UiText.IsProblem("끊김 줄이기 설정을 저장하지 못했습니다.") && UiText.SessionOnPicture("모니터 목록을 가져오지 못했습니다."), "a failed host or a failed monitor list stays visible");
 Check(UiText.SessionBaseline(true) == "연결됨" && UiText.SessionBaseline(false) == "화면만 보는 중", "a live session returns to connected, and view-only keeps its own label");
 Check(!UiText.SessionNoticeHolds("연결됨") && !UiText.SessionNoticeHolds("화면 품질: 고화질") && !UiText.SessionNoticeHolds("클립보드 파일 수신 완료"), "ordinary session notes settle back to the connection state");
 Check(UiText.SessionNoticeHolds("클립보드 보내기 실패: 다시 시도하세요.") && UiText.SessionNoticeHolds(UiText.ClipboardFileProgress("클립보드 수신", 0, 1, "메모.txt", 50, 200)), "failures and an unfinished file copy stay on screen");
+Check(UiText.SessionNoticeHolds(UiText.StaleFrame()) && UiText.SessionOnPicture(UiText.StaleFrame()), "a stalled picture stays visible outside the toolbar until frames resume");
 Check(UiText.FileDropHint(true) == "놓으면 상대 PC에서 붙여넣을 수 있습니다" && UiText.FileDropHint(false) == "입력 제어를 켜야 파일을 보낼 수 있습니다", "a file drag explains where the files will go");
 Check(UiText.FileDropStarted(1) == "파일을 상대 PC로 보내는 중" && UiText.FileDropStarted(3) == "3개 파일을 상대 PC로 보내는 중", "a dropped batch says how many files are leaving");
 Check(UiText.SessionOnPicture("클립보드 파일 준비 완료 · 상대 탐색기에서 붙여넣으세요.") && UiText.SessionOnPicture(UiText.ClipboardFileProgress("클립보드 전송", 0, 1, "메모.txt", 50, 200)) && UiText.SessionOnPicture(UiText.FileDropStarted(2)) && UiText.SessionOnPicture(UiText.FileDropHint(false)) && UiText.SessionOnPicture("파일 보내기 실패: 다시 시도하세요."), "a file transfer stays on the picture while the toolbar is hidden");
-Check(!UiText.SessionOnPicture("연결됨") && !UiText.SessionOnPicture("화면 품질: 고화질") && !UiText.SessionOnPicture("화면만 보는 중") && !UiText.SessionOnPicture(""), "ordinary session notes stay in the toolbar");
+Check(!UiText.SessionOnPicture("연결됨") && !UiText.SessionOnPicture("화면 품질: 고화질") && !UiText.SessionOnPicture("화면만 보는 중") && !UiText.SessionOnPicture(""), "ordinary session notes do not cover the remote picture");
 Check(UiText.InboundArrived("192.168.0.2") == "192.168.0.2 이 PC에 연결됨" && UiText.InboundArrived("  ") == "이 PC에 연결됨", "a new client is named when it reaches this pc");
 Check(UiText.HostPageVisible(true, false) && !UiText.HostPageVisible(false, false) && !UiText.HostPageVisible(true, true) && !UiText.HostPageVisible(false, true), "the host page is on screen only while its tab is selected outside fullscreen");
 Check(UiText.AnnounceInbound(true, false) && !UiText.AnnounceInbound(true, true) && !UiText.AnnounceInbound(false, false) && !UiText.AnnounceInbound(false, true), "a new client is announced only while the host page is hidden");
 Check(UiText.InboundArrival(UiText.InboundArrived("192.168.0.2")) && UiText.SessionOnPicture(UiText.InboundArrived("192.168.0.2")), "an inbound arrival stays on the picture after the toolbar hides");
 Check(UiText.SessionNoticeDuration(UiText.InboundArrived("192.168.0.2")) == TimeSpan.FromSeconds(12) && UiText.SessionNoticeDuration("화면 품질: 고화질") == TimeSpan.FromSeconds(4.5), "an inbound arrival stays longer than an ordinary session note");
-Check(UiText.SessionReveal("03:12 · 15 fps · 40 ms", true) == "03:12 · 15 fps · 40 ms" && UiText.SessionReveal("03:12 · 15 fps · 40 ms", false) == "03:12 · 15 fps · 40 ms · 보기만", "the collapsed session control still says when input is off");
+Check(UiText.SessionOnPicture(UiText.InputReleased()) && UiText.SessionOnPicture(UiText.InputBacklog()), "input release notices stay visible with the toolbar closed");
 Check(!UiText.IsProblem("연결됨") && !UiText.IsProblem("화면 품질: 균형") && !UiText.IsProblem(""), "ordinary session status is not treated as a failure");
 recent.SelectedTab = "host";
 var recentPath = Path.Combine(Path.GetTempPath(), "prd-recent-" + Guid.NewGuid().ToString("N") + ".json");

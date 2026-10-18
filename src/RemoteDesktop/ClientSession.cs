@@ -43,7 +43,6 @@ public partial class MainWindow
         public bool IsFullscreenActive => fullscreen?.IsActive == true;
         public long InputQueueWriteFailures => Interlocked.Read(ref inputQueueWriteFailures);
         public bool IsFullscreen => fullscreen != null;
-        public string? ViewingLabel => viewingSince == null ? null : UiText.ConnectedFor(DateTime.UtcNow - viewingSince.Value);
         private bool normalizingAddress;
         private bool suppressClientPasswordReveal;
         private long lastMove;
@@ -102,7 +101,8 @@ public partial class MainWindow
         private readonly HashSet<int> suppressedSystemKeys = [];
         private readonly HashSet<int> localReleaseKeys = [];
         private bool remoteAltDown;
-        private System.Windows.Threading.DispatcherTimer? toolbarTimer;
+        private double toolbarOffsetX;
+        private double toolbarOffsetY;
         private System.Windows.Threading.DispatcherTimer? sessionNoticeTimer;
         private string? settlingNotice;
         private string? secureNotice;
@@ -838,8 +838,8 @@ public partial class MainWindow
             if (retrying)
             {
                 window.ConnectionControls.Visibility = Visibility.Collapsed;
-                window.SessionToolbar.Visibility = Visibility.Visible;
-                window.SessionReveal.Visibility = Visibility.Collapsed;
+                window.SessionToolbar.Visibility = Visibility.Collapsed;
+                window.SessionReveal.Visibility = Visibility.Visible;
                 window.EndSessionButton.IsEnabled = true;
                 SetHealth(UiText.ReconnectHold());
             }
@@ -947,11 +947,9 @@ public partial class MainWindow
             if (!enabled) secureNotice = null;
             if (!enabled) { announcedDelivery = null; lastFrameQuality = 0; }
             UpdateInputChrome();
-            if (enabled) ShowSessionToolbar();
-            else toolbarTimer?.Stop();
         }
 
-        public void NoteSessionStatus(bool problem)
+        public void NoteSessionStatus()
         {
             if (client == null)
             {
@@ -961,22 +959,19 @@ public partial class MainWindow
                 return;
             }
             ScheduleSessionBaseline();
-            if (problem) ShowSessionToolbar();
-            else SyncSessionNotice(window.SessionToolbar.Visibility == Visibility.Visible);
+            SyncSessionNotice(window.SessionToolbar.Visibility == Visibility.Visible);
         }
 
         public void AnnounceInbound(string? peer)
         {
             if (client == null) return;
             window.SessionStatus(UiText.InboundArrived(peer));
-            ShowSessionToolbar();
         }
 
         public void AnnounceHostNotice(string? text)
         {
             if (client == null || !UiText.HostSessionEnded(text) || UiText.ReconnectNotice(window.StatusText.Text)) return;
             window.SessionStatus(text!);
-            ShowSessionToolbar();
         }
 
         private void DismissInboundArrival()
@@ -1043,11 +1038,13 @@ public partial class MainWindow
 
         private void SetHealth(string text)
         {
+            var previous = healthDetail;
+            if (previous == text) return;
             healthDetail = text;
-            var tone = (System.Windows.Media.Brush)window.FindResource(UiText.HealthTone(text));
-            window.HealthText.Foreground = tone;
-            window.SessionReveal.Foreground = tone;
-            PublishHealth();
+            if (client == null) return;
+            if (text == UiText.StaleFrame()) window.SessionStatus(text);
+            else if (previous == UiText.StaleFrame() && window.StatusText.Text == UiText.StaleFrame())
+                window.SessionStatus(UiText.SessionBaseline(inputEnabled));
         }
 
         private void StartViewingClock()
@@ -1071,21 +1068,10 @@ public partial class MainWindow
             if (!viewerWatching)
             {
                 if (client != null && healthDetail != UiText.PicturePaused()) SetHealth(UiText.PicturePaused());
-                else PublishHealth();
                 return;
             }
             if (client != null && SeenFrame() && UiText.FrameStale(DateTime.UtcNow - LastFrameUtc()) && healthDetail != UiText.StaleFrame())
                 SetHealth(UiText.StaleFrame());
-            else PublishHealth();
-        }
-
-        private void PublishHealth()
-        {
-            var clock = viewingSince == null ? null : UiText.ElapsedClock(DateTime.UtcNow - viewingSince.Value);
-            var text = UiText.SessionHealth(clock, healthDetail);
-            window.HealthText.Text = text;
-            window.SessionReveal.Content = UiText.SessionReveal(text, inputEnabled);
-            window.SessionReveal.ToolTip = UiText.RevealTip(ViewingLabel, window.hostSession.ConnectedPeer);
         }
 
         private void NoteViewerWatch()
@@ -1102,45 +1088,69 @@ public partial class MainWindow
             }
         }
 
-        private void ShowSessionToolbar()
+        private void OpenSessionToolbar()
         {
-            if (client == null) return;
+            if (client == null && !holdingPicture) return;
             window.SessionToolbar.Visibility = Visibility.Visible;
             window.SessionReveal.Visibility = Visibility.Collapsed;
+            window.SessionToolbar.UpdateLayout();
+            ClampSessionToolbarPosition(window.SessionToolbar);
             SyncSessionNotice(true);
-            RestartToolbarTimer();
         }
 
-        private void RestartToolbarTimer()
+        private void CloseSessionToolbar()
         {
-            toolbarTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3.2) };
-            toolbarTimer.Stop();
-            toolbarTimer.Tick -= HideSessionToolbar;
-            toolbarTimer.Tick += HideSessionToolbar;
-            toolbarTimer.Start();
-        }
-
-        private void HideSessionToolbar(object? sender, EventArgs e)
-        {
-            toolbarTimer?.Stop();
-            if (client == null) return;
-            if (window.SessionMenu.IsOpen || window.DisplayList.IsDropDownOpen || window.SessionToolbar.IsMouseOver || window.SessionToolbar.IsKeyboardFocusWithin)
-            {
-                RestartToolbarTimer();
-                return;
-            }
+            if (client == null && !holdingPicture) return;
             window.SessionToolbar.Visibility = Visibility.Collapsed;
             window.SessionReveal.Visibility = Visibility.Visible;
+            window.SessionReveal.UpdateLayout();
+            ClampSessionToolbarPosition(window.SessionReveal);
             SyncSessionNotice(false);
         }
 
-        public void RevealSessionToolbar(object sender, RoutedEventArgs e) => ShowSessionToolbar();
+        private void ClampSessionToolbarPosition(FrameworkElement control)
+        {
+            var stageWidth = window.ClientPanel.ActualWidth;
+            var stageHeight = window.ClientPanel.ActualHeight;
+            var maxX = Math.Max(0, (stageWidth - control.ActualWidth - control.Margin.Left - control.Margin.Right) / 2);
+            var minY = -control.Margin.Top;
+            var maxY = Math.Max(minY, stageHeight - control.ActualHeight - control.Margin.Top - 8);
+            toolbarOffsetX = Math.Clamp(toolbarOffsetX, -maxX, maxX);
+            toolbarOffsetY = Math.Clamp(toolbarOffsetY, minY, maxY);
+            window.SessionToolbar.RenderTransform = new TranslateTransform(toolbarOffsetX, toolbarOffsetY);
+            window.SessionReveal.RenderTransform = new TranslateTransform(toolbarOffsetX, toolbarOffsetY);
+        }
 
-        public void SessionToolbarActivity(object sender, MouseEventArgs e) => RestartToolbarTimer();
+        public void RevealSessionToolbar(object sender, RoutedEventArgs e) => OpenSessionToolbar();
 
-        public void SessionMenuClosed(object sender, RoutedEventArgs e) => RestartToolbarTimer();
+        public void CollapseSessionToolbar(object sender, RoutedEventArgs e) => CloseSessionToolbar();
 
-        public void DisplayListClosed(object sender, EventArgs e) => RestartToolbarTimer();
+        public void SessionToolbarDragDelta(object sender, System.Windows.Controls.Primitives.DragDeltaEventArgs e)
+        {
+            if (window.SessionToolbar.Visibility == Visibility.Visible)
+            {
+                window.SessionToolbar.UpdateLayout();
+                toolbarOffsetX += e.HorizontalChange;
+                toolbarOffsetY += e.VerticalChange;
+                ClampSessionToolbarPosition(window.SessionToolbar);
+            }
+            else if (window.SessionReveal.Visibility == Visibility.Visible)
+            {
+                window.SessionReveal.UpdateLayout();
+                toolbarOffsetX += e.HorizontalChange;
+                toolbarOffsetY += e.VerticalChange;
+                ClampSessionToolbarPosition(window.SessionReveal);
+            }
+        }
+
+        public void SessionViewportSizeChanged()
+        {
+            var control = window.SessionToolbar.Visibility == Visibility.Visible
+                ? window.SessionToolbar
+                : window.SessionReveal.Visibility == Visibility.Visible ? window.SessionReveal : null;
+            if (control == null) return;
+            ClampSessionToolbarPosition(control);
+        }
 
         private void Queue(InputEvent input)
         {
@@ -1158,7 +1168,6 @@ public partial class MainWindow
                 if (overflow && input.Kind == "key" && input.Down) pendingKeyDowns.Remove(input.Code);
             }
             if (overflow && inputBacklog.Note()) window.SessionStatus(UiText.InputBacklog());
-            if (overflow) ShowSessionToolbar();
             signal.Writer.TryWrite(0);
         }
 
@@ -1547,7 +1556,6 @@ public partial class MainWindow
         public void Move(object sender, MouseEventArgs e)
         {
             var stageY = e.GetPosition(window.Stage).Y;
-            if (client != null && stageY <= 20) ShowSessionToolbar();
             lastPointer = e.GetPosition(window.ScreenImage);
             PlaceRemoteCursor();
             if (panCandidate)
@@ -1573,7 +1581,6 @@ public partial class MainWindow
             window.ScreenImage.Focus();
             if (client != null && !UiText.RemotePointer(e.GetPosition(window.Stage).Y, window.ScreenImage.IsMouseCaptured))
             {
-                ShowSessionToolbar();
                 e.Handled = true;
                 return;
             }
@@ -1722,7 +1729,6 @@ public partial class MainWindow
             lock (suppressedSystemKeys)
             lock (localReleaseKeys)
                 foreach (var held in suppressedSystemKeys) localReleaseKeys.Add(held);
-            ShowSessionToolbar();
             window.SessionStatus(UiText.InputReleased());
             window.InputControlToggle.Focus();
             if (window.ScreenImage.IsKeyboardFocused) System.Windows.Input.Keyboard.ClearFocus();
@@ -1824,7 +1830,6 @@ public partial class MainWindow
             inputEnabled = enabled;
             UpdateInputChrome();
             if (client != null) window.SessionStatus(enabled ? "입력 제어 켜짐" : "입력 제어 꺼짐 · 화면 보기만 가능");
-            PublishHealth();
         }
 
         public void ClipboardAutoChanged(object sender, RoutedEventArgs e)
@@ -1986,7 +1991,9 @@ public partial class MainWindow
             var row = window.DisplayList.SelectedItem as MonitorRow;
             var resolution = window.ScreenImage.Source is BitmapSource bitmap ? bitmap.PixelWidth + "×" + bitmap.PixelHeight : "수신 전";
             var measured = lastFrameBytes > 0;
-            return "대상: " + lastConnection.Address
+            var elapsed = viewingSince == null ? "확인 중" : UiText.ElapsedClock(DateTime.UtcNow - viewingSince.Value);
+            return "연결 시간: " + elapsed
+                + "\n대상: " + lastConnection.Address
                 + "\n모니터: " + (string.IsNullOrWhiteSpace(row?.Label) ? "선택 안 됨" : row!.Label)
                 + "\n수신 해상도: " + resolution
                 + "\n요청 화질: " + QualityLabel(frameQuality) + " (" + frameQuality + ")"

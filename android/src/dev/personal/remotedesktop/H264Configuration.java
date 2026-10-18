@@ -10,6 +10,12 @@ final class H264Configuration {
         return 1_000_000L / fps;
     }
 
+    static long decodeBudgetNs(int fps, boolean firstFrame) {
+        if (firstFrame) return 300_000_000L;
+        long budget=frameDurationUs(fps)*1_500L;
+        return Math.max(40_000_000L,Math.min(120_000_000L,budget));
+    }
+
     static final class Pair {
         final byte[] sps;
         final byte[] pps;

@@ -26,6 +26,11 @@ final class H264ConfigurationCheck {
         require(H264Configuration.frameDurationUs(15)==66_666L); checks++;
         require(H264Configuration.frameDurationUs(30)==33_333L); checks++;
         require(H264Configuration.frameDurationUs(24)==66_666L); checks++;
+        require(H264Configuration.decodeBudgetNs(5,false)==120_000_000L); checks++;
+        require(H264Configuration.decodeBudgetNs(10,false)==120_000_000L); checks++;
+        require(H264Configuration.decodeBudgetNs(15,false)==99_999_000L); checks++;
+        require(H264Configuration.decodeBudgetNs(30,false)==49_999_500L); checks++;
+        require(H264Configuration.decodeBudgetNs(15,true)==300_000_000L); checks++;
         return checks;
     }
 

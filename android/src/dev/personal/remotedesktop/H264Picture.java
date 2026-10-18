@@ -23,13 +23,17 @@ final class H264Picture {
 
     Bitmap decode(byte[] accessUnit, int fps) throws IOException {
         if (accessUnit == null || accessUnit.length < 4) throw new IOException("H.264 프레임이 비어 있습니다.");
+        long deadline=System.nanoTime()+H264Configuration.decodeBudgetNs(fps,produced==0);
         byte[] sps = nal(accessUnit, 7);
         byte[] pps = nal(accessUnit, 8);
         try {
             H264Configuration.Pair configuration=H264Configuration.merge(configuredSps,configuredPps,sps,pps);
             if(configuration.complete && configuration.changed) configure(configuration.sps,configuration.pps);
             if (codec == null || !started) throw new IOException("H.264 구성 정보가 없습니다.");
-            int index = codec.dequeueInputBuffer(15_000);
+            long remainingNs=deadline-System.nanoTime();
+            if(remainingNs<=0) throw new IOException("H.264 입력 대기 시간 초과");
+            long remainingUs=Math.max(1L,(remainingNs+999L)/1000L);
+            int index = codec.dequeueInputBuffer((int)Math.min(15_000L,remainingUs));
             if (index < 0) throw new IOException("H.264 입력 버퍼가 없습니다.");
             ByteBuffer input = codec.getInputBuffer(index);
             if (input == null || input.capacity() < accessUnit.length) throw new IOException("H.264 입력 크기 초과");
@@ -38,7 +42,7 @@ final class H264Picture {
             int flags = nal(accessUnit, 5) != null ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0;
             codec.queueInputBuffer(index, 0, accessUnit.length, timestampUs, flags);
             timestampUs += H264Configuration.frameDurationUs(fps);
-            Bitmap bitmap = pull(produced == 0 ? 300_000_000L : 120_000_000L);
+            Bitmap bitmap = pull(deadline);
             produced++;
             return bitmap;
         } catch (IllegalStateException error) {
@@ -87,11 +91,13 @@ final class H264Picture {
         return format;
     }
 
-    private Bitmap pull(long budgetNs) throws IOException {
+    private Bitmap pull(long deadlineNs) throws IOException {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-        long deadline = System.nanoTime() + budgetNs;
-        while (System.nanoTime() < deadline) {
-            int out = codec.dequeueOutputBuffer(info, 20_000);
+        while (System.nanoTime() < deadlineNs) {
+            long remainingNs=deadlineNs-System.nanoTime();
+            long remainingUs=remainingNs/1000L;
+            if(remainingUs<=0) break;
+            int out = codec.dequeueOutputBuffer(info, Math.min(20_000L,remainingUs));
             if (out == MediaCodec.INFO_TRY_AGAIN_LATER || out == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) continue;
             if (out < 0) continue;
             if ((info.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0 || info.size == 0) {

@@ -699,12 +699,14 @@ async Task Session()
     await Task.Delay(2100);
     var hostNotices = new List<string>();
     site.Host.Status += hostNotices.Add;
+    string sessionToken;
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password }))
     {
         Check(response.IsSuccessStatusCode, "password login without host approval");
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
         Check(result.GetProperty("protocol").GetInt32() == 1 && result.GetProperty("maxFileBytes").GetInt64() == 1073741824, "login returns protocol version and file limit");
-        site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.GetProperty("token").GetString());
+        sessionToken = result.GetProperty("token").GetString()!;
+        site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
     }
     Check(hostNotices.Any(text => text is "클라이언트 연결됨 · 127.0.0.1" or "클라이언트 연결됨 · ::1"), "host shows who connected");
     Check(site.Host.SessionPeer is "127.0.0.1" or "::1", "host remembers who connected");
@@ -715,6 +717,45 @@ async Task Session()
         var ping = await response.Content.ReadFromJsonAsync<JsonElement>();
         Check(response.IsSuccessStatusCode && ping.GetProperty("protocol").GetInt32() == 1, "ping returns protocol version");
     }
+    site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("bearer", sessionToken);
+    using (var response = await site.Http.GetAsync("ping")) Check(response.IsSuccessStatusCode, "bearer scheme is parsed case-insensitively");
+    site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "short");
+    using (var response = await site.Http.GetAsync("ping")) Check(response.StatusCode == HttpStatusCode.Unauthorized, "a bearer token with a different length is rejected");
+    site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", sessionToken);
+    var bearerMethod = typeof(RemoteHost).GetMethod("BearerTokenMatches", BindingFlags.Static | BindingFlags.NonPublic)!;
+    var bearerMatches = bearerMethod.CreateDelegate<Func<string?, string?, bool>>();
+    var wrongSameLengthToken = (sessionToken[0] == '0' ? "1" : "0") + sessionToken[1..];
+    Check(bearerMatches("Bearer " + sessionToken, sessionToken) && bearerMatches("bearer " + sessionToken, sessionToken)
+        && !bearerMatches("Bearer " + wrongSameLengthToken, sessionToken) && !bearerMatches("Basic " + sessionToken, sessionToken), "bearer authorization compares equal-length token bytes and accepts only bearer schemes");
+    for (var warmup = 0; warmup < 5000; warmup++)
+    {
+        _ = bearerMatches("Bearer " + sessionToken, sessionToken);
+        _ = bearerMatches("Bearer " + wrongSameLengthToken, sessionToken);
+    }
+    var validSamples = new double[3];
+    var invalidSamples = new double[3];
+    const int bearerComparisonsPerSample = 40000;
+    for (var sample = 0; sample < validSamples.Length; sample++)
+    {
+        var validMatches = 0;
+        var watch = Stopwatch.StartNew();
+        for (var comparison = 0; comparison < bearerComparisonsPerSample; comparison++)
+            if (bearerMatches("Bearer " + sessionToken, sessionToken)) validMatches++;
+        watch.Stop();
+        validSamples[sample] = watch.Elapsed.TotalMilliseconds;
+        var invalidMatches = 0;
+        watch.Restart();
+        for (var comparison = 0; comparison < bearerComparisonsPerSample; comparison++)
+            if (bearerMatches("Bearer " + wrongSameLengthToken, sessionToken)) invalidMatches++;
+        watch.Stop();
+        invalidSamples[sample] = watch.Elapsed.TotalMilliseconds;
+        Check(validMatches == bearerComparisonsPerSample && invalidMatches == 0, "bearer timing sample returns the expected match result");
+    }
+    Array.Sort(validSamples);
+    Array.Sort(invalidSamples);
+    var timingRatio = Math.Max(validSamples[1], invalidSamples[1]) / Math.Max(0.001, Math.Min(validSamples[1], invalidSamples[1]));
+    Console.WriteLine($"Bearer comparison median sample: valid={validSamples[1]:0.00}ms invalid={invalidSamples[1]:0.00}ms ratio={timingRatio:0.00}x");
+    Check(timingRatio < 3.0, "same-length bearer match and mismatch timing stays within the coarse comparison bound");
     using (var response = await site.Http.GetAsync("displays"))
     {
         var displays = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray().ToArray();

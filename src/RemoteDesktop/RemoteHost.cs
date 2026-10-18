@@ -2,6 +2,8 @@ using System.IO;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Net.Http.Headers;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -241,7 +243,17 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private bool Authorized(HttpContext c)
     {
         Interlocked.Increment(ref authorizationCheckCount);
-        return token != null && c.Request.Headers.Authorization == "Bearer " + token;
+        return BearerTokenMatches(c.Request.Headers.Authorization.ToString(), token);
+    }
+    private static bool BearerTokenMatches(string? header, string? expectedToken)
+    {
+        if (string.IsNullOrEmpty(expectedToken) || !AuthenticationHeaderValue.TryParse(header, out var parsed)
+            || !string.Equals(parsed.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrEmpty(parsed.Parameter)
+            || parsed.Parameter.Length != expectedToken.Length) return false;
+        var actual = Encoding.UTF8.GetBytes(parsed.Parameter);
+        var expected = Encoding.UTF8.GetBytes(expectedToken);
+        return actual.Length == expected.Length && CryptographicOperations.FixedTimeEquals(actual, expected);
     }
     private static AuthenticatedRequest? Authenticated(HttpContext context)
         => context.Items.TryGetValue("auth", out var value) ? value as AuthenticatedRequest : null;

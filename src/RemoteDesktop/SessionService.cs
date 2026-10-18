@@ -4,8 +4,6 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
-using System.Net;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -85,6 +83,7 @@ sealed class SessionService
     readonly ConcurrentDictionary<NamedPipeServerStream, byte> activeClients = new();
     readonly object inputChannelGate = new();
     byte[] inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
+    byte[]? latestSecureFrame;
     string inputPipeName = SecureDesktop.NewPipeName();
     int allowFramePublish;
     int trustedUiPid;
@@ -233,6 +232,13 @@ sealed class SessionService
                         if (length is < 2 or > 8192) return;
                         var body = new byte[length];
                         await pipe.ReadExactlyAsync(body, token);
+                        if (SecureDesktop.IsFrameRequest(body))
+                        {
+                            var frame = Volatile.Read(ref latestSecureFrame);
+                            if (Volatile.Read(ref allowFramePublish) == 0) frame = null;
+                            await SecureDesktop.WriteFrameResponseAsync(pipe, frame, token);
+                            continue;
+                        }
                         var input = SecureDesktop.DecodeInput(body);
                         while (inputs.Count >= 32 && inputs.TryDequeue(out _)) { }
                         inputs.Enqueue(input);
@@ -260,6 +266,7 @@ sealed class SessionService
             if (trustedUiPid > 0 && !IsTrustedUiProcess(trustedUiPid, trustedUiSession, Environment.ProcessPath ?? "")) trustedUiPid = 0;
             inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
             inputPipeName = SecureDesktop.NewPipeName();
+            Volatile.Write(ref latestSecureFrame, null);
             pendingPipe?.Dispose();
             pendingPipe = null;
             foreach (var client in activeClients.Keys) client.Dispose();
@@ -297,19 +304,19 @@ sealed class SessionService
             Thread.Sleep(80);
         }
         if (onSecure) injector.ReleaseCore();
-        SecureDesktop.ClearFrame();
+        Volatile.Write(ref latestSecureFrame, null);
     }
 
     bool PublishIfSecure()
     {
         var desktop = OpenInputDesktop(0, false, DesktopRights);
-        if (desktop == 0) { SecureDesktop.ClearFrame(); return false; }
+        if (desktop == 0) { Volatile.Write(ref latestSecureFrame, null); return false; }
         try
         {
-            if (!SetThreadDesktop(desktop)) return false;
+            if (!SetThreadDesktop(desktop)) { Volatile.Write(ref latestSecureFrame, null); return false; }
             var name = DesktopName(desktop);
-            if (!SecureDesktop.IsSecureName(name)) { SecureDesktop.ClearFrame(); return false; }
-            if (Volatile.Read(ref allowFramePublish) == 0) { SecureDesktop.ClearFrame(); return true; }
+            if (!SecureDesktop.IsSecureName(name)) { Volatile.Write(ref latestSecureFrame, null); return false; }
+            if (Volatile.Read(ref allowFramePublish) == 0) { Volatile.Write(ref latestSecureFrame, null); return true; }
             var left = GetSystemMetrics(76);
             var top = GetSystemMetrics(77);
             var width = Math.Clamp(GetSystemMetrics(78), 1, 7680);
@@ -319,8 +326,10 @@ sealed class SessionService
                 graphics.CopyFromScreen(left, top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
             lock (inputChannelGate)
             {
-                if (Volatile.Read(ref allowFramePublish) == 0) { SecureDesktop.ClearFrame(); return true; }
-                SecureDesktop.Publish(ScreenJpeg.Encode(bitmap, 55), width, height);
+                if (Volatile.Read(ref allowFramePublish) == 0) { Volatile.Write(ref latestSecureFrame, null); return true; }
+                var jpeg = ScreenJpeg.Encode(bitmap, 55);
+                var frame = SecureDesktop.Pack(DateTime.UtcNow, width, height, jpeg);
+                Volatile.Write(ref latestSecureFrame, frame.Length <= SecureDesktop.MaxSecureFrameLength ? frame : null);
             }
             return true;
         }

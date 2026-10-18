@@ -24,6 +24,7 @@ public static class SecureDesktop
 {
     public static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(2);
     public const int InputKeyLength = 32;
+    public const int MaxSecureFrameLength = 12_000_000;
     const uint PipeAccessDuplex = 0x00000003;
     const uint PipeRejectRemoteClients = 0x00000008;
     const uint FileFlagOverlapped = 0x40000000;
@@ -98,25 +99,11 @@ public static class SecureDesktop
     {
         lock (fileAccessGate)
         {
-            var directory = Path.GetDirectoryName(FramePath())!;
+            var directory = Path.GetDirectoryName(PipePath())!;
             Directory.CreateDirectory(directory);
             new DirectoryInfo(directory).SetAccessControl(BuildDirectorySecurity(viewer));
-            SetFileAccess(FramePath(), viewer);
-            SetFileAccess(FramePath() + ".tmp", viewer);
             SetFileAccess(PipePath(), viewer);
             SetFileAccess(PipePath() + ".tmp", viewer);
-        }
-    }
-
-    public static void Publish(byte[] jpeg, int width, int height)
-    {
-        lock (fileAccessGate)
-        {
-            var path = FramePath();
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var temp = path + ".tmp";
-            File.WriteAllBytes(temp, Pack(DateTime.UtcNow, width, height, jpeg));
-            File.Move(temp, path, true);
         }
     }
 
@@ -260,6 +247,39 @@ public static class SecureDesktop
         stream.Write(InputProof(key, challenge));
     }
 
+    public static byte[] EncodeFrameRequest() => [1, 8];
+
+    public static bool IsFrameRequest(ReadOnlySpan<byte> payload)
+        => payload.Length == 2 && payload[0] == 1 && payload[1] == 8;
+
+    public static void WriteFrameRequest(Stream stream)
+    {
+        var request = EncodeFrameRequest();
+        stream.Write(BitConverter.GetBytes(request.Length));
+        stream.Write(request);
+    }
+
+    public static async Task WriteFrameResponseAsync(Stream stream, ReadOnlyMemory<byte>? packedFrame, CancellationToken token)
+    {
+        var frame = packedFrame ?? ReadOnlyMemory<byte>.Empty;
+        var header = BitConverter.GetBytes(frame.Length);
+        await stream.WriteAsync(header, token);
+        if (frame.Length > 0) await stream.WriteAsync(frame, token);
+    }
+
+    public static bool ReadFrameResponse(Stream stream, DateTime now, out byte[] jpeg)
+    {
+        jpeg = [];
+        Span<byte> header = stackalloc byte[4];
+        stream.ReadExactly(header);
+        var length = BitConverter.ToInt32(header);
+        if (length == 0) return false;
+        if (length is < 24 or > MaxSecureFrameLength) throw new InvalidDataException("Invalid secure frame response");
+        var packed = new byte[length];
+        stream.ReadExactly(packed);
+        return TryUnpack(packed, now, FreshFor, out jpeg);
+    }
+
     public static int GetPipeClientProcessId(NamedPipeServerStream pipe)
         => GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var processId) && processId is > 0 and <= int.MaxValue
             ? (int)processId : 0;
@@ -318,7 +338,7 @@ public static class SecureDesktop
     {
         var denied = InputDenied();
         byte[]? jpeg = null;
-        var fresh = denied && TryReadFresh(now, out jpeg);
+        var fresh = denied && TryFetchFresh(now, out jpeg);
         var view = Decide(denied, fresh);
         Volatile.Write(ref lastView, (int)view);
         return new SecureObservation(view, view == SecureView.Live ? jpeg : null);
@@ -431,20 +451,26 @@ public static class SecureDesktop
         finally { client?.Dispose(); }
     }
 
-    static bool TryReadFresh(DateTime now, out byte[]? jpeg)
+    static bool TryFetchFresh(DateTime now, out byte[]? jpeg)
     {
         jpeg = null;
-        try
+        lock (forwardGate)
         {
-            using var stream = new FileStream(FramePath(), FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            if (stream.Length is < 24 or > 12_000_000) return false;
-            var packed = new byte[stream.Length];
-            stream.ReadExactly(packed);
-            if (!TryUnpack(packed, now, FreshFor, out var frame)) return false;
-            jpeg = frame;
-            return true;
+            try
+            {
+                if (!EnsureForwarder()) return false;
+                WriteFrameRequest(forwarder!);
+                if (!ReadFrameResponse(forwarder!, now, out var frame)) return false;
+                jpeg = frame;
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException)
+            {
+                forwarder?.Dispose();
+                forwarder = null;
+                return false;
+            }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException or ArgumentException) { return false; }
     }
 
     static bool InputDenied()

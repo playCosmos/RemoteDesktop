@@ -117,6 +117,35 @@ var validSecurePeer = await AuthenticateSecureLoopback(secureInputKey);
 var invalidSecurePeer = await AuthenticateSecureLoopback(new byte[SecureDesktop.InputKeyLength]);
 Check(validSecurePeer.Authenticated && validSecurePeer.ProcessId == Environment.ProcessId && !invalidSecurePeer.Authenticated, $"the loopback secure input listener admits only the session process with its key (auth={validSecurePeer.Authenticated}, pid={validSecurePeer.ProcessId}, expected={Environment.ProcessId}, invalid={invalidSecurePeer.Authenticated})");
 Check(SecureDesktop.AuthorizeInputClient(50, 50, 3, 3) && !SecureDesktop.AuthorizeInputClient(51, 50, 3, 3) && !SecureDesktop.AuthorizeInputClient(50, 50, 4, 3) && !SecureDesktop.AuthorizeInputClient(50, 50, 0xFFFFFFFF, 3) && !SecureDesktop.AuthorizeInputClient(0, 0, 3, 3), "secure input stops when the client PID or active Windows session changes");
+async Task<byte[]?> SecureFramePipeRoundTrip(byte[] key, byte[] packed, DateTime now)
+{
+    var pipeName = SecureDesktop.NewPipeName();
+    using var server = new NamedPipeServerStream(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+    var serverTask = Task.Run(async () =>
+    {
+        await server.WaitForConnectionAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        if (!await SecureDesktop.AuthenticateInputServerAsync(server, key, timeout.Token)) return false;
+        var header = new byte[4];
+        await server.ReadExactlyAsync(header, timeout.Token);
+        var length = BitConverter.ToInt32(header);
+        if (length is < 2 or > 16) return false;
+        var request = new byte[length];
+        await server.ReadExactlyAsync(request, timeout.Token);
+        if (!SecureDesktop.IsFrameRequest(request)) return false;
+        await SecureDesktop.WriteFrameResponseAsync(server, packed, timeout.Token);
+        return true;
+    });
+    using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+    client.Connect(2000);
+    SecureDesktop.AuthenticateInputClient(client, key);
+    SecureDesktop.WriteFrameRequest(client);
+    var hasFrame = SecureDesktop.ReadFrameResponse(client, now, out var frame);
+    return await serverTask && hasFrame ? frame : null;
+}
+var pipeFrameJpeg = new byte[] { 0xFF, 0xD8, 4, 5, 6, 0xFF, 0xD9 };
+var pipeFramePacked = SecureDesktop.Pack(secureNow, 8, 4, pipeFrameJpeg);
+Check((await SecureFramePipeRoundTrip(secureInputKey, pipeFramePacked, secureNow.AddMilliseconds(10)))?.SequenceEqual(pipeFrameJpeg) == true, "the authenticated UAC pipe returns fresh screen frames to the trusted UI");
 async Task<int> GetOtherPipeClientPid()
 {
     var name = SecureDesktop.NewPipeName();

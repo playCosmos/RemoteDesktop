@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -212,6 +213,8 @@ public static class ClipboardPaths
     public const long MaxBatchBytes = 4L * 1024 * 1024 * 1024;
     public const int MaxTextCharacters = 1_000_000;
     public const int MaxImageBytes = 16 * 1024 * 1024;
+    public const int MaxImageDimension = 8192;
+    public const long MaxImagePixels = 16_777_216;
     public const int MaxHtmlCharacters = 1_000_000;
     public const string ImageTooLarge = "image-too-large";
     public const string HtmlTooLarge = "html-too-large";
@@ -228,8 +231,15 @@ public static class ClipboardPaths
     }
     public static void ValidateImage(byte[]? png)
     {
-        if (png is null || png.Length == 0 || png.Length > MaxImageBytes || png.Length < PngSignature.Length || !png.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
+        if (png is null || png.Length == 0 || png.Length > MaxImageBytes || png.Length < 24 || !png.AsSpan(0, PngSignature.Length).SequenceEqual(PngSignature))
             throw new ArgumentException(png is { Length: > MaxImageBytes } ? "클립보드 이미지는 16MB 이하만 지원합니다." : "클립보드 이미지는 PNG만 지원합니다.");
+        if (BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(8, 4)) != 13
+            || !png.AsSpan(12, 4).SequenceEqual("IHDR"u8))
+            throw new ArgumentException("클립보드 PNG 헤더가 올바르지 않습니다.");
+        var width = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(16, 4));
+        var height = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(20, 4));
+        if (width < 1 || height < 1 || width > MaxImageDimension || height > MaxImageDimension || (long)width * height > MaxImagePixels)
+            throw new ArgumentException("클립보드 이미지 해상도가 지원 범위를 벗어났습니다.");
     }
     public static (int Width, int Height) PngSize(byte[] png)
     {

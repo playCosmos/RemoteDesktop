@@ -128,7 +128,10 @@ final class ClipboardFiles {
             while((n=in.read(buffer))!=-1) { if(raw.size()+n>16*1024*1024)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다."); raw.write(buffer,0,n); }
             bytes=raw.toByteArray();
         }
-        if(bytes.length>=8 && (bytes[0] & 0xFF)==0x89 && bytes[1]==0x50 && bytes[2]==0x4E && bytes[3]==0x47) return bytes;
+        if(bytes.length>=8 && (bytes[0] & 0xFF)==0x89 && bytes[1]==0x50 && bytes[2]==0x4E && bytes[3]==0x47) {
+            validatePngHeader(new ByteArrayInputStream(bytes));
+            return bytes;
+        }
         android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options(); bounds.inJustDecodeBounds=true;
         android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);
         if(bounds.outWidth<=0 || bounds.outHeight<=0 || (long)bounds.outWidth*bounds.outHeight>4096L*4096L)throw new IOException("클립보드 이미지는 16MB 이하만 지원합니다.");
@@ -151,7 +154,7 @@ final class ClipboardFiles {
             File file=new File(folder,"picture.png");
             try(OutputStream out=new FileOutputStream(file)) { api.downloadClipboardImage(snapshot.getString("id"),out,bytes -> progress(bytes)); }
             if(file.length()!=image)throw new IOException("클립보드 이미지 크기 불일치");
-            try(InputStream in=new FileInputStream(file)) { byte[] sig=new byte[8]; if(in.read(sig)!=8 || (sig[0] & 0xFF)!=0x89 || sig[1]!=0x50 || sig[2]!=0x4E || sig[3]!=0x47)throw new IOException("클립보드 이미지는 PNG만 지원합니다."); }
+            try(InputStream in=new FileInputStream(file)) { validatePngHeader(in); }
             Uri uri=new Uri.Builder().scheme("content").authority(ClipboardProvider.AUTHORITY).appendPath(name).appendPath("0").appendPath("picture.png").build();
             activity.runOnUiThread(() -> {
                 downloading.remove(name);
@@ -160,6 +163,25 @@ final class ClipboardFiles {
                 observedTextSequence=revision.get(); remoteTextRevision=snapshot.optString("id",""); retireUnused(); status.accept("이미지 클립보드 수신 완료");
             });
         } catch(Exception e) { downloading.remove(name); remove(batch); status.accept("클립보드: "+e.getMessage()); }
+    }
+    private static void validatePngHeader(InputStream input) throws IOException {
+        byte[] header=new byte[24];
+        int offset=0;
+        while(offset<header.length) {
+            int read=input.read(header,offset,header.length-offset);
+            if(read<0)throw new IOException("클립보드 PNG 헤더가 잘못되었습니다.");
+            offset+=read;
+        }
+        if((header[0]&0xFF)!=0x89 || header[1]!=0x50 || header[2]!=0x4E || header[3]!=0x47
+            || header[4]!=0x0D || header[5]!=0x0A || header[6]!=0x1A || header[7]!=0x0A
+            || uint32(header,8)!=13 || header[12]!=0x49 || header[13]!=0x48 || header[14]!=0x44 || header[15]!=0x52)
+            throw new IOException("클립보드 PNG 헤더가 잘못되었습니다.");
+        long width=uint32(header,16), height=uint32(header,20);
+        if(width<1 || height<1 || width>8192 || height>8192 || width*height>16_777_216L)
+            throw new IOException("클립보드 이미지 해상도가 지원 범위를 벗어났습니다.");
+    }
+    private static long uint32(byte[] data,int offset) {
+        return ((long)(data[offset]&0xFF)<<24)|((long)(data[offset+1]&0xFF)<<16)|((long)(data[offset+2]&0xFF)<<8)|(data[offset+3]&0xFFL);
     }
     void accept(Intent intent) {
         if(!Intent.ACTION_SEND.equals(intent.getAction()) && !Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction()))return;

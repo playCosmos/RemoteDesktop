@@ -10,13 +10,22 @@ public sealed partial class RemoteHost
     {
         routes.MapPost("/v1/login", async (HttpContext c) =>
         {
+            var source = AuthenticationSource(c);
+            if (loginThrottle.TryGetDelay(source, DateTime.UtcNow, out var retry))
+            {
+                c.Response.Headers["Retry-After"] = Math.Max(1, (int)Math.Ceiling(retry.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Results.StatusCode(429);
+            }
             if (!await loginGate.WaitAsync(0)) return Results.StatusCode(429);
             try
             {
-                if (DateTime.UtcNow < nextLogin) return Results.StatusCode(429);
-                nextLogin = DateTime.UtcNow.AddSeconds(2);
                 var login = await ReadSmall<Login>(c);
-                if (login?.Password is null || !settings.Verify(login.Password)) return Results.Unauthorized();
+                if (login?.Password is null || !settings.Verify(login.Password))
+                {
+                    loginThrottle.Failed(source, DateTime.UtcNow);
+                    return Results.Unauthorized();
+                }
+                loginThrottle.Succeeded(source);
                 lock (gate)
                 {
                     if (token != null && !UiText.ReplaceQuietSession(DateTime.UtcNow - lastSeen)) return Results.Conflict(new { error = "사용 중인 서버입니다." });
@@ -152,15 +161,18 @@ public sealed partial class RemoteHost
         routes.MapGet("/v1/displays", () => Results.Ok(Desktop.Displays()));
         routes.MapGet("/v1/frame", async (HttpContext c) =>
         {
-            await captureGate.WaitAsync(c.RequestAborted);
+            var requestToken = SessionRequestToken(c);
+            await captureGate.WaitAsync(requestToken);
             var requestedQuality = int.TryParse(c.Request.Query["quality"].FirstOrDefault(), out var quality) ? quality : 55;
             var requestedRate = int.TryParse(c.Request.Query["fps"].FirstOrDefault(), out var fps) ? fps : 15;
             var localCursor = c.Request.Query["cursor"].FirstOrDefault() == "local";
             var viewport = ParseViewport(c.Request.Query["view"].FirstOrDefault());
             try
             {
+                requestToken.ThrowIfCancellationRequested();
                 var held = System.Diagnostics.Stopwatch.StartNew();
                 var frame = desktop.CaptureDetailed(c.Request.Query["display"].FirstOrDefault(), requestedQuality, viewport.X, viewport.Y, viewport.Width, viewport.Height, requestedRate, localCursor);
+                requestToken.ThrowIfCancellationRequested();
                 held.Stop();
                 c.Response.Headers["X-Capture-Ms"] = frame.Timing.CaptureMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
                 c.Response.Headers["X-Encode-Ms"] = frame.Timing.EncodeMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);

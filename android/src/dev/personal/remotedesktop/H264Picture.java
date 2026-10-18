@@ -12,6 +12,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 final class H264Picture {
+    private static final int MAX_DIMENSION = 8192;
+    private static final long MAX_PIXELS = 16_777_216L;
     private MediaCodec codec;
     private boolean started;
     private byte[] configuredSps;
@@ -129,7 +131,9 @@ final class H264Picture {
             width = configuredSize[0];
             height = configuredSize[1];
         }
-        if (width <= 1 || height <= 1) throw new IOException("H.264 출력 크기 오류");
+        if (width <= 1 || height <= 1 || width > MAX_DIMENSION || height > MAX_DIMENSION || (long)width * height > MAX_PIXELS
+            || originX < 0 || originY < 0 || (long)originX + width > image.getWidth() || (long)originY + height > image.getHeight())
+            throw new IOException("H.264 출력 크기가 지원 범위를 벗어났습니다.");
         Image.Plane[] planes = image.getPlanes();
         if (planes == null || planes.length < 3) throw new IOException("H.264 출력 형식 오류");
         Image.Plane yPlane = planes[0];
@@ -148,7 +152,7 @@ final class H264Picture {
         int yPixel = yPlane.getPixelStride();
         int uPixel = uPlane.getPixelStride();
         int vPixel = vPlane.getPixelStride();
-        int count = width * height;
+        int count = Math.multiplyExact(width, height);
         if (pixels == null || pixels.length != count) pixels = new int[count];
         try {
             for (int row = 0; row < height; row++) {
@@ -201,6 +205,7 @@ final class H264Picture {
         boolean separate = false;
         if (high(profile)) {
             chroma = bits.ue();
+            if (chroma < 0 || chroma > 3) throw new IllegalArgumentException("sps");
             if (chroma == 3) separate = bits.u(1) == 1;
             bits.ue();
             bits.ue();
@@ -223,8 +228,8 @@ final class H264Picture {
         } else if (order != 2) throw new IllegalArgumentException("sps");
         bits.ue();
         bits.u(1);
-        int codedWidth = (bits.ue() + 1) * 16;
-        int mapUnits = bits.ue() + 1;
+        long codedWidthLong = (bits.ue() + 1L) * 16L;
+        long mapUnits = bits.ue() + 1L;
         int frameOnly = bits.u(1);
         if (frameOnly == 0) bits.u(1);
         bits.u(1);
@@ -242,11 +247,14 @@ final class H264Picture {
         else if (arrayType == 1) { cropX = 2; cropY = 2 * (2 - frameOnly); }
         else if (arrayType == 2) { cropX = 2; cropY = 2 - frameOnly; }
         else { cropX = 1; cropY = 2 - frameOnly; }
-        int codedHeight = mapUnits * 16 * (2 - frameOnly);
-        int visibleWidth = codedWidth - (cropLeft + cropRight) * cropX;
-        int visibleHeight = codedHeight - (cropTop + cropBottom) * cropY;
-        if (visibleWidth <= 1 || visibleHeight <= 1 || codedWidth > 8192 || codedHeight > 8192) throw new IllegalArgumentException("sps");
-        return new int[] { visibleWidth, visibleHeight, codedWidth, codedHeight, cropLeft * cropX, cropTop * cropY };
+        long codedHeightLong = mapUnits * 16L * (2L - frameOnly);
+        long visibleWidthLong = codedWidthLong - ((long)cropLeft + cropRight) * cropX;
+        long visibleHeightLong = codedHeightLong - ((long)cropTop + cropBottom) * cropY;
+        if (codedWidthLong < 2 || codedHeightLong < 2 || codedWidthLong > MAX_DIMENSION || codedHeightLong > MAX_DIMENSION
+            || visibleWidthLong <= 1 || visibleHeightLong <= 1 || visibleWidthLong > MAX_DIMENSION || visibleHeightLong > MAX_DIMENSION
+            || visibleWidthLong * visibleHeightLong > MAX_PIXELS)
+            throw new IllegalArgumentException("sps");
+        return new int[] { (int)visibleWidthLong, (int)visibleHeightLong, (int)codedWidthLong, (int)codedHeightLong, cropLeft * cropX, cropTop * cropY };
     }
 
     private static boolean high(int profile) {
@@ -309,14 +317,18 @@ final class H264Picture {
             int zeros = 0;
             while (one() == 0) {
                 zeros++;
-                if (zeros > 31) throw new IllegalArgumentException("sps");
+                if (zeros > 30) throw new IllegalArgumentException("sps");
             }
-            return zeros == 0 ? 0 : ((1 << zeros) - 1) + u(zeros);
+            long value = zeros == 0 ? 0 : ((1L << zeros) - 1L) + u(zeros);
+            if (value > Integer.MAX_VALUE) throw new IllegalArgumentException("sps");
+            return (int)value;
         }
         int se() {
-            int code = ue();
-            int magnitude = (code + 1) >> 1;
-            return (code & 1) == 0 ? -magnitude : magnitude;
+            long code = ue();
+            long magnitude = (code + 1L) >> 1;
+            long value = (code & 1) == 0 ? -magnitude : magnitude;
+            if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) throw new IllegalArgumentException("sps");
+            return (int)value;
         }
         private int one() {
             int index = bit >> 3;

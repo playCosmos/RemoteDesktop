@@ -154,6 +154,26 @@ public static class SecureDesktop
     public static string BuildInputPipeSddl(SecurityIdentifier? viewer)
         => BuildInputPipeSecurity(viewer).GetSecurityDescriptorSddlForm(AccessControlSections.Access) + "S:(ML;;NW;;;ME)";
 
+    public static string BuildUiProcessSddl(SecurityIdentifier viewer)
+        => $"D:P(A;;0x001FFFFF;;;SY)(A;;0x00101001;;;OW)(A;;0x00101001;;;{viewer.Value})";
+
+    public static string BuildUiThreadSddl(SecurityIdentifier viewer)
+        => $"D:P(A;;0x001F03FF;;;SY)(A;;0x00100801;;;OW)(A;;0x00100801;;;{viewer.Value})";
+
+    public static bool RestrictUiProcessAccess(int processId, SecurityIdentifier viewer)
+    {
+        if (processId <= 0) return false;
+        var process = OpenProcess(0x00040000 | 0x00001000, false, processId);
+        if (process == 0) return false;
+        try
+        {
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptor(BuildUiProcessSddl(viewer), 1, out var descriptor, out _)) return false;
+            try { return SetKernelObjectSecurity(process, 0x00000004 | 0x80000000, descriptor); }
+            finally { _ = LocalFree(descriptor); }
+        }
+        finally { _ = CloseHandle(process); }
+    }
+
     public static void EnsurePipeSecurityPrivilege()
     {
         if (!OpenProcessToken(GetCurrentProcess(), 0x20 | 0x8, out var token)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -495,6 +515,8 @@ public static class SecureDesktop
     [DllImport("kernel32.dll")] static extern void SetLastError(uint errorCode);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(nint handle);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(nint process, uint access, out nint token);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern nint OpenProcess(uint access, bool inherit, int processId);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool SetKernelObjectSecurity(nint handle, uint securityInformation, nint descriptor);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool LookupPrivilegeValue(string? systemName, string name, out Luid luid);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool AdjustTokenPrivileges(nint token, bool disableAll, ref TokenPrivileges newState, int bufferLength, nint previousState, nint returnLength);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out nint descriptor, out uint size);

@@ -25,6 +25,34 @@ var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 StringContent Json(string json) => new(json, System.Text.Encoding.UTF8, "application/json");
 
+var loginThrottle = new LoginThrottle();
+var throttleNow = DateTime.UtcNow;
+Check(!loginThrottle.TryGetDelay("192.0.2.10", throttleNow, out _), "a new login source is not throttled");
+loginThrottle.Failed("192.0.2.10", throttleNow);
+Check(loginThrottle.TryGetDelay("192.0.2.10", throttleNow.AddMilliseconds(500), out var loginRetry) && Math.Abs(loginRetry.TotalMilliseconds - 500) < 1, "failed login backs off its source");
+Check(!loginThrottle.TryGetDelay("192.0.2.11", throttleNow.AddMilliseconds(500), out _), "one source cannot throttle another source");
+loginThrottle.Failed("192.0.2.10", throttleNow.AddSeconds(1));
+Check(loginThrottle.TryGetDelay("192.0.2.10", throttleNow.AddSeconds(2), out loginRetry) && Math.Abs(loginRetry.TotalSeconds - 1) < 0.001, "repeated failures increase source backoff");
+loginThrottle.Succeeded("192.0.2.10");
+Check(!loginThrottle.TryGetDelay("192.0.2.10", throttleNow.AddSeconds(2), out _), "a successful login clears its source backoff");
+var opaqueThrottle = new SourceIntervalThrottle();
+Check(opaqueThrottle.TryAcquire("192.0.2.10", throttleNow, TimeSpan.FromSeconds(2), out _), "OPAQUE source can begin an exchange");
+Check(!opaqueThrottle.TryAcquire("192.0.2.10", throttleNow.AddSeconds(1), TimeSpan.FromSeconds(2), out var opaqueRetry) && Math.Abs(opaqueRetry.TotalSeconds - 1) < 0.001, "OPAQUE start interval is limited per source");
+Check(opaqueThrottle.TryAcquire("192.0.2.11", throttleNow.AddSeconds(1), TimeSpan.FromSeconds(2), out _), "one OPAQUE source cannot throttle another source");
+
+var responseBytes = await RemoteResponseBounds.ReadBoundedAsync(new MemoryStream([1, 2, 3]), 3, CancellationToken.None);
+Check(responseBytes.SequenceEqual(new byte[] { 1, 2, 3 }), "bounded response accepts bytes within its cap");
+try { await RemoteResponseBounds.ReadBoundedAsync(new MemoryStream([1, 2, 3, 4, 5]), 4, CancellationToken.None); Check(false, "remote response stops at its streaming cap"); }
+catch (IOException) { Check(true, "remote response stops at its streaming cap"); }
+Check(FrameLimits.IsSupported(7680, 4320) && !FrameLimits.IsSupported(8192, 8192), "frame pixel bounds support 8K displays and reject excessive decoded area");
+Check(H264SpsLimitsCheck.Run() == 3, "H.264 SPS bounds are checked before decoder input");
+using var currentIdentity = WindowsIdentity.GetCurrent();
+var securityViewerSid = currentIdentity.User!;
+var processSddl = SecureDesktop.BuildUiProcessSddl(securityViewerSid);
+var threadSddl = SecureDesktop.BuildUiThreadSddl(securityViewerSid);
+Check(processSddl.StartsWith("D:P", StringComparison.Ordinal) && processSddl.Contains(";;;OW)", StringComparison.Ordinal) && processSddl.Contains("0x00101001;;;" + securityViewerSid.Value, StringComparison.Ordinal) && !processSddl.Contains("0x001FFFFF;;;" + securityViewerSid.Value, StringComparison.Ordinal) && !processSddl.Contains(";;;BA)", StringComparison.Ordinal), "trusted UI process DACL blocks same-user handle duplication");
+Check(threadSddl.StartsWith("D:P", StringComparison.Ordinal) && threadSddl.Contains(";;;OW)", StringComparison.Ordinal) && threadSddl.Contains("0x00100801;;;" + securityViewerSid.Value, StringComparison.Ordinal) && !threadSddl.Contains(";;;BA)", StringComparison.Ordinal), "trusted UI thread DACL limits same-user thread access");
+
 Check(WindowsFileClipboard.DecodeText("한글", unicode: true) == "한글", "clipboard keeps a text string");
 Check(WindowsFileClipboard.DecodeText(new MemoryStream(System.Text.Encoding.Unicode.GetBytes("가").Concat(new byte[] { 0, 0 }).ToArray()), unicode: true) == "가", "clipboard decodes a Unicode text stream");
 Check(WindowsFileClipboard.DecodeText(new MemoryStream(System.Text.Encoding.ASCII.GetBytes("ok").Concat(new byte[] { 0 }).ToArray()), unicode: false) == "ok", "clipboard decodes an ANSI text stream");
@@ -414,6 +442,10 @@ Check(ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false) && !Cli
 var picturePng = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 var pictureSize = ClipboardPaths.PngSize(picturePng);
 Check(pictureSize.Width == 1 && pictureSize.Height == 1, "a clipboard picture decodes");
+var oversizedPng = (byte[])picturePng.Clone();
+oversizedPng[18] = 0x20; oversizedPng[22] = 0x20;
+try { ClipboardPaths.ValidateImage(oversizedPng); Check(false, "compressed clipboard PNG dimensions are bounded"); }
+catch (ArgumentException) { Check(true, "compressed clipboard PNG dimensions are bounded"); }
 try { ClipboardPaths.ValidateImage([1, 2, 3, 4, 5, 6, 7, 8]); Check(false, "a non-png picture is rejected"); }
 catch (ArgumentException ex) { Check(ex.Message == "클립보드 이미지는 PNG만 지원합니다.", "a non-png picture is rejected"); }
 Check(!ClipboardSync.ClipboardClear.PushEmpty(0, 0, false, picturePng.Length) && !ClipboardSync.ClipboardClear.ApplyEmpty(0, 0, false, false, false, picturePng.Length), "a picture is not treated as an empty clipboard");
@@ -542,6 +574,8 @@ using (var picture = new System.Drawing.Bitmap(32, 32, System.Drawing.Imaging.Pi
     using (var graphics = System.Drawing.Graphics.FromImage(picture)) graphics.Clear(System.Drawing.Color.FromArgb(255, 220, 16, 24));
     var sharp = ScreenJpeg.Encode(picture, 75);
     var small = ScreenJpeg.Encode(picture, 25);
+    Check(FrameLimits.TryReadJpegDimensions(sharp, out var jpegWidth, out var jpegHeight) && jpegWidth == 32 && jpegHeight == 32
+        && !FrameLimits.TryReadJpegDimensions([0xFF, 0xD8, 0xFF, 0xDA, 0, 2], out _, out _), "JPEG frame dimensions are checked before decoding");
     Check(sharp.Length > 4 && sharp[0] == 0xFF && sharp[1] == 0xD8 && ScreenJpeg.Chroma(sharp) == 444, "normal quality keeps red and blue samples");
     Check(small[0] == 0xFF && small[1] == 0xD8 && ScreenJpeg.Chroma(small) == 420, "the lowest quality saves bandwidth");
     using var decoded = new System.Drawing.Bitmap(new MemoryStream(sharp));
@@ -587,6 +621,7 @@ File.Delete(recentPath);
 
 await Password();
 await Session();
+await SessionRevocationRace();
 await ClipboardFiles();
 if (args.Contains("--capture")) await Capture();
 Console.WriteLine(passed + " integration checks passed.");
@@ -646,7 +681,7 @@ async Task Session()
     using (var response = await site.Http.PostAsync("pake/start", Json("{\"loginRequest\":\"not-enrolled\",\"nonce\":\"" + opaqueNonce + "\"}"))) Check(response.StatusCode == HttpStatusCode.Conflict, "unregistered host rejects key exchange before the body matters");
     using (var response = await site.Http.PostAsync("pake/finish", Json("{\"exchangeId\":\"missing\",\"finishLoginRequest\":\"missing\",\"nonce\":\"" + opaqueNonce + "\"}"))) Check(response.StatusCode == HttpStatusCode.Unauthorized, "unknown key exchange cannot finish");
     using (var response = await site.Http.PostAsJsonAsync("login", new { password = "wrong" })) Check(response.StatusCode == HttpStatusCode.Unauthorized, "wrong password rejected");
-    using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password })) Check((int)response.StatusCode == 429, "login rate limit");
+    using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password })) Check((int)response.StatusCode == 429, "a failed source is temporarily throttled");
     await Task.Delay(2100);
     var hostNotices = new List<string>();
     site.Host.Status += hostNotices.Add;
@@ -710,6 +745,59 @@ async Task Session()
     await Task.Delay(17000);
     try { await client.Ping(CancellationToken.None); Check(false, "session timeout"); }
     catch (HttpRequestException e) when (e.StatusCode == HttpStatusCode.Unauthorized) { Check(true, "abandoned session expires"); }
+}
+
+async Task SessionRevocationRace()
+{
+    await using var site = await OpenHost();
+    using (var response = await site.Http.PostAsJsonAsync("login", new { password = site.Password }))
+    {
+        response.EnsureSuccessStatusCode();
+        var token = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+        site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+    var captureGate = (SemaphoreSlim)typeof(RemoteHost).GetField("captureGate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(site.Host)!;
+    await captureGate.WaitAsync();
+    var released = false;
+    try
+    {
+        var previousSeen = site.Host.SessionLastSeenUtc!.Value;
+        await Task.Delay(5);
+        using var requestTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+        var frameRequest = site.Http.GetAsync("frame", HttpCompletionOption.ResponseHeadersRead, requestTimeout.Token);
+        var authorizedBy = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        while (site.Host.SessionLastSeenUtc <= previousSeen && DateTime.UtcNow < authorizedBy) await Task.Delay(5);
+        Check(site.Host.SessionLastSeenUtc > previousSeen, "queued frame request is authorized before revocation");
+        var disconnect = Task.Run(() => site.Host.Disconnect());
+        var revokedBy = DateTime.UtcNow + TimeSpan.FromSeconds(1);
+        while (site.Host.SessionPeer != null && DateTime.UtcNow < revokedBy) await Task.Delay(5);
+        Check(site.Host.SessionPeer == null, "frame test session is revoked while request waits");
+        captureGate.Release();
+        released = true;
+        try
+        {
+            using var response = await frameRequest;
+            var body = await response.Content.ReadAsByteArrayAsync();
+            Check(response.StatusCode != HttpStatusCode.OK || body.Length == 0, "queued frame is canceled on session revocation");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            Check(true, "queued frame is canceled on session revocation");
+        }
+        await disconnect;
+        using (var login = await site.Http.PostAsJsonAsync("login", new { password = site.Password }))
+        {
+            login.EnsureSuccessStatusCode();
+            var token = (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString();
+            site.Http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        using (var logout = await site.Http.PostAsync("logout", new StringContent("")))
+            Check(logout.StatusCode == HttpStatusCode.OK && site.Host.SessionPeer == null, "explicit logout returns successfully while revoking its session");
+    }
+    finally
+    {
+        if (!released) captureGate.Release();
+    }
 }
 
 async Task ClipboardFiles()

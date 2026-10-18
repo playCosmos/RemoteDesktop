@@ -384,6 +384,7 @@ sealed class SessionService
             var executable = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executable)) return;
             var existingUi = FindExistingUiProcess(executable, session);
+            if (existingUi > 0 && !SecureDesktop.RestrictUiProcessAccess(existingUi, viewer)) existingUi = 0;
             lock (inputChannelGate)
             {
                 if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
@@ -396,28 +397,59 @@ sealed class SessionService
                 try
                 {
                     var startup = new StartupInfo { cb = Marshal.SizeOf<StartupInfo>(), desktop = "winsta0" + (char)92 + "default", showWindow = 5, flags = 1 };
-                    if (!CreateProcessAsUser(primary, null, AppInstall.Quoted(executable), 0, 0, false, 0x400, environment, Path.GetDirectoryName(executable), ref startup, out var process)) return;
-                    var childPid = process.ProcessId is > 0 and <= int.MaxValue ? (int)process.ProcessId : 0;
-                    var wait = WaitForSingleObject(process.Process, 300);
-                    if (childPid > 0 && wait != 0 && IsTrustedUiProcess(childPid, session, executable))
+                    if (!ConvertStringSecurityDescriptorToSecurityDescriptor(SecureDesktop.BuildUiProcessSddl(viewer), 1, out var processSecurity, out _))
+                        throw new Win32Exception(Marshal.GetLastWin32Error());
+                    try
                     {
-                        lock (inputChannelGate)
+                        if (!ConvertStringSecurityDescriptorToSecurityDescriptor(SecureDesktop.BuildUiThreadSddl(viewer), 1, out var threadSecurity, out _))
+                            throw new Win32Exception(Marshal.GetLastWin32Error());
+                        try
                         {
-                            if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
-                                trustedUiPid = childPid;
+                            var processAttributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = processSecurity };
+                            var threadAttributes = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Descriptor = threadSecurity };
+                            if (!CreateProcessAsUser(primary, null, AppInstall.Quoted(executable), ref processAttributes, ref threadAttributes, false, 0x404, environment, Path.GetDirectoryName(executable), ref startup, out var process)) return;
+                            try
+                            {
+                                var childPid = process.ProcessId is > 0 and <= int.MaxValue ? (int)process.ProcessId : 0;
+                                var trustedChild = childPid > 0 && IsTrustedUiProcess(childPid, session, executable);
+                                var assigned = false;
+                                if (trustedChild)
+                                {
+                                    lock (inputChannelGate)
+                                    {
+                                        if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
+                                        {
+                                            trustedUiPid = childPid;
+                                            assigned = true;
+                                        }
+                                    }
+                                }
+                                if (ResumeThread(process.Thread) == uint.MaxValue)
+                                {
+                                    if (assigned) lock (inputChannelGate) if (trustedUiPid == childPid) trustedUiPid = 0;
+                                    _ = TerminateProcess(process.Process, 1);
+                                    return;
+                                }
+                                if (WaitForSingleObject(process.Process, 300) == 0 && assigned)
+                                {
+                                    lock (inputChannelGate) if (trustedUiPid == childPid) trustedUiPid = 0;
+                                }
+                                if (childPid > 0 && trustedUiPid == 0)
+                                {
+                                    var candidate = FindExistingUiProcess(executable, session);
+                                    if (candidate > 0 && !SecureDesktop.RestrictUiProcessAccess(candidate, viewer)) candidate = 0;
+                                    lock (inputChannelGate)
+                                    {
+                                        if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
+                                            trustedUiPid = candidate;
+                                    }
+                                }
+                            }
+                            finally { CloseHandle(process.Thread); CloseHandle(process.Process); }
                         }
+                        finally { _ = LocalFree(threadSecurity); }
                     }
-                    if (childPid > 0 && trustedUiPid == 0)
-                    {
-                        var candidate = FindExistingUiProcess(executable, session);
-                        lock (inputChannelGate)
-                        {
-                            if (trustedUiPid == 0 && trustedViewer?.Equals(viewer) == true && trustedUiSession == session)
-                                trustedUiPid = candidate;
-                        }
-                    }
-                    CloseHandle(process.Thread);
-                    CloseHandle(process.Process);
+                    finally { _ = LocalFree(processSecurity); }
                 }
                 finally { if (environment != 0) DestroyEnvironmentBlock(environment); }
             }
@@ -551,6 +583,7 @@ sealed class SessionService
     }
     [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public nint Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct ProcessHandles { public nint Process, Thread; public uint ProcessId, ThreadId; }
+    [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public nint Descriptor; public int InheritHandle; }
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetThreadDesktop(nint desktop);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
@@ -562,7 +595,11 @@ sealed class SessionService
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(nint token, int infoClass, nint info, int length, out int returnLength);
     [DllImport("userenv.dll", SetLastError = true)] static extern bool CreateEnvironmentBlock(out nint environment, nint token, bool inherit);
     [DllImport("userenv.dll", SetLastError = true)] static extern bool DestroyEnvironmentBlock(nint environment);
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessAsUser(nint token, string? application, string command, nint processAttributes, nint threadAttributes, bool inherit, uint flags, nint environment, string? directory, ref StartupInfo startup, out ProcessHandles process);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessAsUser(nint token, string? application, string command, ref SecurityAttributes processAttributes, ref SecurityAttributes threadAttributes, bool inherit, uint flags, nint environment, string? directory, ref StartupInfo startup, out ProcessHandles process);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out nint descriptor, out uint size);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(nint handle);
     [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(nint handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint ResumeThread(nint thread);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(nint process, uint exitCode);
+    [DllImport("kernel32.dll")] static extern nint LocalFree(nint memory);
 }

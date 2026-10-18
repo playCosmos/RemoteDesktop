@@ -1260,11 +1260,14 @@ public partial class MainWindow
 
         private static DecodedFrame DecodeFrame(byte[] jpeg)
         {
+            if (!FrameLimits.TryReadJpegDimensions(jpeg, out var headerWidth, out var headerHeight) || !FrameLimits.IsSupported(headerWidth, headerHeight))
+                throw new InvalidOperationException("JPEG 프레임 크기가 지원 범위를 벗어났습니다.");
             using var stream = new MemoryStream(jpeg, writable: false);
             using var bitmap = new System.Drawing.Bitmap(stream);
             var width = bitmap.Width;
             var height = bitmap.Height;
-            if (width <= 0 || height <= 0) throw new InvalidOperationException("빈 화면 프레임");
+            if (width != headerWidth || height != headerHeight || !FrameLimits.IsSupported(width, height))
+                throw new InvalidOperationException("원격 화면 크기가 올바르지 않습니다.");
             System.Drawing.Imaging.BitmapData? bits = null;
             byte[]? pixels = null;
             try
@@ -1272,7 +1275,8 @@ public partial class MainWindow
                 bits = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, width, height), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
                 var stride = bits.Stride;
                 if (stride <= 0) throw new InvalidOperationException("화면 프레임 방향이 올바르지 않습니다.");
-                var count = stride * height;
+                var count = checked(stride * height);
+                if (count > FrameLimits.MaxDecodedBytes) throw new InvalidOperationException("원격 화면 프레임이 너무 큽니다.");
                 pixels = System.Buffers.ArrayPool<byte>.Shared.Rent(count);
                 Marshal.Copy(bits.Scan0, pixels, 0, count);
                 var dpiX = bitmap.HorizontalResolution;
@@ -1292,9 +1296,11 @@ public partial class MainWindow
 
         private static DecodedFrame CopyFrame(byte[] pixels, int width, int height)
         {
-            var stride = width * 4;
-            var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(stride * height);
-            Buffer.BlockCopy(pixels, 0, rented, 0, stride * height);
+            var count = FrameLimits.CheckedByteCount(width, height, 4);
+            if (pixels.Length < count) throw new InvalidOperationException("H.264 프레임 크기가 올바르지 않습니다.");
+            var stride = checked(width * 4);
+            var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(count);
+            Buffer.BlockCopy(pixels, 0, rented, 0, count);
             return new DecodedFrame(width, height, 96, 96, stride, rented);
         }
 

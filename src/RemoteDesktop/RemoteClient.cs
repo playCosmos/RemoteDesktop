@@ -52,16 +52,18 @@ public sealed class RemoteClient : IDisposable
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
         var view = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{viewX:0.#####},{viewY:0.#####},{viewWidth:0.#####},{viewHeight:0.#####}");
         var query = (display == null ? "?quality=" + quality : "?display=" + Uri.EscapeDataString(display) + "&quality=" + quality) + "&view=" + view;
-        return await http.GetByteArrayAsync("frame" + query, timeout.Token);
+        using var response = await http.GetAsync("frame" + query, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+        response.EnsureSuccessStatusCode();
+        return await RemoteResponseBounds.ReadBoundedAsync(response.Content, FrameLimits.MaxResponseBytes, timeout.Token);
     }
     public async Task<RemoteFrame> FrameDetailed(CancellationToken ct, string? display, int quality, int fps, bool localCursor, bool viewerHasFrame = false, string? cursorShape = null, bool keyframe = false, double viewX = 0, double viewY = 0, double viewWidth = 1, double viewHeight = 1)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
         var view = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{viewX:0.#####},{viewY:0.#####},{viewWidth:0.#####},{viewHeight:0.#####}");
         var query = (display == null ? "?quality=" + quality : "?display=" + Uri.EscapeDataString(display) + "&quality=" + quality) + "&view=" + view + "&fps=" + fps + (localCursor ? "&cursor=local" : "") + (viewerHasFrame ? "&cached=1" : "") + (localCursor && !string.IsNullOrEmpty(cursorShape) ? "&shape=" + Uri.EscapeDataString(cursorShape) : "") + "&codec=h264" + (keyframe ? "&key=1" : "");
-        using var response = await http.GetAsync("frame" + query, timeout.Token);
+        using var response = await http.GetAsync("frame" + query, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
         response.EnsureSuccessStatusCode();
-        var bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token);
+        var bytes = await RemoteResponseBounds.ReadBoundedAsync(response.Content, FrameLimits.MaxResponseBytes, timeout.Token);
         return new RemoteFrame(bytes, Header(response, "X-Capture-Ms"), Header(response, "X-Encode-Ms"), HeaderFlag(response, "X-Frame-Reused"), (int)Header(response, "X-Jpeg-Quality"), Header(response, "X-Cursor-X"), Header(response, "X-Cursor-Y"), HeaderFlag(response, "X-Cursor-Local"), HeaderFlag(response, "X-Cursor-Visible"), (int)Header(response, "X-Cursor-Hot-X"), (int)Header(response, "X-Cursor-Hot-Y"), HeaderText(response, "X-Cursor-Hash"), HeaderBytes(response, "X-Cursor-Png"), HeaderText(response, "X-Secure-Desktop"), HeaderText(response, "X-Codec"), Header(response, "X-Wait-Ms"));
     }
 
@@ -119,9 +121,9 @@ public sealed class RemoteClient : IDisposable
     }
     public async Task<byte[]> DownloadClipboardImage(string id, CancellationToken ct)
     {
-        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/image", ct);
+        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/image", HttpCompletionOption.ResponseHeadersRead, ct);
         await EnsureClipboard(response);
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var bytes = await RemoteResponseBounds.ReadBoundedAsync(response.Content, (int)ClipboardPaths.MaxImageBytes, ct);
         var expected = response.Headers.GetValues("X-Content-SHA256").Single();
         if (!string.Equals(expected, Convert.ToHexString(SHA256.HashData(bytes)), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
         ClipboardPaths.ValidateImage(bytes);
@@ -129,12 +131,12 @@ public sealed class RemoteClient : IDisposable
     }
     public async Task<string> DownloadClipboardHtml(string id, CancellationToken ct)
     {
-        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/html", ct);
+        using var response = await http.GetAsync("clipboard/" + Uri.EscapeDataString(id) + "/html", HttpCompletionOption.ResponseHeadersRead, ct);
         await EnsureClipboard(response);
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var bytes = await RemoteResponseBounds.ReadBoundedAsync(response.Content, ClipboardPaths.MaxHtmlCharacters * 3, ct);
         var expected = response.Headers.GetValues("X-Content-SHA256").Single();
         if (!string.Equals(expected, Convert.ToHexString(SHA256.HashData(bytes)), StringComparison.OrdinalIgnoreCase)) throw new IOException("파일 해시 불일치");
-        var html = System.Text.Encoding.UTF8.GetString(bytes);
+        var html = new System.Text.UTF8Encoding(false, true).GetString(bytes);
         ClipboardPaths.ValidateHtml(html);
         return html;
     }

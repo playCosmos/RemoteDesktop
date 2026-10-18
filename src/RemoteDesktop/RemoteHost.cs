@@ -13,13 +13,16 @@ namespace RemoteDesktop;
 
 public sealed partial class RemoteHost : IAsyncDisposable
 {
+    private static readonly object SessionCancellationItem = new();
     public const long MaxFileBytes = 1024L * 1024 * 1024;
     private readonly HostSettings settings;
     private readonly Desktop desktop;
     private readonly object gate = new();
     private readonly SemaphoreSlim loginGate = new(1);
+    private readonly LoginThrottle loginThrottle = new();
     private readonly SemaphoreSlim captureGate = new(1);
     private readonly SemaphoreSlim opaqueGate = new(1);
+    private readonly SourceIntervalThrottle opaqueStartThrottle = new();
     private readonly ConcurrentDictionary<string, PendingOpaqueLogin> pendingOpaqueLogins = new();
     private WebApplication? app;
     private Timer? timer;
@@ -28,8 +31,6 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private string? sessionPeer;
     private DateTime? sessionStarted;
     private DateTime lastSeen;
-    private DateTime nextLogin;
-    private DateTime nextOpaqueLogin;
     private string serverFingerprint = "";
     private CancellationTokenSource session = new();
     private int disposeState;
@@ -62,6 +63,8 @@ public sealed partial class RemoteHost : IAsyncDisposable
         app = builder.Build();
         app.Use(async (context, next) =>
         {
+            CancellationTokenSource? sessionRequest = null;
+            CancellationTokenRegistration abortOnRevocation = default;
             try
             {
                 if (!IsPublicAuthenticationPath(context.Request.Path))
@@ -70,7 +73,10 @@ public sealed partial class RemoteHost : IAsyncDisposable
                     {
                         if (!Authorized(context)) { context.Response.StatusCode = 401; return; }
                         lastSeen = DateTime.UtcNow;
+                        sessionRequest = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, session.Token);
                     }
+                    context.Items[SessionCancellationItem] = sessionRequest.Token;
+                    if (context.Request.Path != "/v1/logout") abortOnRevocation = sessionRequest.Token.Register(context.Abort);
                 }
                 await next(context);
             }
@@ -84,6 +90,11 @@ public sealed partial class RemoteHost : IAsyncDisposable
             catch (Exception e) when (e is ArgumentException or System.Text.Json.JsonException or BadHttpRequestException)
             { await WriteClientError(context, 400, e.Message); }
             catch (Exception) { if (!context.Response.HasStarted) context.Response.StatusCode = 500; }
+            finally
+            {
+                abortOnRevocation.Dispose();
+                sessionRequest?.Dispose();
+            }
         });
         serverFingerprint = Convert.ToHexString(SHA256.HashData(certificate.RawData));
         MapAuthentication(app);
@@ -119,13 +130,17 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private async Task<IResult> StartOpaqueLogin(HttpContext context)
     {
         if (!settings.HasOpaqueIdentity) return Results.Conflict(new { error = "Windows secure enrollment required" });
+        var source = AuthenticationSource(context);
+        if (!opaqueStartThrottle.TryAcquire(source, DateTime.UtcNow, TimeSpan.FromSeconds(2), out var retry))
+        {
+            context.Response.Headers["Retry-After"] = Math.Max(1, (int)Math.Ceiling(retry.TotalSeconds)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return Results.StatusCode(429);
+        }
         if (!await opaqueGate.WaitAsync(0)) return Results.StatusCode(429);
         try
         {
-            if (DateTime.UtcNow < nextOpaqueLogin) return Results.StatusCode(429);
-            nextOpaqueLogin = DateTime.UtcNow.AddSeconds(2);
             foreach (var stale in pendingOpaqueLogins.Where(item => item.Value.ExpiresAt <= DateTime.UtcNow).ToArray()) pendingOpaqueLogins.TryRemove(stale.Key, out _);
-            if (pendingOpaqueLogins.Count >= 8) return Results.StatusCode(429);
+            if (pendingOpaqueLogins.Count >= 32 || pendingOpaqueLogins.Values.Count(item => item.Source == source) >= 2) return Results.StatusCode(429);
 
             var request = await ReadSmall<OpaqueStartRequest>(context);
             if (request is null || !ValidNonce(request.Nonce) || string.IsNullOrEmpty(request.LoginRequest) || request.LoginRequest.Length > 16384) throw new ArgumentException("Invalid OPAQUE request");
@@ -135,7 +150,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
                     HostSettings.OpaqueClientIdentifier, HostSettings.OpaqueServerIdentifier, out var result, out _)
                 || result is null) return Results.Unauthorized();
             var exchangeId = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-            if (!pendingOpaqueLogins.TryAdd(exchangeId, new(result, request.Nonce, DateTime.UtcNow.AddSeconds(30)))) return Results.StatusCode(503);
+            if (!pendingOpaqueLogins.TryAdd(exchangeId, new(result, request.Nonce, DateTime.UtcNow.AddSeconds(30), source))) return Results.StatusCode(503);
             return Results.Ok(new { exchangeId, loginResponse = result.LoginResponse });
         }
         finally { opaqueGate.Release(); }
@@ -144,7 +159,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     {
         var request = await ReadSmall<OpaqueFinishRequest>(context);
         if (request is null || !ValidNonce(request.Nonce) || string.IsNullOrEmpty(request.ExchangeId) || request.ExchangeId.Length > 100 || string.IsNullOrEmpty(request.FinishLoginRequest) || request.FinishLoginRequest.Length > 16384) throw new ArgumentException("Invalid OPAQUE finish request");
-        if (!pendingOpaqueLogins.TryRemove(request.ExchangeId, out var pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Nonce != request.Nonce) return Results.Unauthorized();
+        if (!pendingOpaqueLogins.TryRemove(request.ExchangeId, out var pending) || pending.ExpiresAt <= DateTime.UtcNow || pending.Nonce != request.Nonce || pending.Source != AuthenticationSource(context)) return Results.Unauthorized();
         var opaqueServer = new OpaqueServer();
         if (!opaqueServer.FinishLogin(pending.State.ServerLoginState, request.FinishLoginRequest, out var sessionKey) || string.IsNullOrEmpty(sessionKey)) return Results.Unauthorized();
         var proof = PakeBootstrap.ComputeProof(sessionKey, request.Nonce, serverFingerprint);
@@ -154,6 +169,21 @@ public sealed partial class RemoteHost : IAsyncDisposable
     {
         try { return Convert.FromBase64String(nonce).Length == 32 && nonce.Length <= 64; }
         catch (FormatException) { return false; }
+    }
+    private static string AuthenticationSource(HttpContext context)
+    {
+        var address = context.Connection.RemoteIpAddress;
+        if (address is null) return "unknown";
+        if (address.IsIPv4MappedToIPv6) return address.MapToIPv4().ToString();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) return address.ToString();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var prefix = address.GetAddressBytes();
+            Array.Clear(prefix, 8, 8);
+            var scope = address.IsIPv6LinkLocal ? address.ScopeId : 0;
+            return new System.Net.IPAddress(prefix, scope).ToString();
+        }
+        return address.ToString();
     }
     private static async Task<T?> ReadSmall<T>(HttpContext c, int maxBytes = 32768)
     {
@@ -170,6 +200,9 @@ public sealed partial class RemoteHost : IAsyncDisposable
         return System.Text.Json.JsonSerializer.Deserialize<T>(data.ToArray(), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
     }
     private bool Authorized(HttpContext c) => token != null && c.Request.Headers.Authorization == "Bearer " + token;
+    private static CancellationToken SessionRequestToken(HttpContext context)
+        => context.Items.TryGetValue(SessionCancellationItem, out var value) && value is CancellationToken requestToken
+            ? requestToken : context.RequestAborted;
     private static (double X, double Y, double Width, double Height) ParseViewport(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return (0, 0, 1, 1);
@@ -234,5 +267,5 @@ public sealed partial class RemoteHost : IAsyncDisposable
     private record Login(string Password);
     private sealed record OpaqueStartRequest(string LoginRequest, string Nonce);
     private sealed record OpaqueFinishRequest(string ExchangeId, string FinishLoginRequest, string Nonce);
-    private sealed record PendingOpaqueLogin(StartServerLoginResult State, string Nonce, DateTime ExpiresAt);
+    private sealed record PendingOpaqueLogin(StartServerLoginResult State, string Nonce, DateTime ExpiresAt, string Source);
 }

@@ -32,6 +32,9 @@ Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.rem
 $h264CheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\H264ConfigurationCheck.java'
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($h264CheckSource))
 Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.H264ConfigurationCheck")
+$h264PictureCheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\H264PictureCheck.java'
+Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes;$platform",'-d',$checkOutput) + @($h264PictureCheckSource))
+Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput;$platform","dev.personal.remotedesktop.H264PictureCheck")
 $sessionPolicyCheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\RemoteSessionPolicyCheck.java'
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($sessionPolicyCheckSource))
 Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.RemoteSessionPolicyCheck")

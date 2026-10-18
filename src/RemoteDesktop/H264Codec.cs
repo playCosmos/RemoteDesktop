@@ -352,9 +352,11 @@ public sealed class H264Decoder : IDisposable
         pixels = [];
         frameWidth = 0;
         frameHeight = 0;
+        var inputBytes = VideoCodec.ToAnnexB(annexB);
+        H264SpsLimits.Validate(inputBytes);
         MediaFoundation.Startup();
         Ensure();
-        var sample = MediaFoundation.WrapSample(VideoCodec.ToAnnexB(annexB));
+        var sample = MediaFoundation.WrapSample(inputBytes);
         try
         {
             var duration = 10_000_000L / 15;
@@ -478,10 +480,16 @@ public sealed class H264Decoder : IDisposable
             current.GetUINT64(ref MediaFoundation.FrameSizeKey, out var packed);
             width = (int)(packed >> 32);
             height = (int)(packed & 0xffffffff);
-            stride = current.GetUINT32(ref MediaFoundation.StrideKey, out var packedStride) >= 0 ? packedStride : width;
+            if (current.GetUINT32(ref MediaFoundation.StrideKey, out var packedStride) >= 0)
+            {
+                stride = unchecked((int)packedStride);
+                if (Math.Abs((long)stride) > FrameLimits.MaxDimension * 2L) return false;
+            }
+            else stride = width;
         }
         finally { Marshal.ReleaseComObject(current); }
-        configured = width > 1 && height > 1;
+        configured = FrameLimits.IsSupported(width, height) && Math.Abs((long)stride) >= width;
+        if (!configured) return false;
         transform.ProcessMessage(0x10000007, 0);
         return configured;
     }
@@ -494,9 +502,15 @@ public sealed class H264Decoder : IDisposable
 
     int OutputSize()
     {
-        if (transform!.GetOutputStreamInfo(0, out var info) >= 0 && info.Size > 0) return info.Size;
-        var row = Math.Max(width, Math.Abs(stride));
-        return Math.Max(row * Math.Max(height, 2) * 3 / 2, 64);
+        if (transform!.GetOutputStreamInfo(0, out var info) >= 0 && info.Size > 0)
+        {
+            if (info.Size > FrameLimits.MaxNv12Bytes) throw new InvalidOperationException("H.264 출력 크기가 지원 범위를 벗어났습니다.");
+            return info.Size;
+        }
+        var row = Math.Max((long)width, Math.Abs((long)stride));
+        var size = row * Math.Max(height, 2) * 3 / 2;
+        if (size > FrameLimits.MaxNv12Bytes) throw new InvalidOperationException("H.264 출력 크기가 지원 범위를 벗어났습니다.");
+        return (int)Math.Max(size, 64);
     }
 
     int OutputAlignment()
@@ -531,13 +545,17 @@ public sealed class H264Decoder : IDisposable
 
     public static byte[] FromNv12(byte[] nv12, int width, int height, int stride = 0)
     {
-        if (width < 2 || height < 2) return [];
+        if (!FrameLimits.IsSupported(width, height)) return [];
         var bottomUp = stride < 0;
-        var rowBytes = Math.Abs(stride);
+        var rowBytesLong = Math.Abs((long)stride);
+        if (rowBytesLong > FrameLimits.MaxDimension * 2L) return [];
+        var rowBytes = (int)rowBytesLong;
         if (rowBytes < width) rowBytes = width;
-        var chroma = rowBytes * height;
-        if (nv12.Length < chroma + rowBytes * (height / 2)) return [];
-        var pixels = new byte[width * height * 4];
+        var chromaLong = (long)rowBytes * height;
+        var required = chromaLong + (long)rowBytes * (height / 2);
+        if (required > FrameLimits.MaxNv12Bytes || nv12.Length < required) return [];
+        var chroma = (int)chromaLong;
+        var pixels = new byte[FrameLimits.CheckedByteCount(width, height, 4)];
         for (var y = 0; y < height; y++)
         {
             var yRow = bottomUp ? height - 1 - y : y;

@@ -125,6 +125,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Verify Windows SignTool timeout cleanup
+        shell: pwsh
+        timeout-minutes: 1
+        run: ./tests/WindowsSignToolTimeoutSmoke.ps1
+
       - name: Test Windows Authenticode signing with a temporary certificate
         shell: pwsh
         timeout-minutes: 10
@@ -133,7 +138,6 @@ jobs:
           $pfxPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.pfx'
           $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
           $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
-          $timestampUrl = 'http://timestamp.digicert.com'
           $password = [guid]::NewGuid().ToString('N') + '!A9'
           $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
           $certificate = $null
@@ -150,8 +154,8 @@ jobs:
 
             $env:WINDOWS_SIGNING_PFX = $pfxPath
             $env:WINDOWS_SIGNING_PFX_PASSWORD = $password
-            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $timestampUrl
-            ./build.ps1 -WindowsSign -WindowsSigningPfx $pfxPath -WindowsTimestampUrl $timestampUrl -OutputRoot $outputRoot
+            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $null
+            ./build.ps1 -WindowsSign -WindowsNoTimestamp -WindowsSigningPfx $pfxPath -OutputRoot $outputRoot
 
             $signedExe = Join-Path $outputRoot 'windows-portable/RemoteDesktop.exe'
             if (!(Test-Path -LiteralPath $signedExe -PathType Leaf)) { throw 'The signed portable executable was not produced.' }

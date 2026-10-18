@@ -20,6 +20,9 @@ $ErrorActionPreference = 'Stop'
 if ($AndroidRelease) { $Android = $true }
 if ($WindowsNoTimestamp -and !$WindowsSign) { throw '-WindowsNoTimestamp requires -WindowsSign.' }
 if ($WindowsTestUntrustedCertificate -and (!$WindowsSign -or !$WindowsNoTimestamp)) { throw '-WindowsTestUntrustedCertificate requires -WindowsSign and -WindowsNoTimestamp.' }
+if ($WindowsTestUntrustedCertificate -and $null -eq ('RemoteDesktop.Build.AuthenticodeTrustVerifier' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'scripts/AuthenticodeTrustVerifier.cs')
+}
 
 function Resolve-WindowsSignToolPath {
     if (![string]::IsNullOrWhiteSpace($WindowsSignToolPath)) {
@@ -91,14 +94,16 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
             if ($null -eq $signature -or $null -eq $signature.SignerCertificate) {
                 throw 'Windows Authenticode signature has no signer certificate.'
             }
-            $signatureStatus = [string]$signature.Status
-            if ($signatureStatus -notin @('Valid','NotTrusted')) {
-                throw "Windows Authenticode signature is invalid. Status=$signatureStatus."
-            }
             if ($signature.SignerCertificate.Thumbprint -ne $thumbprint) {
                 throw 'Windows Authenticode signature does not use the temporary test certificate.'
             }
-            Write-Output "Windows Authenticode signature integrity verified with the temporary certificate. Trust status=$signatureStatus."
+            $trustStatus = [RemoteDesktop.Build.AuthenticodeTrustVerifier]::VerifyFile($ExecutablePath)
+            $untrustedRoot = [Convert]::ToUInt32('800B0109', 16)
+            if ($trustStatus -notin @([uint32]0, $untrustedRoot)) {
+                throw ('Windows Authenticode verification failed with WinVerifyTrust status 0x{0:X8}.' -f $trustStatus)
+            }
+            $trustMessage = if ($trustStatus -eq $untrustedRoot) { 'test root is intentionally untrusted' } else { 'trusted' }
+            Write-Output "Windows Authenticode signature integrity verified with the temporary certificate; $trustMessage."
         }
         else { Invoke-WindowsSignTool $SignToolPath $verifyArguments $TimeoutSeconds }
     }

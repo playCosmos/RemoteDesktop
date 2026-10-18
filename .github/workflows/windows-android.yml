@@ -182,7 +182,7 @@ jobs:
           $signedExe = Join-Path $outputRoot 'windows-portable/RemoteDesktop.exe'
           if (!(Test-Path -LiteralPath $signedExe -PathType Leaf)) { throw 'The signed portable executable was not produced.' }
           $signature = Get-AuthenticodeSignature -LiteralPath $signedExe
-          if ($signature.Status -notin @('Valid','NotTrusted') -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_SIGNING_TEST_THUMBPRINT) { throw "The signed executable did not validate with the temporary certificate. Status=$($signature.Status)." }
+          if ($null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_SIGNING_TEST_THUMBPRINT) { throw "The signed executable did not use the temporary certificate. Status=$($signature.Status)." }
           Write-Output "Temporary Authenticode signature verified. Certificate trust status=$($signature.Status)."
 
       - name: Clean up temporary Windows signing material

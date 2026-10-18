@@ -311,14 +311,24 @@ public sealed class H264Encoder : IDisposable
 
     void ReleaseTransform()
     {
-        if (transform == null) return;
-        if (streaming)
-        {
-            transform.ProcessMessage(0x10000001, 0);
-            streaming = false;
-        }
-        Marshal.ReleaseComObject(transform);
+        var current = transform;
         transform = null;
+        var wasStreaming = streaming;
+        streaming = false;
+        if (current == null) return;
+        try
+        {
+            if (wasStreaming)
+            {
+                try { current.ProcessMessage(0x10000001, 0); }
+                catch (Exception ex) when (ex is COMException or InvalidComObjectException) { }
+            }
+        }
+        finally
+        {
+            try { Marshal.ReleaseComObject(current); }
+            catch (InvalidComObjectException) { }
+        }
     }
 
     readonly struct SampleHolder(IMFSample sample) : IDisposable
@@ -566,6 +576,7 @@ public sealed class H264Session : IDisposable
     readonly H264Encoder encoder = new();
     int misses;
     bool disposed;
+    bool encoderReleased;
     public bool Retired { get; private set; }
     public bool PendingKeyframe { get; private set; } = true;
 
@@ -597,14 +608,25 @@ public sealed class H264Session : IDisposable
     void NoteMiss()
     {
         PendingKeyframe = true;
-        if (++misses >= 3) Retired = true;
+        if (++misses >= 3)
+        {
+            Retired = true;
+            ReleaseEncoder();
+        }
+    }
+
+    void ReleaseEncoder()
+    {
+        if (encoderReleased) return;
+        encoderReleased = true;
+        encoder.Dispose();
     }
 
     public void Dispose()
     {
         if (disposed) return;
         disposed = true;
-        encoder.Dispose();
+        ReleaseEncoder();
     }
 }
 

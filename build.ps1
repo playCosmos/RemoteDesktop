@@ -1,6 +1,7 @@
 param(
     [switch]$Android,
     [switch]$FrameworkDependent,
+    [string]$AndroidSdk = '',
     [string]$OutputRoot = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -22,7 +23,9 @@ try {
     $windowsName = if ($FrameworkDependent) { 'windows-framework-dependent' } else { 'windows-portable' }
     Publish-Windows $windowsName
     if ($Android) {
-        & "$PSScriptRoot/android/build.ps1"
+        $androidBuildArgs = @{}
+        if (![string]::IsNullOrWhiteSpace($AndroidSdk)) { $androidBuildArgs.Sdk = $AndroidSdk }
+        & "$PSScriptRoot/android/build.ps1" @androidBuildArgs
         if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
         New-Item -ItemType Directory -Force -Path (Join-Path $OutputRoot 'android') | Out-Null
         Copy-Item -LiteralPath android/build/RemoteDesktop-debug.apk -Destination (Join-Path $OutputRoot 'android/RemoteDesktop-debug.apk')

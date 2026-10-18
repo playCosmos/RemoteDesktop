@@ -118,6 +118,13 @@ var missing = VideoCodec.Pace(75, 55, double.NaN, 15, 2, 3, true);
 Check(!missing.Changed && missing.Quality == 55 && missing.Slow == 2 && missing.Fast == 3, "a missing transfer time leaves the pace alone");
 Check(UiText.PaceShift(75, 75, 55) == "화면이 밀려 화질을 낮췄습니다. 고화질 대신 균형." && UiText.PaceShift(40, 40, 30) == "화면이 밀려 화질을 더 낮췄습니다." && UiText.PaceShift(75, 55, 75) == "화면에 여유가 생겨 화질을 고화질로 되돌렸습니다." && UiText.PaceShift(75, 40, 55) == "화면에 여유가 생겨 화질을 균형으로 올렸습니다." && UiText.PaceShift(75, 55, 55) == null && !UiText.IsProblem(UiText.PaceShift(75, 75, 55)), "a paced quality change is explained once");
 Check(VideoCodec.NeedsKeyframe(0, 15, false) && VideoCodec.NeedsKeyframe(30, 15, false) && !VideoCodec.NeedsKeyframe(10, 15, false) && VideoCodec.NeedsKeyframe(1, 15, true), "a skipped or forced picture starts a new video keyframe");
+using (var failedVideo = new H264Session())
+{
+    var invalidJpeg = new byte[] { 0xFF, 0xD8, 0x00, 0x00 };
+    Check(failedVideo.Encode(invalidJpeg, false, false, 15, 55).Length == 0 && !failedVideo.Retired, "one invalid frame does not retire the H.264 session");
+    Check(failedVideo.Encode(invalidJpeg, false, false, 15, 55).Length == 0 && !failedVideo.Retired, "two invalid frames do not retire the H.264 session");
+    Check(failedVideo.Encode(invalidJpeg, false, false, 15, 55).Length == 0 && failedVideo.Retired && failedVideo.Encode(invalidJpeg, false, false, 15, 55).Length == 0, "three invalid frames retire H.264 and leave the session on JPEG");
+}
 var avcc = new byte[] { 0, 0, 0, 2, 9, 16, 0, 0, 0, 1, 5 };
 var annex = VideoCodec.ToAnnexB(avcc);
 Check(!VideoCodec.IsAnnexB(avcc) && VideoCodec.IsAnnexB(annex) && annex.Length == 4 + 2 + 4 + 1 && annex[4] == 9 && annex[10] == 5, "length-prefixed video turns into annex-b");

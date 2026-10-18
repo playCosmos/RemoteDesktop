@@ -30,6 +30,27 @@ public static class ServiceRecoveryPolicy
     public static IReadOnlyList<ServiceFailureAction> Actions => actions;
 }
 
+public static class ServiceStopPolicy
+{
+    public static bool StopAndDeleteWhenStopped(Func<bool> isStopped, Action delete, int maxChecks, Action wait)
+    {
+        ArgumentNullException.ThrowIfNull(isStopped);
+        ArgumentNullException.ThrowIfNull(delete);
+        ArgumentNullException.ThrowIfNull(wait);
+        if (maxChecks < 1) throw new ArgumentOutOfRangeException(nameof(maxChecks));
+        for (var check = 0; check < maxChecks; check++)
+        {
+            if (isStopped())
+            {
+                delete();
+                return true;
+            }
+            if (check + 1 < maxChecks) wait();
+        }
+        return false;
+    }
+}
+
 public static class AppCommand
 {
     public const string Service = "--service";

@@ -89,6 +89,12 @@ Check(!AppInstall.ShowMachineInstall(InstallScope.Machine) && !AppInstall.ShowUs
 var serviceCommand = (char)34 + Path.Combine(machineInstall, "RemoteDesktop.exe") + (char)34 + " --service";
 Check(AppInstall.ServiceCommand(Path.Combine(machineInstall, "RemoteDesktop.exe")) == serviceCommand, "the service starts the installed exe");
 Check(ServiceRecoveryPolicy.ResetPeriodSeconds == 86400 && ServiceRecoveryPolicy.Actions.SequenceEqual([new ServiceFailureAction(ServiceFailureActionType.Restart, 5000), new ServiceFailureAction(ServiceFailureActionType.Restart, 15000), new ServiceFailureAction(ServiceFailureActionType.Restart, 60000)]), "an unexpected machine-service failure receives bounded automatic restarts");
+var serviceStopChecks = 0;
+var serviceStopWaits = 0;
+var serviceDeletes = 0;
+Check(ServiceStopPolicy.StopAndDeleteWhenStopped(() => ++serviceStopChecks >= 3, () => serviceDeletes++, 41, () => serviceStopWaits++) && serviceStopChecks == 3 && serviceStopWaits == 2 && serviceDeletes == 1, "machine uninstall deletes its service only after it reaches the stopped state");
+serviceStopChecks = serviceStopWaits = serviceDeletes = 0;
+Check(!ServiceStopPolicy.StopAndDeleteWhenStopped(() => { serviceStopChecks++; return false; }, () => serviceDeletes++, 3, () => serviceStopWaits++) && serviceStopChecks == 3 && serviceStopWaits == 2 && serviceDeletes == 0, "a service that ignores stop is retained and uninstall can report a timeout");
 Check(AppInstall.CanRemoveDirectory(perUserInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && AppInstall.CanRemoveDirectory(machineInstall, @"C:\Program Files", @"C:\Users\me\AppData\Local") && !AppInstall.CanRemoveDirectory(@"C:\Windows", @"C:\Program Files", @"C:\Users\me\AppData\Local"), "uninstall can remove only an install folder");
 var publishedDir = Path.Combine(Path.GetTempPath(), "prd-pub-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(publishedDir);

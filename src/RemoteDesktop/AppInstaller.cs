@@ -60,9 +60,17 @@ public static class AppInstaller
 
     public static void UninstallMachineHere()
     {
-        if (!HostFirewall.RemoveForProgram(Environment.ProcessPath))
+        var executable = Environment.ProcessPath;
+        var restoreFirewall = HostFirewall.HasRuleForProgram(executable);
+        if (!HostFirewall.RemoveForProgram(executable))
             throw new InvalidOperationException(UiText.FirewallRemoveFailed());
-        StopAndDeleteService();
+        try { StopAndDeleteService(); }
+        catch (Exception error)
+        {
+            if (restoreFirewall && !string.IsNullOrWhiteSpace(executable) && !HostFirewall.TryApplySavedPort(executable))
+                Trace.TraceError("Machine uninstall could not stop the service and failed to restore its firewall rule: {0}", error);
+            throw;
+        }
         SecureAttention.RestorePolicy();
         var shortcut = AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms));
         if (File.Exists(shortcut)) File.Delete(shortcut);
@@ -304,17 +312,23 @@ public static class AppInstaller
                     var error = Marshal.GetLastWin32Error();
                     if (error != 1062) throw new Win32Exception(error);
                 }
-                var until = DateTime.UtcNow.AddSeconds(8);
-                while (DateTime.UtcNow < until)
+                var deleted = ServiceStopPolicy.StopAndDeleteWhenStopped(
+                    () =>
+                    {
+                        if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                        return status.CurrentState == Stopped;
+                    },
+                    () =>
+                    {
+                        if (DeleteService(service)) return;
+                        var error = Marshal.GetLastWin32Error();
+                        if (error != 1072) throw new Win32Exception(error);
+                    },
+                    maxChecks: 41,
+                    wait: () => Thread.Sleep(200));
+                if (!deleted)
                 {
-                    if (!QueryServiceStatus(service, ref status)) break;
-                    if (status.CurrentState == Stopped) break;
-                    Thread.Sleep(200);
-                }
-                if (!DeleteService(service))
-                {
-                    var error = Marshal.GetLastWin32Error();
-                    if (error != 1072) throw new Win32Exception(error);
+                    throw new TimeoutException("Windows 서비스를 멈추지 못해 설치 제거를 중단했습니다.");
                 }
             }
             finally { CloseServiceHandle(service); }

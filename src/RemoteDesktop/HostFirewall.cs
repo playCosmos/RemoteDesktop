@@ -130,14 +130,15 @@ public static class HostFirewall
         }
     }
 
-    public static void TryApplySavedPort(string executable)
+    public static bool TryApplySavedPort(string executable)
     {
         try
         {
-            if (TryPlan(SavedPort(), executable, out var plan)) Apply(plan);
+            return TryPlan(SavedPort(), executable, out var plan) && Apply(plan);
         }
         catch (Exception)
         {
+            return false;
         }
     }
 

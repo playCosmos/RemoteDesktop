@@ -69,13 +69,11 @@ public static class AppInstaller
             }
         }
 
-        var prepared = false;
         var committed = false;
         var rollbackCompleted = false;
         try
         {
             prepareInstall();
-            prepared = true;
             var installed = CopyExecutable(source, destinationDirectory);
             finishInstall(installed);
             committed = true;
@@ -83,11 +81,6 @@ public static class AppInstaller
         }
         catch (Exception installError)
         {
-            if (!prepared)
-            {
-                rollbackCompleted = true;
-                throw;
-            }
             try
             {
                 prepareRollback();
@@ -135,8 +128,13 @@ public static class AppInstaller
         var hadShortcut = File.Exists(shortcut);
         var autostart = CaptureUserAutostart();
         var serviceState = default(ServiceUpdateState);
+        var serviceStateKnown = false;
         _ = InstallExecutableTransactionally(source, machineDirectory,
-            prepareInstall: () => serviceState = StopServiceForUpdate(),
+            prepareInstall: () => serviceState = StopServiceForUpdate(observed =>
+            {
+                serviceState = observed;
+                serviceStateKnown = true;
+            }),
             finishInstall: installed =>
             {
                 CreateShortcut(shortcut, installed);
@@ -148,10 +146,14 @@ public static class AppInstaller
             },
             prepareRollback: () =>
             {
+                if (!serviceStateKnown) return;
                 if (serviceState.Exists) _ = StopServiceForUpdate();
                 else StopAndDeleteService();
             },
-            finishRollback: () => RestoreMachineInstallState(serviceState, autostart, shortcut, hadShortcut));
+            finishRollback: () =>
+            {
+                if (serviceStateKnown) RestoreMachineInstallState(serviceState, autostart, shortcut, hadShortcut);
+            });
     }
 
     private static void RestoreMachineInstallState(ServiceUpdateState serviceState, RegistryValueSnapshot autostart, string shortcut, bool hadShortcut)
@@ -297,7 +299,7 @@ public static class AppInstaller
     private readonly record struct ServiceUpdateState(bool Exists, bool WasRunning);
     private readonly record struct RegistryValueSnapshot(bool Exists, object? Value, RegistryValueKind Kind);
 
-    static ServiceUpdateState StopServiceForUpdate()
+    static ServiceUpdateState StopServiceForUpdate(Action<ServiceUpdateState>? observe = null)
     {
         var manager = OpenSCManager(null, null, ManagerAccess);
         if (manager == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -307,14 +309,21 @@ public static class AppInstaller
             if (service == 0)
             {
                 var error = Marshal.GetLastWin32Error();
-                if (error == 1060) return new(false, false);
+                if (error == 1060)
+                {
+                    var absent = new ServiceUpdateState(false, false);
+                    observe?.Invoke(absent);
+                    return absent;
+                }
                 throw new Win32Exception(error);
             }
             try
             {
                 var status = new ServiceStatus();
                 if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                if (status.CurrentState == Stopped) return new(true, false);
+                var previousState = new ServiceUpdateState(true, status.CurrentState != Stopped);
+                observe?.Invoke(previousState);
+                if (!previousState.WasRunning) return previousState;
                 if (!ControlService(service, StopControl, ref status))
                 {
                     var error = Marshal.GetLastWin32Error();
@@ -324,7 +333,7 @@ public static class AppInstaller
                 while (DateTime.UtcNow < until)
                 {
                     if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                    if (status.CurrentState == Stopped) return new(true, true);
+                    if (status.CurrentState == Stopped) return previousState;
                     Thread.Sleep(200);
                 }
                 throw new TimeoutException("기존 Windows 서비스를 중지하지 못했습니다.");

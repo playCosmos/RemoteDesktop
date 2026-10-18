@@ -145,6 +145,20 @@ try
         && File.ReadAllText(transactionTarget) == "working machine version"
         && !Directory.EnumerateFiles(transactionDir, "*.rollback").Any(), "a failed machine upgrade restores the previous executable after service rollback");
 
+    var prepareFailure = false;
+    var prepareFailureRolledBack = false;
+    try
+    {
+        AppInstaller.InstallExecutableTransactionally(publishedExe, transactionDir,
+            () => throw new TimeoutException("simulated service stop timeout"),
+            _ => throw new Exception("copy must not run after a failed service stop"),
+            () => prepareFailureRolledBack = true,
+            () => prepareFailureRolledBack &= File.ReadAllText(transactionTarget) == "working machine version");
+    }
+    catch (TimeoutException error) when (error.Message == "simulated service stop timeout") { prepareFailure = true; }
+    Check(prepareFailure && prepareFailureRolledBack && File.ReadAllText(transactionTarget) == "working machine version"
+        && !Directory.EnumerateFiles(transactionDir, "*.rollback").Any(), "a failed service stop before copy still runs rollback and preserves the installed executable");
+
     var freshInstallFailed = false;
     try
     {

@@ -7,6 +7,7 @@ param(
     [string]$AndroidReleaseKeystore = $env:ANDROID_RELEASE_KEYSTORE,
     [string]$AndroidReleaseAlias = $env:ANDROID_RELEASE_KEY_ALIAS,
     [switch]$WindowsSign,
+    [switch]$WindowsNoTimestamp,
     [string]$WindowsSigningPfx = $env:WINDOWS_SIGNING_PFX,
     [string]$WindowsTimestampUrl = $env:WINDOWS_SIGNING_TIMESTAMP_URL,
     [string]$WindowsSignToolPath = $env:WINDOWS_SIGNTOOL,
@@ -14,7 +15,9 @@ param(
     [string]$OutputRoot = ''
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'scripts/SignToolProcess.ps1')
 if ($AndroidRelease) { $Android = $true }
+if ($WindowsNoTimestamp -and !$WindowsSign) { throw '-WindowsNoTimestamp requires -WindowsSign.' }
 
 function Resolve-WindowsSignToolPath {
     if (![string]::IsNullOrWhiteSpace($WindowsSignToolPath)) {
@@ -36,37 +39,6 @@ function Resolve-WindowsSignToolPath {
         Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
     if ($candidates.Count -eq 0) { throw 'Windows SDK SignTool was not found. Set WINDOWS_SIGNTOOL to signtool.exe.' }
     return [System.IO.Path]::GetFullPath($candidates[0])
-}
-
-function Invoke-WindowsSignTool([string]$SignToolPath, [string[]]$Arguments, [int]$TimeoutSeconds) {
-    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $SignToolPath
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    foreach ($argument in $Arguments) { [void]$startInfo.ArgumentList.Add($argument) }
-
-    $process = [System.Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    try {
-        if (!$process.Start()) { throw 'SignTool could not be started.' }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (!$process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill($true) } catch { }
-            try { $process.WaitForExit() } catch { }
-            try { $null = $stdoutTask.GetAwaiter().GetResult() } catch { }
-            try { $null = $stderrTask.GetAwaiter().GetResult() } catch { }
-            throw "SignTool exceeded the $TimeoutSeconds second timeout. Check the RFC 3161 timestamp endpoint and certificate store."
-        }
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        if (![string]::IsNullOrWhiteSpace($stdout)) { Write-Output $stdout.TrimEnd() }
-        if (![string]::IsNullOrWhiteSpace($stderr)) { Write-Output $stderr.TrimEnd() }
-        if ($process.ExitCode -ne 0) { throw "SignTool failed with exit code $($process.ExitCode)." }
-    }
-    finally { $process.Dispose() }
 }
 
 function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [string]$PfxPassword, [string]$TimestampUrl, [string]$SignToolPath, [int]$TimeoutSeconds) {
@@ -101,8 +73,18 @@ function Sign-WindowsExecutable([string]$ExecutablePath, [string]$PfxPath, [stri
         }
         if ($null -eq $storeCertificate -or !$storeCertificate.HasPrivateKey) { throw 'The Windows signing certificate could not be loaded into the current-user certificate store.' }
 
-        Invoke-WindowsSignTool $SignToolPath @('sign','/s','My','/sha1',$thumbprint,'/fd','SHA256','/tr',$TimestampUrl,'/td','SHA256','/u',$codeSigningOid,$ExecutablePath) $TimeoutSeconds
-        Invoke-WindowsSignTool $SignToolPath @('verify','/pa','/all','/tw','/v',$ExecutablePath) $TimeoutSeconds
+        $signArguments = @('sign','/s','My','/sha1',$thumbprint,'/fd','SHA256')
+        $verifyArguments = @('verify','/pa','/all')
+        if (![string]::IsNullOrWhiteSpace($TimestampUrl))
+        {
+            $signArguments += @('/tr',$TimestampUrl,'/td','SHA256')
+            $verifyArguments += '/tw'
+        }
+        else { Write-Warning 'Signing without a trusted timestamp; use this only for short-lived tests.' }
+        $signArguments += @('/u',$codeSigningOid,$ExecutablePath)
+        $verifyArguments += @('/v',$ExecutablePath)
+        Invoke-WindowsSignTool $SignToolPath $signArguments $TimeoutSeconds
+        Invoke-WindowsSignTool $SignToolPath $verifyArguments $TimeoutSeconds
     }
     finally {
         if ($storeCertificate) { $storeCertificate.Dispose() }
@@ -154,10 +136,13 @@ try {
         if (!$repositoryRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $repositoryRoot += [System.IO.Path]::DirectorySeparatorChar }
         if ($windowsPfxPath.StartsWith($repositoryRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'The Windows signing PFX must stay outside the source repository.' }
         if ([string]::IsNullOrEmpty($originalWindowsSigningPassword)) { throw 'Set WINDOWS_SIGNING_PFX_PASSWORD in the process environment.' }
-        if ([string]::IsNullOrWhiteSpace($WindowsTimestampUrl)) { $WindowsTimestampUrl = 'http://timestamp.digicert.com' }
-        $timestampUri = $null
-        if (![Uri]::TryCreate($WindowsTimestampUrl, [UriKind]::Absolute, [ref]$timestampUri) -or $timestampUri.Scheme -notin @('http','https')) {
-            throw 'WINDOWS_SIGNING_TIMESTAMP_URL must be an absolute HTTP or HTTPS RFC 3161 timestamp URL.'
+        if ($WindowsNoTimestamp) { $WindowsTimestampUrl = '' }
+        else {
+            if ([string]::IsNullOrWhiteSpace($WindowsTimestampUrl)) { $WindowsTimestampUrl = 'http://timestamp.digicert.com' }
+            $timestampUri = $null
+            if (![Uri]::TryCreate($WindowsTimestampUrl, [UriKind]::Absolute, [ref]$timestampUri) -or $timestampUri.Scheme -notin @('http','https')) {
+                throw 'WINDOWS_SIGNING_TIMESTAMP_URL must be an absolute HTTP or HTTPS RFC 3161 timestamp URL.'
+            }
         }
         $windowsSigningPassword = $originalWindowsSigningPassword
         $WindowsSigningPfx = $windowsPfxPath

@@ -223,7 +223,7 @@ $env:WINDOWS_SIGNING_TIMESTAMP_URL = 'http://timestamp.digicert.com'
 ./build.ps1 -WindowsSign
 ```
 
-빌드는 PFX 암호를 컴파일 자식 프로세스에 전달하지 않고, 서명할 때만 현재 사용자 인증서 저장소에 임시로 가져옵니다. 빌드가 가져온 인증서는 서명 후 개인 키와 함께 제거하며, 사용자 인증서는 그대로 둡니다. Windows SDK의 SignTool은 자동 검색되고, 찾지 못하면 `WINDOWS_SIGNTOOL`로 경로를 지정할 수 있습니다. 서명은 SHA-256 및 RFC 3161 타임스탬프를 사용하고, 빌드는 신뢰 체인과 서명을 확인합니다. 기본 SignTool 제한시간은 180초이며 타임스탬프 서버가 느리면 `-WindowsSignToolTimeoutSeconds`로 늘릴 수 있습니다. 실제 배포 발행자 표시를 위해서는 대상 PC가 신뢰하는 상용 코드 서명 인증서가 필요합니다.
+빌드는 PFX 암호를 컴파일 자식 프로세스에 전달하지 않고, 서명할 때만 현재 사용자 인증서 저장소에 임시로 가져옵니다. 빌드가 가져온 인증서는 서명 후 개인 키와 함께 제거하며, 사용자 인증서는 그대로 둡니다. Windows SDK의 SignTool은 자동 검색되고, 찾지 못하면 `WINDOWS_SIGNTOOL`로 경로를 지정할 수 있습니다. 기본 서명은 SHA-256 및 RFC 3161 타임스탬프를 사용하고, 빌드는 신뢰 체인과 서명을 확인합니다. 기본 SignTool 제한시간은 180초이며 타임스탬프 서버가 느리면 `-WindowsSignToolTimeoutSeconds`로 늘릴 수 있습니다. `-WindowsNoTimestamp`는 짧은 수명의 테스트 인증서에서만 사용하고 실제 배포에는 사용하지 마세요. 실제 배포 발행자 표시를 위해서는 대상 PC가 신뢰하는 상용 코드 서명 인증서가 필요합니다.
 
 GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사(화면 캡처·H.264 포함), Windows·Android 빌드, APK 서명 검증, WPF 레이아웃 검사, 실제 Windows 서비스 설치·시작·제거 smoke test를 수행하고 portable EXE와 APK를 14일간 workflow artifact로 보관합니다. Windows runner의 UAC는 꺼져 있으므로 대화형 UAC 승인 창과 잠금 화면 전환은 실제 사용자 세션에서 별도로 확인해야 합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
 

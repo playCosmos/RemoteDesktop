@@ -227,9 +227,10 @@ final class RemoteApi {
                     if(attempt++>0) {
                         if(attempt>4)throw new IOException("클립보드 전송을 이어받지 못했습니다.");
                         long probed=receivedClipboard(id,i);
-                        if(probed<offset || probed>files.get(i).length() || probed==offset) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
-                        offset=probed;
-                        if(offset==files.get(i).length()) break;
+                        long resumed=UploadResume.nextOffset(offset,probed,files.get(i).length());
+                        if(resumed<0) throw new IOException("클립보드 전송을 이어받지 못했습니다.");
+                        offset=resumed;
+                        if(UploadResume.complete(offset,files.get(i).length())) break;
                     }
                     HttpsURLConnection c=open("clipboard/uploads/"+id+"/"+i,"PUT");
                     try {
@@ -239,11 +240,6 @@ final class RemoteApi {
                             while(skip>0) { long skipped=in.skip(skip); if(skipped<=0) { if(in.read()<0) throw new IOException("클립보드 전송을 이어받지 못했습니다."); skipped=1; } skip-=skipped; }
                             int read; long count=offset;
                             while((read=in.read(buffer))!=-1) { if(cancelled)throw new IOException("전송 취소됨"); out.write(buffer,0,read); count+=read; progress.update(count); }
-                        }
-                        int code=c.getResponseCode();
-                        if(code==409) {
-                            String got=c.getHeaderField("X-Received-Bytes");
-                            if(got!=null) { long received=Long.parseLong(got); if(received>offset && received<=files.get(i).length()) { offset=received; if(offset==files.get(i).length()) break; continue; } }
                         }
                         check(c);
                         break;

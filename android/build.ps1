@@ -32,6 +32,9 @@ Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.rem
 $h264CheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\H264ConfigurationCheck.java'
 Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($h264CheckSource))
 Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.H264ConfigurationCheck")
+$uploadResumeCheckSource = Join-Path $androidRoot 'src\dev\personal\remotedesktop\UploadResumeCheck.java'
+Run "$Jdk\bin\javac.exe" (@('-encoding','UTF-8','--release','8','-classpath',"$output\classes","-d",$checkOutput) + @($uploadResumeCheckSource))
+Run "$Jdk\bin\java.exe" @('-cp',"$output\classes;$checkOutput","dev.personal.remotedesktop.UploadResumeCheck")
 Run "$Jdk\bin\jar.exe" @('cf',"$output\classes.jar",'-C',"$output\classes",'.')
 Run "$buildTools\d8.bat" @('--lib',$platform,'--min-api','30','--output',"$output\dex","$output\classes.jar")
 Run "$buildTools\aapt.exe" @('package','-f','-M',"$androidRoot\AndroidManifest.xml",'-I',$platform,'-F',"$output\unsigned.apk")

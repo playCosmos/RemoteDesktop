@@ -12,11 +12,11 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private final ExecutorService transfers = Executors.newSingleThreadExecutor();
-    private final ScheduledExecutorService frames = Executors.newSingleThreadScheduledExecutor();
     private final Handler chromeHandler = new Handler(Looper.getMainLooper());
     private RemoteSession session;
     private EditText address, pin, password;
@@ -87,7 +87,6 @@ public final class MainActivity extends Activity {
     private volatile String secureState = "off";
     private long healthWindow=SystemClock.elapsedRealtime();
     private long lastFrameMillis;
-    private long nextFrameAt;
     private ScaleGestureDetector scaleDetector;
     private float zoom=1f, viewX=0f, viewY=0f, viewWidth=1f, viewHeight=1f;
     private boolean pinchActive;
@@ -102,7 +101,7 @@ public final class MainActivity extends Activity {
                 float focusX=detector.getFocusX()/Math.max(1f,screen==null?1f:screen.getWidth());
                 float focusY=detector.getFocusY()/Math.max(1f,screen==null?1f:screen.getHeight());
                 float globalX=viewX+focusX*viewWidth, globalY=viewY+focusY*viewHeight;
-                viewWidth=1f/zoom; viewHeight=1f/zoom; viewX=clamp(globalX-focusX*viewWidth,0,1-viewWidth); viewY=clamp(globalY-focusY*viewHeight,0,1-viewHeight); nextFrameAt=0;
+                viewWidth=1f/zoom; viewHeight=1f/zoom; viewX=clamp(globalX-focusX*viewWidth,0,1-viewWidth); viewY=clamp(globalY-focusY*viewHeight,0,1-viewHeight); session.requestImmediateFrame();
                 placeCursor();
                 return true;
             }
@@ -189,7 +188,7 @@ public final class MainActivity extends Activity {
             public String preferredDisplay(String host) { return preferences.getString("address","").equals(host)?preferences.getString("display", ""):""; }
             public void connected(String host,String fingerprint,String display,int attempt) {
                 cursorTouched=false;
-                nextFrameAt=0;
+                session.requestImmediateFrame();
                 runOnUiThread(() -> {
                     if(session.generation()!=attempt || session.remote()==null) return;
                     password.setText("");
@@ -201,7 +200,7 @@ public final class MainActivity extends Activity {
                 info("연결됨 · "+touchModeDescription());
             }
             public void reconnected(String display,int attempt) {
-                nextFrameAt=0;
+                session.requestImmediateFrame();
                 runOnUiThread(() -> {
                     if(session.generation()!=attempt || session.remote()==null) return;
                     connectionScroll.setVisibility(View.GONE);
@@ -212,6 +211,8 @@ public final class MainActivity extends Activity {
             public void report(Exception error) { MainActivity.this.report(error); }
             public void hideHealth() { runOnUiThread(() -> health.setVisibility(View.GONE)); }
             public void inputQueueOverflow() { info("입력 지연으로 연결 종료"); disconnect(); }
+            public int frameRate() { return MainActivity.this.frameRate; }
+            public void requestFrame(RemoteApi api,String display,int requestedFps) throws Exception { MainActivity.this.requestFrame(api,display,requestedFps); }
         });
         address.setText(preferences.getString("address","")); pin.setText(preferences.getString("pin",""));
         frameQuality=Math.max(25,Math.min(90,preferences.getInt("frameQuality",55)));
@@ -280,46 +281,7 @@ public final class MainActivity extends Activity {
         registerBack();
         clipboardFiles=new ClipboardFiles(this,() -> session.remote(),this::info,transfers);
         clipboardFiles.accept(getIntent());
-        frames.scheduleWithFixedDelay(() -> {
-            final RemoteApi api=session.remote();
-            try {
-                if(api==null) return;
-                if(!resumed) { session.keepalive(); return; }
-                if(session.reconnectNeeded() || session.recovering()) return;
-                final int selectedRate=frameRate;
-                long now=SystemClock.elapsedRealtime();
-                if(now<nextFrameAt) return;
-                nextFrameAt=now+1000L/selectedRate;
-                clipboardFiles.syncText();
-                final String display=session.selectedDisplay();
-                long started=SystemClock.elapsedRealtime();
-                PolledFrame polled=pollFrame(api, display, selectedRate);
-                if(polled==null) return;
-                lastFrameMillis=SystemClock.elapsedRealtime()-started;
-                if(!polled.keep) {
-                    int selectedQuality=frameQuality;
-                    int[] step=LinkPace.pace(selectedQuality, requestedQuality, lastTransferMs, selectedRate, paceSlow, paceFast, true);
-                    paceSlow=step[1];
-                    paceFast=step[2];
-                    if(step[3]==1) {
-                        pacedQuality=step[0];
-                        needKey=true;
-                        String notice=LinkPace.notice(selectedQuality, requestedQuality, step[0]);
-                        if(notice!=null) info(notice);
-                    }
-                }
-                receivedFrames++;
-                session.noteFrameReceived();
-                updateHealth();
-                final RemoteApi.Cursor cursor=polled.cursor;
-                if(polled.keep) {
-                    runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) applyCursor(polled); });
-                    return;
-                }
-                Bitmap next=polled.bitmap;
-                runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) { bitmap=next; renderedDisplay=display; renderedViewX=polled.viewX; renderedViewY=polled.viewY; renderedViewWidth=polled.viewWidth; renderedViewHeight=polled.viewHeight; screen.setImageBitmap(next); applyCursor(polled); } else next.recycle(); });
-            } catch(Exception e) { try { if(api!=null && session.remote()==api) session.noteSessionFailure(api, e); } catch(Exception ignored) {} }
-        },0,10,TimeUnit.MILLISECONDS);
+        session.startFrameLoop();
     }
     private void showPreviousCrash(File previousCrashFile) {
         if(previousCrashFile==null || !previousCrashFile.isFile()) return;
@@ -497,8 +459,8 @@ public final class MainActivity extends Activity {
     @Override protected void onStart() {
         super.onStart();
         resumed=true;
-        nextFrameAt=0;
-        RemoteApi api=session==null?null:session.remote();
+        if(session==null) return;
+        RemoteApi api=session.remote();
         if(api==null) return;
         applySessionChrome(true);
         session.onStart();
@@ -641,7 +603,7 @@ public final class MainActivity extends Activity {
         float width=Math.max(1,screen.getWidth()), height=Math.max(1,screen.getHeight());
         viewX=clamp(viewX-dx/width*viewWidth,0,1-viewWidth);
         viewY=clamp(viewY-dy/height*viewHeight,0,1-viewHeight);
-        nextFrameAt=0;
+        session.requestImmediateFrame();
         placeCursor();
     }
     private void moveCursor(float x,float y) {
@@ -667,7 +629,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-2, dp(40));
         lp.setMargins(dp(3),dp(2),dp(3),dp(2));
         toolbar.addView(controlButton, lp);
-        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; cursorGeneration.incrementAndGet(); cursorTouched=false; nextFrameAt=0; placeCursor(); if(session.remote()!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
+        controlButton.setOnCheckedChangeListener((view,checked) -> { bumpChrome(); if(!checked)event("release",0,false); inputEnabled=checked; cursorGeneration.incrementAndGet(); cursorTouched=false; session.requestImmediateFrame(); placeCursor(); if(session.remote()!=null)info(checked?"입력 제어 켜짐":"입력 제어 꺼짐 · 화면 보기만 가능"); });
     }
     private void chooseQuality() {
         String[] labels=qualityLabels(); int[] values={30,55,75}; int selected=frameQuality<=40?0:frameQuality>=65?2:1;
@@ -675,10 +637,10 @@ public final class MainActivity extends Activity {
     }
     private void lowBandwidth() { frameQuality=25; frameRate=5; pacedQuality=25; paceSlow=0; paceFast=0; needKey=true; preferences.edit().putInt("frameQuality",25).putInt("frameRate",5).apply(); info(preferH264 && "H.264".equals(activeCodec)?"저대역폭 모드: 품질 25 · 5 FPS":"저대역폭 모드: JPEG 25 · 5 FPS"); }
     private static float clamp(float value,float min,float max) { return Math.max(min,Math.min(max,value)); }
-    private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; nextFrameAt=0; placeCursor(); info("확대 초기화"); }
+    private void resetZoom() { zoom=1f; viewX=viewY=0f; viewWidth=viewHeight=1f; session.requestImmediateFrame(); placeCursor(); info("확대 초기화"); }
     private void chooseFrameRate() {
         String[] labels={"5 FPS · 저전력","10 FPS · 절약","15 FPS · 균형","30 FPS · 최대"}; int[] values={5,10,15,30}; int selected=frameRate==5?0:frameRate==10?1:frameRate==30?3:2;
-        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; paceSlow=0; paceFast=0; nextFrameAt=0; needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
+        new AlertDialog.Builder(this).setTitle("최대 프레임 속도").setSingleChoiceItems(labels,selected,(dialog,which) -> { frameRate=values[which]; paceSlow=0; paceFast=0; session.requestImmediateFrame(); needKey=true; preferences.edit().putInt("frameRate",frameRate).apply(); dialog.dismiss(); info("최대 프레임 속도: "+frameRate+" FPS"); }).setNegativeButton("취소",null).show();
     }
     private static int validFrameRate(int rate) { return rate==5 || rate==10 || rate==15 || rate==30 ? rate : 15; }
     private void showSessionInfo() {
@@ -737,7 +699,35 @@ public final class MainActivity extends Activity {
         leaveDialog.show();
     }
     @Override public void onWindowFocusChanged(boolean focus) { super.onWindowFocusChanged(focus); if(!focus) cancelTouch(); else if(session!=null && session.remote()!=null) applySessionChrome(true); }
-    @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); frames.shutdownNow(); transfers.shutdownNow(); session.shutdown(); super.onDestroy(); }
+    @Override protected void onDestroy() { disconnect(); clipboardFiles.dispose(); transfers.shutdownNow(); session.shutdown(); super.onDestroy(); }
+    private void requestFrame(RemoteApi api,String display,int selectedRate) throws Exception {
+        clipboardFiles.syncText();
+        long started=SystemClock.elapsedRealtime();
+        PolledFrame polled=pollFrame(api,display,selectedRate);
+        if(polled==null) return;
+        lastFrameMillis=SystemClock.elapsedRealtime()-started;
+        if(!polled.keep) {
+            int selectedQuality=frameQuality;
+            int[] step=LinkPace.pace(selectedQuality,requestedQuality,lastTransferMs,selectedRate,paceSlow,paceFast,true);
+            paceSlow=step[1];
+            paceFast=step[2];
+            if(step[3]==1) {
+                pacedQuality=step[0];
+                needKey=true;
+                String notice=LinkPace.notice(selectedQuality,requestedQuality,step[0]);
+                if(notice!=null) info(notice);
+            }
+        }
+        receivedFrames++;
+        session.noteFrameReceived();
+        updateHealth();
+        if(polled.keep) {
+            runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) applyCursor(polled); });
+            return;
+        }
+        Bitmap next=polled.bitmap;
+        runOnUiThread(() -> { if(session.remote()==api && session.selectedDisplay().equals(display) && resumed && !session.reconnectNeeded()) { bitmap=next; renderedDisplay=display; renderedViewX=polled.viewX; renderedViewY=polled.viewY; renderedViewWidth=polled.viewWidth; renderedViewHeight=polled.viewHeight; screen.setImageBitmap(next); applyCursor(polled); } else next.recycle(); });
+    }
     private PolledFrame pollFrame(RemoteApi api, String display, int requestedFps) throws Exception {
         final int epoch=session.generation();
         if(picturedSession!=api) { picturedSession=api; needKey=true; }

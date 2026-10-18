@@ -22,6 +22,8 @@ final class RemoteSession {
         void report(Exception error);
         void hideHealth();
         void inputQueueOverflow();
+        int frameRate();
+        void requestFrame(RemoteApi api, String display, int requestedFps) throws Exception;
     }
 
     interface ApiFactory { RemoteApi create(String host, String fingerprint) throws Exception; }
@@ -30,6 +32,7 @@ final class RemoteSession {
     private final ApiFactory apiFactory;
     private final ThreadPoolExecutor control = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>());
     private final ScheduledExecutorService retryTimer = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService frames = Executors.newSingleThreadScheduledExecutor();
     private final Object sessionGate = new Object();
     private final AtomicBoolean recovering = new AtomicBoolean();
     private final AtomicInteger generation = new AtomicInteger();
@@ -43,7 +46,9 @@ final class RemoteSession {
     private volatile String sessionHost = "";
     private volatile String sessionFingerprint = "";
     private volatile String selectedDisplay = "";
-    private long nextKeepaliveAt;
+    private volatile long nextKeepaliveAt;
+    private volatile long nextFrameAt;
+    private final AtomicBoolean frameLoopStarted = new AtomicBoolean();
 
     RemoteSession(Listener listener) { this(listener, RemoteApi::new); }
 
@@ -187,6 +192,29 @@ final class RemoteSession {
 
     void noteFrameReceived() { foregroundFailures = 0; }
 
+    void requestImmediateFrame() { nextFrameAt = 0; }
+
+    void startFrameLoop() {
+        if (!frameLoopStarted.compareAndSet(false, true)) return;
+        frames.scheduleWithFixedDelay(this::frameTick, 0, 10, TimeUnit.MILLISECONDS);
+    }
+
+    private void frameTick() {
+        RemoteApi api = remote;
+        try {
+            if (api == null) return;
+            if (!listener.resumed()) { keepalive(); return; }
+            if (reconnectNeeded || recovering.get()) return;
+            int rate = listener.frameRate();
+            long now = SystemClock.elapsedRealtime();
+            if (!RemoteSessionPolicy.frameDue(now, nextFrameAt)) return;
+            nextFrameAt = RemoteSessionPolicy.nextFrameAt(now, rate);
+            listener.requestFrame(api, selectedDisplay, rate);
+        } catch (Exception error) {
+            if (api != null && remote == api) noteSessionFailure(api, error);
+        }
+    }
+
     void noteSessionFailure(RemoteApi api, Exception error) {
         RemoteSessionPolicy.FrameFailure action = RemoteSessionPolicy.frameFailure(remote == api, statusCode(error), listener.resumed(), foregroundFailures);
         if (action == RemoteSessionPolicy.FrameFailure.IGNORE || action == RemoteSessionPolicy.FrameFailure.RETRY_FRAME) {
@@ -200,6 +228,7 @@ final class RemoteSession {
 
     void onStart() {
         foregroundFailures = 0;
+        requestImmediateFrame();
         RemoteApi api = remote;
         if (api == null || (!reconnectNeeded && !backgroundUncertain)) return;
         listener.status("다시 연결 중", -1);
@@ -312,6 +341,7 @@ final class RemoteSession {
     }
 
     void shutdown() {
+        frames.shutdownNow();
         retryTimer.shutdownNow();
         control.shutdown();
     }

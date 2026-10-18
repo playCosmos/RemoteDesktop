@@ -1,4 +1,4 @@
-# Personal Remote Desktop 0.9.152
+# Personal Remote Desktop 0.9.153
 
 개인용 Windows 서버·클라이언트 통합 앱과 Android 클라이언트입니다. 서버에 저장한 비밀번호로 수락 없이 접속합니다.
 
@@ -6,8 +6,8 @@
 
 ## 실행 파일
 
-- Windows 통합 실행 파일: `artifacts/0.9.152/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
-- Android: `artifacts/0.9.152/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
+- Windows 통합 실행 파일: `artifacts/0.9.153/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
+- Android: `artifacts/0.9.153/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
 
 Windows는 별도 설치 과정 없이 실행합니다. 같은 실행 파일에서 **접속 받기**와 원격 클라이언트를 모두 사용할 수 있습니다. 저장된 서버 비밀번호가 있으면 앱을 열 때 접속 대기를 시작합니다. 창을 닫으면 트레이에 남고 접속 대기는 계속됩니다. 트레이의 **종료**를 눌러야 앱이 끝납니다. 접속 대기를 시작하는 동안 같은 버튼을 다시 누르면 포트가 열리기 전에 취소됩니다.
 
@@ -23,7 +23,7 @@ Windows 클라이언트는 서버 지문 입력란을 비워 첫 연결하면 OP
 ./build.ps1 -FrameworkDependent
 ```
 
-프레임워크 종속 산출물은 `artifacts/0.9.152/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
+프레임워크 종속 산출물은 `artifacts/0.9.153/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
 
 ## 접속
 
@@ -150,7 +150,7 @@ Windows는 .NET SDK 10, Android는 SDK Platform 35 / Build Tools 35.0.0 / JDK가
 
 GitHub Actions는 pull request와 `main` 변경마다 Windows 통합 검사(화면 캡처·H.264 포함), Windows·Android 빌드, APK 서명 검증과 실제 WPF 창의 넓은·좁은 화면 배치 smoke test를 수행하고, portable EXE와 APK를 14일간 workflow artifact로 보관합니다. 개발 PC에서 SDK와 JDK 위치가 기본값과 다르면 `./build.ps1 -Android -AndroidSdk "C:\Android\Sdk" -AndroidJdk "C:\Java\jdk-21"`처럼 지정할 수 있습니다.
 
-통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. Windows CI와 로컬 `--capture` 실행은 화면 캡처, H.264 인코드·디코드와 JPEG 호환 경로까지 확인합니다. Android 검사는 커서 배치, H.264 설정, 전송 재개와 세션 복구 정책(5초 ping, 전경 3회 실패 기준, 재시도 간격)을 확인합니다. 파일·텍스트 왕복, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, UAC 프레임 파이프·ACL·프로세스 ID·세션 인증, 끊김 줄이기 설정도 검증합니다.
+통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. Windows CI와 로컬 `--capture` 실행은 화면 캡처, H.264 인코드·디코드와 JPEG 호환 경로까지 확인합니다. Android 검사는 커서 배치, H.264 설정, 전송 재개와 세션 복구 정책(5초 ping, 전경 3회 실패 기준, 재시도 간격, FPS 프레임 deadline)을 확인합니다. 파일·텍스트 왕복, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, UAC 프레임 파이프·ACL·프로세스 ID·세션 인증, 끊김 줄이기 설정도 검증합니다.
 
 Windows 빌드와 Android APK 생성·서명 검증을 수행합니다. 실제 탐색기의 붙여넣기와 Android 앱 간 URI 공유·붙여넣기, 실제 IME 입력, 1GiB·장시간 전송은 별도 실기 검증이 필요합니다. 현재 환경에는 연결된 Android 기기가 없습니다. 빌드 도구의 NuGet 취약성 정보 조회 네트워크 경고와 JDK 호환 경고가 발생할 수 있습니다.
 

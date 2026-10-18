@@ -25,5 +25,12 @@ final class RemoteSessionPolicy {
 
     static long recoveryDelayMs(boolean resumed) { return resumed ? 3000L : 5000L; }
 
+    static boolean frameDue(long now, long nextFrameAt) { return now >= nextFrameAt; }
+
+    static long nextFrameAt(long now, int requestedFps) {
+        int fps = requestedFps == 5 || requestedFps == 10 || requestedFps == 15 || requestedFps == 30 ? requestedFps : 15;
+        return now + Math.max(1L, 1000L / fps);
+    }
+
     static boolean busySessionStatus(int statusCode) { return statusCode == 409; }
 }

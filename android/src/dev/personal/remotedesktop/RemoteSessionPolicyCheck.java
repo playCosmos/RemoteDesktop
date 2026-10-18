@@ -20,6 +20,8 @@ public final class RemoteSessionPolicyCheck {
         check(RemoteSessionPolicy.frameFailure(true, 0, true, 0) == RemoteSessionPolicy.FrameFailure.RETRY_FRAME && RemoteSessionPolicy.frameFailure(true, 0, true, 1) == RemoteSessionPolicy.FrameFailure.RETRY_FRAME, "foreground frame failures tolerate two misses");
         check(RemoteSessionPolicy.frameFailure(true, 0, true, 2) == RemoteSessionPolicy.FrameFailure.REAUTHENTICATE, "three consecutive foreground misses start recovery");
         check(RemoteSessionPolicy.recoveryDelayMs(true) == 3000L && RemoteSessionPolicy.recoveryDelayMs(false) == 5000L, "recovery retries respect foreground and background delays");
+        check(RemoteSessionPolicy.nextFrameAt(1000L, 5) == 1200L && RemoteSessionPolicy.nextFrameAt(1000L, 30) == 1033L, "frame scheduling follows the selected FPS");
+        check(!RemoteSessionPolicy.frameDue(1000L, 1001L) && RemoteSessionPolicy.frameDue(1001L, 1001L), "a frame is requested at its due time");
         check(RemoteSessionPolicy.busySessionStatus(409) && !RemoteSessionPolicy.busySessionStatus(401), "a busy-host response probes the existing token before replacing it");
         System.out.println("Android remote-session policy: " + checks + " checks passed.");
     }

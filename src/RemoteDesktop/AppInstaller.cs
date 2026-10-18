@@ -42,6 +42,81 @@ public static class AppInstaller
         }
     }
 
+    public static string InstallExecutableTransactionally(
+        string source,
+        string destinationDirectory,
+        Action prepareInstall,
+        Action<string> finishInstall,
+        Action prepareRollback,
+        Action finishRollback)
+    {
+        ArgumentNullException.ThrowIfNull(prepareInstall);
+        ArgumentNullException.ThrowIfNull(finishInstall);
+        ArgumentNullException.ThrowIfNull(prepareRollback);
+        ArgumentNullException.ThrowIfNull(finishRollback);
+        if (!AppInstall.CanInstall(source)) throw new InvalidOperationException(UiText.InstallNeedsPublished());
+        Directory.CreateDirectory(destinationDirectory);
+        var destination = AppInstall.Executable(destinationDirectory);
+        var hadPreviousExecutable = File.Exists(destination);
+        var backup = hadPreviousExecutable ? destination + "." + Guid.NewGuid().ToString("N") + ".rollback" : null;
+        if (backup != null)
+        {
+            try { File.Copy(destination, backup, false); }
+            catch
+            {
+                TryDeleteBackup(backup);
+                throw;
+            }
+        }
+
+        var prepared = false;
+        var committed = false;
+        var rollbackCompleted = false;
+        try
+        {
+            prepareInstall();
+            prepared = true;
+            var installed = CopyExecutable(source, destinationDirectory);
+            finishInstall(installed);
+            committed = true;
+            return installed;
+        }
+        catch (Exception installError)
+        {
+            if (!prepared)
+            {
+                rollbackCompleted = true;
+                throw;
+            }
+            try
+            {
+                prepareRollback();
+                if (backup != null) File.Move(backup, destination, true);
+                else if (File.Exists(destination)) File.Delete(destination);
+                finishRollback();
+                rollbackCompleted = true;
+            }
+            catch (Exception rollbackError)
+            {
+                var retainedBackup = backup != null && File.Exists(backup) ? backup : null;
+                var recovery = retainedBackup == null ? "" : " 복구 백업 위치: " + retainedBackup;
+                Trace.TraceError("Executable install rollback failed. Backup: {0}; error: {1}", retainedBackup ?? "none", rollbackError);
+                throw new AggregateException("설치에 실패했고 복구 작업도 완료하지 못했습니다." + recovery, installError, rollbackError);
+            }
+            throw;
+        }
+        finally
+        {
+            if (backup != null && (committed || rollbackCompleted)) TryDeleteBackup(backup);
+        }
+    }
+
+    private static void TryDeleteBackup(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception error) { Trace.TraceWarning("Could not remove installer backup {0}: {1}", path, error.GetType().Name); }
+    }
+
     public static string InstallPerUser(PerUserRequest request)
     {
         var destination = CopyExecutable(request.SourceExecutable, request.DestinationDirectory);
@@ -55,26 +130,51 @@ public static class AppInstaller
     {
         var source = Environment.ProcessPath ?? throw new InvalidOperationException(UiText.InstallNeedsPublished());
         var machineDirectory = AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
-        var restartService = File.Exists(AppInstall.Executable(machineDirectory)) && StopServiceForUpdate();
-        try
-        {
-            var destination = CopyExecutable(source, machineDirectory);
-            CreateShortcut(AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)), destination);
-            ClearUserAutostart();
-            InstallService(destination);
-            SecureAttention.TryEnsurePolicy();
-            HostFirewall.TryApplySavedPort(destination);
-            StartService();
-        }
-        catch
-        {
-            if (restartService)
+        var commonPrograms = Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
+        var shortcut = AppInstall.ShortcutPath(commonPrograms);
+        var hadShortcut = File.Exists(shortcut);
+        var autostart = CaptureUserAutostart();
+        var serviceState = default(ServiceUpdateState);
+        _ = InstallExecutableTransactionally(source, machineDirectory,
+            prepareInstall: () => serviceState = StopServiceForUpdate(),
+            finishInstall: installed =>
             {
-                try { StartService(); }
-                catch (Exception) { }
-            }
-            throw;
+                CreateShortcut(shortcut, installed);
+                ClearUserAutostart();
+                InstallService(installed);
+                StartService();
+                SecureAttention.TryEnsurePolicy();
+                HostFirewall.TryApplySavedPort(installed);
+            },
+            prepareRollback: () =>
+            {
+                if (serviceState.Exists) _ = StopServiceForUpdate();
+                else StopAndDeleteService();
+            },
+            finishRollback: () => RestoreMachineInstallState(serviceState, autostart, shortcut, hadShortcut));
+    }
+
+    private static void RestoreMachineInstallState(ServiceUpdateState serviceState, RegistryValueSnapshot autostart, string shortcut, bool hadShortcut)
+    {
+        var failures = new List<Exception>();
+        try { RestoreUserAutostart(autostart); }
+        catch (Exception error) { failures.Add(error); }
+        if (!hadShortcut && File.Exists(shortcut))
+        {
+            try { File.Delete(shortcut); }
+            catch (Exception error) { failures.Add(error); }
         }
+        if (!serviceState.Exists)
+        {
+            try { SecureAttention.RestorePolicy(); }
+            catch (Exception error) { failures.Add(error); }
+        }
+        if (serviceState.WasRunning)
+        {
+            try { StartService(); }
+            catch (Exception error) { failures.Add(error); }
+        }
+        if (failures.Count > 0) throw new AggregateException("이전 설치 상태로 완전히 돌아가지 못했습니다.", failures);
     }
 
     public static void UninstallMachineHere()
@@ -122,6 +222,26 @@ public static class AppInstaller
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKey, true);
         key?.DeleteValue(AppInstall.RunValueName, false);
+    }
+
+    private static RegistryValueSnapshot CaptureUserAutostart()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKey, false);
+        if (key == null || !key.GetValueNames().Contains(AppInstall.RunValueName, StringComparer.OrdinalIgnoreCase))
+            return default;
+        return new(true, key.GetValue(AppInstall.RunValueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames), key.GetValueKind(AppInstall.RunValueName));
+    }
+
+    private static void RestoreUserAutostart(RegistryValueSnapshot snapshot)
+    {
+        if (!snapshot.Exists)
+        {
+            using var existing = Registry.CurrentUser.OpenSubKey(RunKey, true);
+            existing?.DeleteValue(AppInstall.RunValueName, false);
+            return;
+        }
+        using var key = Registry.CurrentUser.CreateSubKey(RunKey, true) ?? throw new InvalidOperationException("로그인 자동 실행을 복원하지 못했습니다.");
+        key.SetValue(AppInstall.RunValueName, snapshot.Value!, snapshot.Kind);
     }
 
     public static bool UserAutostartEnabled(string executable)
@@ -174,7 +294,10 @@ public static class AppInstaller
     const uint Running = 4;
     const uint ErrorServiceSpecific = 1066;
 
-    static bool StopServiceForUpdate()
+    private readonly record struct ServiceUpdateState(bool Exists, bool WasRunning);
+    private readonly record struct RegistryValueSnapshot(bool Exists, object? Value, RegistryValueKind Kind);
+
+    static ServiceUpdateState StopServiceForUpdate()
     {
         var manager = OpenSCManager(null, null, ManagerAccess);
         if (manager == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -184,14 +307,14 @@ public static class AppInstaller
             if (service == 0)
             {
                 var error = Marshal.GetLastWin32Error();
-                if (error == 1060) return false;
+                if (error == 1060) return new(false, false);
                 throw new Win32Exception(error);
             }
             try
             {
                 var status = new ServiceStatus();
                 if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                if (status.CurrentState == Stopped) return false;
+                if (status.CurrentState == Stopped) return new(true, false);
                 if (!ControlService(service, StopControl, ref status))
                 {
                     var error = Marshal.GetLastWin32Error();
@@ -201,7 +324,7 @@ public static class AppInstaller
                 while (DateTime.UtcNow < until)
                 {
                     if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                    if (status.CurrentState == Stopped) return true;
+                    if (status.CurrentState == Stopped) return new(true, true);
                     Thread.Sleep(200);
                 }
                 throw new TimeoutException("기존 Windows 서비스를 중지하지 못했습니다.");

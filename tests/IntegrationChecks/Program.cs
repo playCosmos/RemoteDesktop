@@ -105,6 +105,9 @@ Directory.CreateDirectory(devDir);
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.exe"), "exe");
 File.WriteAllText(Path.Combine(devDir, "RemoteDesktop.dll"), "dll");
 var copiedDir = Path.Combine(AppContext.BaseDirectory, "prd-copy-" + Guid.NewGuid().ToString("N"));
+var transactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-" + Guid.NewGuid().ToString("N"));
+var freshTransactionDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-fresh-" + Guid.NewGuid().ToString("N"));
+var failedRollbackDir = Path.Combine(AppContext.BaseDirectory, "prd-transaction-recovery-" + Guid.NewGuid().ToString("N"));
 var missingExe = Path.Combine(publishedDir, "missing", "RemoteDesktop.exe");
 try
 {
@@ -121,12 +124,66 @@ try
         failedCopyPreservedInstall = File.ReadAllText(Path.Combine(copiedDir, "RemoteDesktop.exe")) == "updated executable";
     }
     Check(failedCopyPreservedInstall && !Directory.EnumerateFiles(copiedDir, "*.new").Any(), "a failed staged install preserves the working executable and removes its temporary file");
+
+    Directory.CreateDirectory(transactionDir);
+    var transactionTarget = Path.Combine(transactionDir, "RemoteDesktop.exe");
+    File.WriteAllText(transactionTarget, "working machine version");
+    var transactionPrepared = false;
+    var rollbackPrepared = false;
+    var rollbackFinished = false;
+    var transactionFailed = false;
+    try
+    {
+        AppInstaller.InstallExecutableTransactionally(publishedExe, transactionDir,
+            () => transactionPrepared = true,
+            _ => throw new InvalidOperationException("simulated service start failure"),
+            () => rollbackPrepared = true,
+            () => rollbackFinished = true);
+    }
+    catch (InvalidOperationException error) when (error.Message == "simulated service start failure") { transactionFailed = true; }
+    Check(transactionFailed && transactionPrepared && rollbackPrepared && rollbackFinished
+        && File.ReadAllText(transactionTarget) == "working machine version"
+        && !Directory.EnumerateFiles(transactionDir, "*.rollback").Any(), "a failed machine upgrade restores the previous executable after service rollback");
+
+    var freshInstallFailed = false;
+    try
+    {
+        AppInstaller.InstallExecutableTransactionally(publishedExe, freshTransactionDir,
+            () => { },
+            _ => throw new InvalidOperationException("simulated first service start failure"),
+            () => { },
+            () => { });
+    }
+    catch (InvalidOperationException error) when (error.Message == "simulated first service start failure") { freshInstallFailed = true; }
+    Check(freshInstallFailed && !File.Exists(AppInstall.Executable(freshTransactionDir)), "a failed first machine install removes its unpublished executable");
+
+    Directory.CreateDirectory(failedRollbackDir);
+    var recoveryTarget = AppInstall.Executable(failedRollbackDir);
+    File.WriteAllText(recoveryTarget, "recoverable machine version");
+    var recoveryBackupRetained = false;
+    try
+    {
+        AppInstaller.InstallExecutableTransactionally(publishedExe, failedRollbackDir,
+            () => { },
+            _ => throw new InvalidOperationException("simulated service start failure"),
+            () => throw new TimeoutException("simulated service stop timeout"),
+            () => { });
+    }
+    catch (AggregateException error) when (error.Message.Contains("복구 백업 위치:", StringComparison.Ordinal))
+    {
+        var backup = Directory.EnumerateFiles(failedRollbackDir, "*.rollback").SingleOrDefault();
+        recoveryBackupRetained = backup != null && File.ReadAllText(backup) == "recoverable machine version";
+    }
+    Check(recoveryBackupRetained, "a failed service rollback retains and reports the previous executable for recovery");
 }
 finally
 {
     if (Directory.Exists(publishedDir)) Directory.Delete(publishedDir, true);
     if (Directory.Exists(devDir)) Directory.Delete(devDir, true);
     if (Directory.Exists(copiedDir)) Directory.Delete(copiedDir, true);
+    if (Directory.Exists(transactionDir)) Directory.Delete(transactionDir, true);
+    if (Directory.Exists(freshTransactionDir)) Directory.Delete(freshTransactionDir, true);
+    if (Directory.Exists(failedRollbackDir)) Directory.Delete(failedRollbackDir, true);
 }
 Check(UiText.PlacementTitle(InstallScope.Portable) == "설치하지 않고 실행 중" && UiText.PlacementTitle(InstallScope.PerUser) == "이 사용자에게 설치됨" && UiText.PlacementTitle(InstallScope.Machine) == "이 PC에 설치됨", "the host names portable, per-user, and machine installs");
 Check(UiText.PlacementBody(InstallScope.Portable, false).Contains("개발용", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Portable, true).Contains("모든 사용자", StringComparison.Ordinal) && UiText.PlacementBody(InstallScope.Machine, true).Contains("보안 화면", StringComparison.Ordinal), "install copy says what portable, per-user, and machine installs do");

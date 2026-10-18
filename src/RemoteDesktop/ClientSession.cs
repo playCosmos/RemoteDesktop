@@ -817,51 +817,62 @@ public partial class MainWindow
 
         private async Task DisconnectCore(bool retrying = false)
         {
-            generation++;
-            needKeyframe = true;
             var remote = client;
             client = null;
-            holdingPicture = retrying;
-            if (!retrying) fullscreen?.Close();
-            window.RefreshIdentity();
-            connection?.Cancel();
-            inputs?.Writer.TryComplete();
-            inputSignal?.Writer.TryComplete();
-            lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
-            inputBacklog.Reset();
-            if (!retrying) ClearFrame();
-            if (!retrying) ResetVideo();
-            if (!retrying) ResetPace();
-            if (!retrying) SetView(PictureView.Full);
-            panCandidate = false;
-            panning = false;
-            ShowStage(retrying ? UiText.ReconnectHold() : null);
-            if (retrying) window.SessionStatus(UiText.ReconnectHold());
-            window.SessionInfoCard.Visibility = Visibility.Collapsed;
-            if (!retrying) selectedDisplay = null;
-            SetSessionControlsEnabled(false);
-            if (retrying)
+            try
             {
-                window.ConnectionControls.Visibility = Visibility.Collapsed;
-                window.SessionToolbar.Visibility = Visibility.Collapsed;
-                window.SessionReveal.Visibility = Visibility.Visible;
-                window.EndSessionButton.IsEnabled = true;
-                SetHealth(UiText.ReconnectHold());
+                generation++;
+                needKeyframe = true;
+                holdingPicture = retrying;
+                if (!retrying) fullscreen?.Close();
+                window.RefreshIdentity();
+                connection?.Cancel();
+                inputs?.Writer.TryComplete();
+                inputSignal?.Writer.TryComplete();
+                lock (inputGate) { pendingMove = null; pendingWheel = null; pendingKeyDowns.Clear(); }
+                inputBacklog.Reset();
+                if (!retrying) ClearFrame();
+                if (!retrying) ResetVideo();
+                if (!retrying) ResetPace();
+                if (!retrying) SetView(PictureView.Full);
+                panCandidate = false;
+                panning = false;
+                ShowStage(retrying ? UiText.ReconnectHold() : null);
+                if (retrying) window.SessionStatus(UiText.ReconnectHold());
+                window.SessionInfoCard.Visibility = Visibility.Collapsed;
+                if (!retrying) selectedDisplay = null;
+                SetSessionControlsEnabled(false);
+                if (retrying)
+                {
+                    window.ConnectionControls.Visibility = Visibility.Collapsed;
+                    window.SessionToolbar.Visibility = Visibility.Collapsed;
+                    window.SessionReveal.Visibility = Visibility.Visible;
+                    window.EndSessionButton.IsEnabled = true;
+                    SetHealth(UiText.ReconnectHold());
+                }
+                else
+                {
+                    window.ConnectionControls.Visibility = Visibility.Visible;
+                    SetHealth("연결 종료");
+                }
+                SetConnectFormEnabled(!retrying);
+                inputEnabled = false;
+                window.ConnectButton.IsEnabled = !retrying;
+                window.ConnectButton.IsDefault = false;
+                window.ConnectButton.Content = retrying ? "다시 연결 중…" : connectedOnce ? "다시 접속" : "접속";
+                window.ServerPin.Visibility = Visibility.Collapsed;
+                UpdatePinSummary();
+                if (!retrying && window.IsVisible && window.ClientTab.IsSelected) FocusClientPassword();
             }
-            else
+            finally
             {
-                window.ConnectionControls.Visibility = Visibility.Visible;
-                SetHealth("연결 종료");
+                if (remote != null)
+                {
+                    try { await remote.Logout(); }
+                    catch (Exception error) { Trace.TraceWarning("Remote logout failed during disconnect: {0}", error.GetType().Name); }
+                    finally { remote.Dispose(); }
+                }
             }
-            SetConnectFormEnabled(!retrying);
-            inputEnabled = false;
-            window.ConnectButton.IsEnabled = !retrying;
-            window.ConnectButton.IsDefault = false;
-            window.ConnectButton.Content = retrying ? "다시 연결 중…" : connectedOnce ? "다시 접속" : "접속";
-            window.ServerPin.Visibility = Visibility.Collapsed;
-            UpdatePinSummary();
-            if (!retrying && window.IsVisible && window.ClientTab.IsSelected) FocusClientPassword();
-            if (remote != null) { try { await remote.Logout(); } catch { } remote.Dispose(); }
         }
 
         private void RevealConnectForm(string notice, bool problem)
@@ -914,8 +925,16 @@ public partial class MainWindow
             sessionPassword = null;
             resumeEpoch++;
             ReleaseReconnectWait();
-            await DisconnectCore();
-            window.ClientNotice("연결 종료됨");
+            try
+            {
+                await DisconnectCore();
+                window.ClientNotice("연결 종료됨");
+            }
+            catch (Exception error)
+            {
+                Trace.TraceError("Remote disconnect cleanup failed: {0}", error);
+                window.ClientNotice(UiText.ClientDisconnectFailed(error), problem: true);
+            }
         }
 
         public void CancelReconnect(object sender, RoutedEventArgs e)

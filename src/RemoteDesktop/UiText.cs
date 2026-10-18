@@ -65,6 +65,9 @@ public static class UiText
     public static string HostStopFailed(Exception error)
         => "접속 대기 중지 실패: " + Explain(error, "앱을 다시 시작한 뒤 상태를 확인하세요.");
 
+    public static string ClientDisconnectFailed(Exception error)
+        => "연결 종료 중 오류가 발생했습니다: " + Explain(error, "앱을 다시 시작한 뒤 다시 확인하세요.");
+
     public static bool HostSessionEnded(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;

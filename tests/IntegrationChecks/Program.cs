@@ -109,6 +109,19 @@ Check(UiText.InstallCancelled() == "설치를 취소했습니다." && !UiText.Is
 Check(UiText.SecureDesktopNotice("live") == "보안 화면 · 클릭과 키는 이 화면으로 갑니다." && UiText.SecureDesktopNotice("hidden")!.Contains("모든 사용자", StringComparison.Ordinal) && UiText.SecureDesktopNotice("off") == null && !UiText.IsProblem(UiText.SecureDesktopNotice("hidden")), "a secure desktop is named without looking like a failure");
 Check(UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("live")) && UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("hidden")) && !UiText.ShowSecureDesktop(true, UiText.SecureDesktopNotice("live")) && !UiText.ShowSecureDesktop(false, null) && !UiText.ShowSecureDesktop(false, ""), "the secure desktop notice stays on the picture until the controls open");
 Check(SecureDesktop.Decide(false, true) == SecureView.Off && SecureDesktop.Decide(true, false) == SecureView.Hidden && SecureDesktop.Decide(true, true) == SecureView.Live, "the secure desktop is shown only when a fresh frame exists");
+Check(SecureDesktop.ShouldEnable(true, true, true) && !SecureDesktop.ShouldEnable(false, true, true) && !SecureDesktop.ShouldEnable(true, false, true) && !SecureDesktop.ShouldEnable(true, true, false), "secure desktop gating requires the setting, a running service, and its endpoint");
+SecureDesktop.Configure(false);
+var injectorType = typeof(Desktop).Assembly.GetType("RemoteDesktop.InputInjector", throwOnError: true)!;
+var applyInput = injectorType.GetMethod("ApplyCore", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+var inputInjector = Activator.CreateInstance(injectorType, nonPublic: true)!;
+var observationsBeforeDisabledInput = SecureDesktop.ObservationCount;
+var invalidInputRejected = false;
+try { _ = applyInput.Invoke(inputInjector, [new InputEvent("unsupported")]); }
+catch (TargetInvocationException error) when (error.InnerException is ArgumentException) { invalidInputRejected = true; }
+Check(invalidInputRejected && SecureDesktop.ObservationCount == observationsBeforeDisabledInput, "a disabled secure desktop skips observation on the input path");
+var secureDropsBefore = SecureDesktop.InputDroppedBySecureDesktop;
+SecureDesktop.RecordSecureInputDrop(SecureView.Hidden);
+Check(SecureDesktop.InputDroppedBySecureDesktop == secureDropsBefore + 1, "secure desktop input withholding increments its diagnostic counter");
 Check(SecureDesktop.Header(SecureView.Live) == "live" && SecureDesktop.Header(SecureView.Hidden) == "hidden" && SecureDesktop.Header(SecureView.Off) == "off", "the secure desktop header stays small");
 Check(SecureDesktop.IsSecureName("Winlogon") && SecureDesktop.IsSecureName("Disconnect") && !SecureDesktop.IsSecureName("Default") && !SecureDesktop.IsSecureName(null), "the sign-in and UAC desktops are the secure ones");
 var secureNow = new DateTime(2026, 8, 22, 0, 0, 0, DateTimeKind.Utc);
@@ -633,14 +646,15 @@ async Task Password()
     Check(site.Certificate.HasPrivateKey, "server TLS certificate has a current-user private key");
     Check(site.Settings.Verify(site.Password) && !site.Settings.Verify("wrong"), "salted password verification");
     var hostPath = Path.Combine(site.Root, "host.json");
-    var persistedHost = new HostSettings { Port = 45999 };
+    var persistedHost = new HostSettings { Port = 45999, SecureDesktopEnabled = false };
     persistedHost.SetPassword(site.Password, hostPath);
     var restartedHost = HostSettings.Load(hostPath);
     Check(restartedHost.HasPassword && restartedHost.Verify(site.Password), "server password works after restart without re-entry");
     Check(restartedHost.Port == 45999, "server port survives restart");
+    Check(!restartedHost.SecureDesktopEnabled, "secure desktop kill switch survives restart");
     Check(restartedHost.UseSmoothHost, "stutter reduction stays enabled when the setting is absent");
     File.WriteAllText(hostPath, "{\"Port\":45999}");
-    Check(HostSettings.Load(hostPath).UseSmoothHost, "older host settings keep stutter reduction enabled");
+    Check(HostSettings.Load(hostPath).UseSmoothHost && HostSettings.Load(hostPath).SecureDesktopEnabled, "older host settings keep stutter reduction and secure desktop enabled");
     var smoothOff = HostSettings.Load(hostPath);
     smoothOff.SmoothHost = false;
     smoothOff.Save(hostPath);

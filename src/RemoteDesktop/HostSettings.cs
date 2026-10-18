@@ -14,6 +14,7 @@ public sealed class HostSettings
     public string OpaqueIdentityProtected { get; set; } = "";
     public int Port { get; set; } = 45831;
     public bool? SmoothHost { get; set; }
+    public bool SecureDesktopEnabled { get; set; } = true;
     [System.Text.Json.Serialization.JsonIgnore] public bool UseSmoothHost => SmoothHost != false;
     [System.Text.Json.Serialization.JsonIgnore] public bool HasPassword => Salt.Length > 0 && PasswordHash.Length > 0;
     [System.Text.Json.Serialization.JsonIgnore] public bool HasOpaqueIdentity => OpaqueIdentityProtected.Length > 0;

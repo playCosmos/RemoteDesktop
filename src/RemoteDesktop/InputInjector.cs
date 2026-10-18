@@ -13,12 +13,16 @@ internal sealed class InputInjector
     public string? ApplyCore(InputEvent e)
     {
         if (e.Kind == SecureAttention.Kind) return Attention();
-        if (!SecureDesktop.OwnsDesktop)
+        if (!SecureDesktop.OwnsDesktop && SecureDesktop.Enabled)
         {
-            var view = SecureDesktop.Observe(DateTime.UtcNow).View;
+            var view = SecureDesktop.CachedObservation(DateTime.UtcNow).View;
             if (view != SecureView.Off)
             {
-                if (view == SecureView.Live) SecureDesktop.Forward(e);
+                if (view == SecureView.Live)
+                {
+                    if (!SecureDesktop.TryForward(e)) SecureDesktop.RecordSecureInputDrop(view);
+                }
+                else SecureDesktop.RecordSecureInputDrop(view);
                 return null;
             }
         }
@@ -57,7 +61,7 @@ internal sealed class InputInjector
     {
         try
         {
-            switch (SecureAttention.Decide(SecureDesktop.OwnsDesktop, SecureDesktop.ReadPort() != 0))
+            switch (SecureAttention.Decide(SecureDesktop.OwnsDesktop, SecureDesktop.Enabled && SecureDesktop.ReadPort() != 0))
             {
                 case SecureAttention.Delivery.Send:
                     var now = DateTime.UtcNow;

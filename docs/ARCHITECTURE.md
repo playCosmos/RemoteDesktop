@@ -30,6 +30,14 @@
 - 프로토콜 레코드가 C#과 Java에 각각 있다. 필드 이름 하나는 컴파일로 잡히지 않고 통합 테스트의 Windows 경로에서만 보인다.
 - tests/IntegrationChecks/Program.cs가 비밀번호, 세션, 클립보드, 캡처를 한 호스트에서 순서대로 실행했다. 실패한 검사의 원인이 앞선 세션 상태에 남았다. 지금은 각 실행이 자신의 임시 디렉터리와 포트를 연다.
 
+## SecureDesktop 입력 핫패스 (P0-1)
+
+`RemoteHost.StartAsync`는 `settings.json`의 `SecureDesktopEnabled`(기본값 `true`), `PersonalRemoteDesktop` 서비스의 실행 상태, 보안 입력 엔드포인트 존재 여부를 한 번 확인한다. 셋 중 하나라도 없거나 꺼져 있으면 `InputInjector`와 `DisplayCapture`가 보안 데스크톱 경로를 건너뛴다. 설정 파일에서 `SecureDesktopEnabled`를 `false`로 바꾸면 킬 스위치가 된다.
+
+서비스를 사용할 수 있으면 `SecureDesktop`이 350ms 주기로 데스크톱 상태와 최신 보안 프레임을 갱신한다. `InputInjector.ApplyCore`와 `DisplayCapture.SecureReplacement`는 상태 조회에 캐시만 사용하며 입력마다 `Observe`나 보안 프레임 읽기를 실행하지 않는다. 캐시가 `Live`일 때 입력 전달은 기존 파이프를 사용하고 실패를 계측한다. 데스크톱 이름을 확인하지 못하면 입력을 허용하지 않고 `Hidden`으로 유지한다. 일반 화면으로 돌아왔다는 관측은 `OpenInputDesktop` 성공과 비보안 데스크톱 이름으로 확인한다. `Live` 프레임이 2초 넘게 오래되면 `Hidden`으로 전환한다.
+
+보안 화면 상태로 입력을 보류한 횟수는 `SecureDesktop.InputDroppedBySecureDesktop`, 파이프 전달 실패는 `SecureDesktop.InputForwardFailures`에서 확인한다. 각각 최초 발생 때 `Trace` 경고를 남긴다. 전달 실패가 연속 3회면 관측 타이머를 즉시 깨워 데스크톱 상태를 다시 판정한다.
+
 ## 순서
 
 한 단계가 끝나기 전에는 다음 단계의 파일을 나누지 않는다. 각 단계는 기존 통합 테스트를 그대로 통과해야 한다.

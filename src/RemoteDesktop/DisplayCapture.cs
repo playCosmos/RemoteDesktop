@@ -201,7 +201,12 @@ internal sealed class DisplayCapture
 
     private CapturedFrame? SecureReplacement(CaptureRequest request, Rectangle view)
     {
-        var observed = SecureDesktop.Observe(DateTime.UtcNow);
+        if (!SecureDesktop.Enabled)
+        {
+            if (secureLatched) { secureLatched = false; reusableJpeg = null; }
+            return null;
+        }
+        var observed = SecureDesktop.CachedObservation(DateTime.UtcNow);
         if (observed.View == SecureView.Off)
         {
             if (secureLatched) { secureLatched = false; reusableJpeg = null; }

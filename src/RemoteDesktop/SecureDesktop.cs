@@ -4,9 +4,11 @@ using System.Net.Sockets;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 
 namespace RemoteDesktop;
@@ -23,21 +25,115 @@ public readonly record struct SecureObservation(SecureView View, byte[]? Jpeg);
 public static class SecureDesktop
 {
     public static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan ObservationInterval = TimeSpan.FromMilliseconds(350);
     public const int InputKeyLength = 32;
     public const int MaxSecureFrameLength = 12_000_000;
+    private const int ForwardFailureRecheckThreshold = 3;
+    private sealed record ObservationSnapshot(SecureView View, byte[]? Jpeg, DateTime ObservedUtc);
+    private enum InputDesktopState { Unknown, Normal, Secure }
     const uint PipeAccessDuplex = 0x00000003;
     const uint PipeRejectRemoteClients = 0x00000008;
     const uint FileFlagOverlapped = 0x40000000;
     const uint FileFlagFirstPipeInstance = 0x00080000;
     public static bool OwnsDesktop { get; set; }
     static int lastView;
+    static int enabled;
+    static long observationCount;
+    static long inputDroppedBySecureDesktop;
+    static long inputForwardFailures;
+    static int consecutiveForwardFailures;
+    static int forwardRecheckRequested;
+    static int secureDropWarningWritten;
+    static int forwardFailureWarningWritten;
+    static int observationWarningWritten;
+    static int observerBusy;
+    static readonly object observerGate = new();
+    static ObservationSnapshot observation = new(SecureView.Off, null, DateTime.MinValue);
+    static Timer? observer;
     static NamedPipeClientStream? forwarder;
     static readonly object forwardGate = new();
     static readonly object fileAccessGate = new();
-    static long nextProbeTicks;
-    static int deniedProbe;
 
+    public static bool Enabled => Volatile.Read(ref enabled) != 0;
     public static SecureView LastView => (SecureView)Volatile.Read(ref lastView);
+    public static long ObservationCount => Interlocked.Read(ref observationCount);
+    public static long InputDroppedBySecureDesktop => Interlocked.Read(ref inputDroppedBySecureDesktop);
+    public static long InputForwardFailures => Interlocked.Read(ref inputForwardFailures);
+    public static int ConsecutiveForwardFailures => Volatile.Read(ref consecutiveForwardFailures);
+    public static bool ForwardRecheckPending => Volatile.Read(ref forwardRecheckRequested) != 0;
+
+    public static bool ShouldEnable(bool settingEnabled, bool serviceRunning, bool endpointAvailable)
+        => settingEnabled && serviceRunning && endpointAvailable;
+
+    public static bool IsMachineServiceRunning()
+    {
+        var manager = OpenSCManager(null, null, 0x0001);
+        if (manager == 0) return false;
+        try
+        {
+            var service = OpenService(manager, AppInstall.ServiceName, 0x0004);
+            if (service == 0) return false;
+            try { return QueryServiceStatus(service, out var status) && status.CurrentState == 0x4; }
+            finally { _ = CloseServiceHandle(service); }
+        }
+        finally { _ = CloseServiceHandle(manager); }
+    }
+
+    public static void Configure(bool useSecureDesktop)
+    {
+        StopObserving();
+        Volatile.Write(ref enabled, useSecureDesktop ? 1 : 0);
+        var initial = useSecureDesktop ? SecureView.Hidden : SecureView.Off;
+        Volatile.Write(ref lastView, (int)initial);
+        Volatile.Write(ref observation, new ObservationSnapshot(initial, null, DateTime.UtcNow));
+        Interlocked.Exchange(ref forwardRecheckRequested, 0);
+        Interlocked.Exchange(ref consecutiveForwardFailures, 0);
+        if (useSecureDesktop) StartObserving();
+    }
+
+    public static void StartObserving()
+    {
+        if (!Enabled) return;
+        lock (observerGate)
+        {
+            if (observer != null) return;
+            observer = new Timer(_ =>
+            {
+                if (!Enabled || Interlocked.Exchange(ref observerBusy, 1) != 0) return;
+                try { _ = Observe(DateTime.UtcNow); }
+                catch (Exception ex)
+                {
+                    Publish(new SecureObservation(SecureView.Hidden, null), DateTime.UtcNow);
+                    if (Interlocked.Exchange(ref observationWarningWritten, 1) == 0)
+                        Trace.TraceWarning("Secure desktop observation failed; input remains gated. {0}", ex.GetType().Name);
+                }
+                finally { Interlocked.Exchange(ref observerBusy, 0); }
+            }, null, TimeSpan.Zero, ObservationInterval);
+        }
+    }
+
+    public static void StopObserving()
+    {
+        Timer? current;
+        lock (observerGate) { current = observer; observer = null; }
+        current?.Dispose();
+    }
+
+    public static SecureObservation CachedObservation(DateTime nowUtc)
+    {
+        if (!Enabled) return new SecureObservation(SecureView.Off, null);
+        var current = Volatile.Read(ref observation);
+        if (current.View == SecureView.Live && nowUtc.ToUniversalTime() - current.ObservedUtc > FreshFor)
+            return new SecureObservation(SecureView.Hidden, null);
+        return new SecureObservation(current.View, current.Jpeg);
+    }
+
+    public static void RecordSecureInputDrop(SecureView view)
+    {
+        Interlocked.Increment(ref inputDroppedBySecureDesktop);
+        if (Interlocked.Exchange(ref secureDropWarningWritten, 1) == 0)
+            Trace.TraceWarning("Remote input was withheld by secure desktop state {0}.", view);
+    }
 
     public static SecureView Decide(bool inputDenied, bool frameFresh)
         => !inputDenied ? SecureView.Off : frameFresh ? SecureView.Live : SecureView.Hidden;
@@ -356,12 +452,46 @@ public static class SecureDesktop
 
     public static SecureObservation Observe(DateTime now)
     {
-        var denied = InputDenied();
+        Interlocked.Increment(ref observationCount);
+        if (!Enabled)
+        {
+            var disabled = new SecureObservation(SecureView.Off, null);
+            Publish(disabled, now);
+            return disabled;
+        }
+        var state = ProbeInputDesktop();
+        if (state == InputDesktopState.Normal)
+        {
+            Interlocked.Exchange(ref consecutiveForwardFailures, 0);
+            Interlocked.Exchange(ref forwardRecheckRequested, 0);
+            var normal = new SecureObservation(SecureView.Off, null);
+            Publish(normal, now);
+            return normal;
+        }
+        if (state == InputDesktopState.Unknown)
+        {
+            var hidden = new SecureObservation(SecureView.Hidden, null);
+            Publish(hidden, now);
+            if (Interlocked.Exchange(ref observationWarningWritten, 1) == 0)
+                Trace.TraceWarning("The active input desktop could not be identified; remote input remains gated.");
+            return hidden;
+        }
         byte[]? jpeg = null;
-        var fresh = denied && TryFetchFresh(now, out jpeg);
-        var view = Decide(denied, fresh);
+        var fresh = TryFetchFresh(now, out jpeg);
+        var view = Decide(true, fresh);
+        if (fresh) Interlocked.Exchange(ref consecutiveForwardFailures, 0);
+        Interlocked.Exchange(ref forwardRecheckRequested, 0);
+        var result = new SecureObservation(view, view == SecureView.Live ? jpeg : null);
+        Publish(result, now);
+        return result;
+    }
+
+    private static void Publish(SecureObservation result, DateTime observedUtc)
+    {
+        if (!Enabled) result = new SecureObservation(SecureView.Off, null);
+        var view = result.View;
         Volatile.Write(ref lastView, (int)view);
-        return new SecureObservation(view, view == SecureView.Live ? jpeg : null);
+        Volatile.Write(ref observation, new ObservationSnapshot(view, result.Jpeg, observedUtc.ToUniversalTime()));
     }
 
     public static byte[] EncodeInput(InputEvent input)
@@ -425,28 +555,42 @@ public static class SecureDesktop
         };
     }
 
-    public static void Forward(InputEvent input) => TryForward(input);
-
     public static bool TryForward(InputEvent input)
     {
         var payload = EncodeInput(input);
+        var sent = false;
         lock (forwardGate)
         {
             try
             {
-                if (!EnsureForwarder()) return false;
-                var length = BitConverter.GetBytes(payload.Length);
-                forwarder!.Write(length);
-                forwarder.Write(payload);
-                return true;
+                if (EnsureForwarder())
+                {
+                    var length = BitConverter.GetBytes(payload.Length);
+                    forwarder!.Write(length);
+                    forwarder.Write(payload);
+                    sent = true;
+                }
             }
             catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException)
             {
                 forwarder?.Dispose();
                 forwarder = null;
-                return false;
             }
         }
+        if (sent) Interlocked.Exchange(ref consecutiveForwardFailures, 0);
+        else
+        {
+            Interlocked.Increment(ref inputForwardFailures);
+            var consecutive = Interlocked.Increment(ref consecutiveForwardFailures);
+            if (consecutive >= ForwardFailureRecheckThreshold && Interlocked.Exchange(ref forwardRecheckRequested, 1) == 0)
+            {
+                try { Volatile.Read(ref observer)?.Change(TimeSpan.Zero, ObservationInterval); }
+                catch (ObjectDisposedException) { }
+            }
+            if (Interlocked.Exchange(ref forwardFailureWarningWritten, 1) == 0)
+                Trace.TraceWarning("Secure desktop input forwarding failed; failures={0}, consecutive={1}.", InputForwardFailures, consecutive);
+        }
+        return sent;
     }
 
     static bool EnsureForwarder()
@@ -493,20 +637,27 @@ public static class SecureDesktop
         }
     }
 
-    static bool InputDenied()
+    private static InputDesktopState ProbeInputDesktop()
     {
-        var now = DateTime.UtcNow.Ticks;
-        if (now < Volatile.Read(ref nextProbeTicks)) return Volatile.Read(ref deniedProbe) == 1;
         var desk = OpenInputDesktop(0, false, 0x0001);
-        var denied = desk == 0 && Marshal.GetLastWin32Error() == 5;
-        if (desk != 0) CloseDesktop(desk);
-        Volatile.Write(ref deniedProbe, denied ? 1 : 0);
-        Volatile.Write(ref nextProbeTicks, now + TimeSpan.TicksPerMillisecond * 100);
-        return denied;
+        if (desk == 0) return Marshal.GetLastWin32Error() == 5 ? InputDesktopState.Secure : InputDesktopState.Unknown;
+        try
+        {
+            var name = new StringBuilder(256);
+            if (!GetUserObjectInformation(desk, 2, name, (uint)(name.Capacity * sizeof(char)), out _)) return InputDesktopState.Unknown;
+            return IsSecureName(name.ToString()) ? InputDesktopState.Secure : InputDesktopState.Normal;
+        }
+        finally { _ = CloseDesktop(desk); }
     }
 
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool CloseDesktop(nint desktop);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool GetUserObjectInformation(nint handle, int index, StringBuilder information, uint length, out uint needed);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint OpenSCManager(string? machineName, string? databaseName, uint access);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern nint OpenService(nint manager, string serviceName, uint access);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool QueryServiceStatus(nint service, out ServiceStatus status);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool CloseServiceHandle(nint handle);
+    [StructLayout(LayoutKind.Sequential)] struct ServiceStatus { public int ServiceType, CurrentState, ControlsAccepted, Win32ExitCode, ServiceSpecificExitCode, CheckPoint, WaitHint; }
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetNamedPipeClientProcessId(nint pipe, out uint clientProcessId);
     [StructLayout(LayoutKind.Sequential)] struct Luid { public uint LowPart; public int HighPart; }
     [StructLayout(LayoutKind.Sequential)] struct TokenPrivileges { public uint Count; public Luid Luid; public uint Attributes; }

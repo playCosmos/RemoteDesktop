@@ -53,6 +53,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
     }
     public async Task StartAsync(int port, X509Certificate2 certificate)
     {
+        SecureDesktop.Configure(SecureDesktop.ShouldEnable(settings.SecureDesktopEnabled, SecureDesktop.IsMachineServiceRunning(), SecureDesktop.ReadPort() != 0));
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(k =>
@@ -248,6 +249,7 @@ public sealed partial class RemoteHost : IAsyncDisposable
         try
         {
             timer?.Dispose();
+            SecureDesktop.Configure(false);
             Disconnect();
             var runningApp = app;
             app = null;

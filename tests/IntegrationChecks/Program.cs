@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using RemoteDesktop;
 
@@ -74,6 +76,43 @@ var securePacked = SecureDesktop.Pack(secureNow, 8, 4, new byte[] { 1, 2, 3, 4 }
 Check(SecureDesktop.TryUnpack(securePacked, secureNow.AddSeconds(1), TimeSpan.FromSeconds(2), out var secureJpeg) && secureJpeg.SequenceEqual(new byte[] { 1, 2, 3, 4 }), "a fresh secure frame unpacks");
 Check(!SecureDesktop.TryUnpack(securePacked, secureNow.AddSeconds(5), TimeSpan.FromSeconds(2), out _), "a stale secure frame is ignored");
 Check(!SecureDesktop.TryUnpack(securePacked.AsSpan(0, 8).ToArray(), secureNow, TimeSpan.FromSeconds(2), out _), "a short secure frame is ignored");
+var secureInputKey = Enumerable.Range(0, SecureDesktop.InputKeyLength).Select(i => (byte)i).ToArray();
+var secureChallenge = Enumerable.Range(0, SecureDesktop.InputKeyLength).Select(i => (byte)(255 - i)).ToArray();
+var secureEndpointText = "45831\n" + Convert.ToBase64String(secureInputKey);
+Check(SecureDesktop.TryParseEndpoint(secureEndpointText, out var securePort, out var parsedSecureKey) && securePort == 45831 && parsedSecureKey.SequenceEqual(secureInputKey) && !SecureDesktop.TryParseEndpoint("65536\n" + Convert.ToBase64String(secureInputKey), out _, out _) && !SecureDesktop.TryParseEndpoint("45831\nnot-a-key", out _, out _), "the secure desktop channel accepts only a valid port and private key");
+var secureProof = SecureDesktop.InputProof(secureInputKey, secureChallenge);
+var otherSecureChallenge = secureChallenge.Select(value => (byte)(value ^ 0xA5)).ToArray();
+Check(SecureDesktop.VerifyInputProof(secureInputKey, secureChallenge, secureProof) && !SecureDesktop.VerifyInputProof(secureInputKey, otherSecureChallenge, secureProof) && !SecureDesktop.VerifyInputProof(secureInputKey, secureChallenge, new byte[SecureDesktop.InputKeyLength]) && !SecureDesktop.VerifyInputProof(secureInputKey.AsSpan(1), secureChallenge, secureProof), "the secure desktop channel verifies a fresh keyed challenge");
+async Task<bool> AuthenticateSecureLoopback(byte[] offeredKey)
+{
+    using var server = new TcpListener(IPAddress.Loopback, 0);
+    server.Start();
+    var port = ((IPEndPoint)server.LocalEndpoint).Port;
+    var serverCheck = Task.Run(async () =>
+    {
+        using var accepted = await server.AcceptTcpClientAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        return await SecureDesktop.AuthenticateInputServerAsync(accepted.GetStream(), secureInputKey, timeout.Token);
+    });
+    using var client = new TcpClient();
+    await client.ConnectAsync(IPAddress.Loopback, port);
+    var stream = client.GetStream();
+    stream.ReadTimeout = 1000;
+    SecureDesktop.AuthenticateInputClient(stream, offeredKey);
+    return await serverCheck;
+}
+Check(await AuthenticateSecureLoopback(secureInputKey) && !await AuthenticateSecureLoopback(new byte[SecureDesktop.InputKeyLength]), "the loopback secure input listener admits only a client holding its session key");
+var viewerSid = WindowsIdentity.GetCurrent().User!;
+var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+var privateSids = new HashSet<string>(StringComparer.Ordinal) { new SecurityIdentifier(WellKnownSidType.WorldSid, null).Value, new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null).Value, new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null).Value };
+var secureDirectoryAcl = SecureDesktop.BuildDirectorySecurity(viewerSid);
+var secureFileAcl = SecureDesktop.BuildFileSecurity(viewerSid);
+var secureDirectoryRules = secureDirectoryAcl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+var secureFileRules = secureFileAcl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToArray();
+var secureTrustedSids = new[] { systemSid, adminsSid };
+bool HasFullControl(FileSystemAccessRule[] rules, SecurityIdentifier sid) => rules.Any(rule => rule.IdentityReference.Equals(sid) && rule.AccessControlType == AccessControlType.Allow && (rule.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl);
+Check(secureDirectoryAcl.AreAccessRulesProtected && secureFileAcl.AreAccessRulesProtected && secureTrustedSids.All(sid => HasFullControl(secureDirectoryRules, sid) && HasFullControl(secureFileRules, sid)) && secureDirectoryRules.Any(rule => rule.IdentityReference.Equals(viewerSid) && (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute && (rule.FileSystemRights & FileSystemRights.Write) == 0) && secureFileRules.Any(rule => rule.IdentityReference.Equals(viewerSid) && (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute && (rule.FileSystemRights & FileSystemRights.Write) == 0) && secureDirectoryRules.All(rule => !privateSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)) && secureFileRules.All(rule => !privateSids.Contains(((SecurityIdentifier)rule.IdentityReference).Value)), "secure desktop files are readable only by SYSTEM, administrators, and the active user");
 var secureMove = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("move", 0.25, 0.75)));
 var secureKey = SecureDesktop.DecodeInput(SecureDesktop.EncodeInput(new InputEvent("key", Code: 13, Down: true)));
 Check(secureMove.Kind == "move" && secureMove.X == 0.25 && secureMove.Y == 0.75 && secureKey.Kind == "key" && secureKey.Code == 13 && secureKey.Down, "secure input keeps the pointer and the key");

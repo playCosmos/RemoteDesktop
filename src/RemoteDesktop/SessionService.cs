@@ -5,6 +5,8 @@ using System.Drawing;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Security.Principal;
 
 namespace RemoteDesktop;
 
@@ -77,16 +79,27 @@ sealed class SessionService
     readonly CancellationTokenSource cancel = new();
     readonly ConcurrentQueue<InputEvent> inputs = new();
     readonly InputInjector injector = new();
+    readonly SemaphoreSlim inputClients = new(8, 8);
+    readonly ConcurrentDictionary<TcpClient, byte> activeClients = new();
+    readonly object inputChannelGate = new();
+    byte[] inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
+    int inputPort;
+    int allowFramePublish;
     Thread? desktopThread;
     TcpListener? listener;
 
     public void Start()
     {
         SecureAttention.TryEnsurePolicy();
-        SecureDesktop.OwnsDesktop = true;
+        SecureDesktop.SetViewerAccess(null);
+        SecureDesktop.ClearFrame();
+        SecureDesktop.ClearPort();
+        Volatile.Write(ref allowFramePublish, 1);
         listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
-        SecureDesktop.WritePort(((IPEndPoint)listener.LocalEndpoint).Port);
+        inputPort = ((IPEndPoint)listener.LocalEndpoint).Port;
+        SecureDesktop.WritePort(inputPort, inputKey);
+        SecureDesktop.OwnsDesktop = true;
         _ = AcceptInputs(cancel.Token);
         desktopThread = new Thread(DesktopLoop) { IsBackground = true, Name = "Secure desktop" };
         desktopThread.SetApartmentState(ApartmentState.STA);
@@ -97,15 +110,29 @@ sealed class SessionService
     public void Stop()
     {
         cancel.Cancel();
+        Volatile.Write(ref allowFramePublish, 0);
         try { listener?.Stop(); } catch (SocketException) { }
+        lock (inputChannelGate)
+        {
+            foreach (var client in activeClients.Keys) client.Dispose();
+            while (inputs.TryDequeue(out _)) { }
+        }
         desktopThread?.Join(2000);
+        try { SecureDesktop.SetViewerAccess(null); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException) { }
         SecureDesktop.ClearFrame();
         SecureDesktop.ClearPort();
+        SecureDesktop.OwnsDesktop = false;
     }
 
     public void SessionChanged(int reason)
     {
-        if (reason is 5 or 8) LaunchUi();
+        if (reason is 2 or 4 or 6)
+        {
+            try { ResetInputChannel(null); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException) { }
+            SecureDesktop.ClearFrame();
+        }
+        else if (reason is 1 or 3 or 5 or 8) LaunchUi();
     }
 
     async Task AcceptInputs(CancellationToken token)
@@ -115,32 +142,69 @@ sealed class SessionService
             TcpClient client;
             try { client = await listener.AcceptTcpClientAsync(token); }
             catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException) { return; }
-            _ = ReadInputs(client, token);
+            if (!inputClients.Wait(0)) { client.Dispose(); continue; }
+            byte[] expectedKey;
+            lock (inputChannelGate)
+            {
+                activeClients.TryAdd(client, 0);
+                expectedKey = inputKey;
+            }
+            _ = ReadInputs(client, expectedKey, token);
         }
     }
 
-    async Task ReadInputs(TcpClient client, CancellationToken token)
+    async Task ReadInputs(TcpClient client, byte[] expectedKey, CancellationToken token)
     {
-        using (client)
-        using (var stream = client.GetStream())
+        try
         {
-            var lengthBytes = new byte[4];
-            while (!token.IsCancellationRequested)
+            using (client)
+            using (var stream = client.GetStream())
             {
+                using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(2));
                 try
                 {
-                    await stream.ReadExactlyAsync(lengthBytes, token);
-                    var length = BitConverter.ToInt32(lengthBytes);
-                    if (length is < 2 or > 8192) return;
-                    var body = new byte[length];
-                    await stream.ReadExactlyAsync(body, token);
-                    var input = SecureDesktop.DecodeInput(body);
-                    while (inputs.Count > 32 && inputs.TryDequeue(out _)) { }
-                    inputs.Enqueue(input);
+                    if (!await SecureDesktop.AuthenticateInputServerAsync(stream, expectedKey, handshakeTimeout.Token)) return;
                 }
-                catch (Exception ex) when (ex is IOException or InvalidDataException or EndOfStreamException or OperationCanceledException or ArgumentException) { return; }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or SocketException or ObjectDisposedException) { return; }
+                var lengthBytes = new byte[4];
+                while (!token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await stream.ReadExactlyAsync(lengthBytes, token);
+                        var length = BitConverter.ToInt32(lengthBytes);
+                        if (length is < 2 or > 8192) return;
+                        var body = new byte[length];
+                        await stream.ReadExactlyAsync(body, token);
+                        var input = SecureDesktop.DecodeInput(body);
+                        while (inputs.Count >= 32 && inputs.TryDequeue(out _)) { }
+                        inputs.Enqueue(input);
+                    }
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or EndOfStreamException or OperationCanceledException or ArgumentException or FormatException) { return; }
+                }
             }
         }
+        finally
+        {
+            activeClients.TryRemove(client, out _);
+            inputClients.Release();
+        }
+    }
+
+    void ResetInputChannel(SecurityIdentifier? viewer)
+    {
+        Volatile.Write(ref allowFramePublish, 0);
+        lock (inputChannelGate)
+        {
+            inputKey = RandomNumberGenerator.GetBytes(SecureDesktop.InputKeyLength);
+            foreach (var client in activeClients.Keys) client.Dispose();
+            while (inputs.TryDequeue(out _)) { }
+            SecureDesktop.ClearFrame();
+            SecureDesktop.SetViewerAccess(viewer);
+            if (inputPort is > 0 and <= 65535) SecureDesktop.WritePort(inputPort, inputKey);
+        }
+        Volatile.Write(ref allowFramePublish, 1);
     }
 
     void DesktopLoop()
@@ -172,7 +236,7 @@ sealed class SessionService
         SecureDesktop.ClearFrame();
     }
 
-    static bool PublishIfSecure()
+    bool PublishIfSecure()
     {
         var desktop = OpenInputDesktop(0, false, DesktopRights);
         if (desktop == 0) { SecureDesktop.ClearFrame(); return false; }
@@ -181,6 +245,7 @@ sealed class SessionService
             if (!SetThreadDesktop(desktop)) return false;
             var name = DesktopName(desktop);
             if (!SecureDesktop.IsSecureName(name)) { SecureDesktop.ClearFrame(); return false; }
+            if (Volatile.Read(ref allowFramePublish) == 0) { SecureDesktop.ClearFrame(); return true; }
             var left = GetSystemMetrics(76);
             var top = GetSystemMetrics(77);
             var width = Math.Clamp(GetSystemMetrics(78), 1, 7680);
@@ -188,7 +253,11 @@ sealed class SessionService
             using var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
             using (var graphics = Graphics.FromImage(bitmap))
                 graphics.CopyFromScreen(left, top, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
-            SecureDesktop.Publish(ScreenJpeg.Encode(bitmap, 55), width, height);
+            lock (inputChannelGate)
+            {
+                if (Volatile.Read(ref allowFramePublish) == 0) { SecureDesktop.ClearFrame(); return true; }
+                SecureDesktop.Publish(ScreenJpeg.Encode(bitmap, 55), width, height);
+            }
             return true;
         }
         finally { CloseDesktop(desktop); }
@@ -207,13 +276,21 @@ sealed class SessionService
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    static void LaunchUi()
+    void LaunchUi()
     {
         var session = WTSGetActiveConsoleSessionId();
         if (session == 0xFFFFFFFF) return;
         if (!WTSQueryUserToken(session, out var user)) return;
         try
         {
+            var viewer = TokenUserSid(user);
+            if (viewer == null) return;
+            try { ResetInputChannel(viewer); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+            {
+                SecureDesktop.ClearFrame();
+                return;
+            }
             if (!DuplicateTokenEx(user, 0x10000000, 0, 2, 1, out var primary)) return;
             try
             {
@@ -234,6 +311,21 @@ sealed class SessionService
         finally { CloseHandle(user); }
     }
 
+    static SecurityIdentifier? TokenUserSid(nint token)
+    {
+        if (token == 0) return null;
+        _ = GetTokenInformation(token, 1, 0, 0, out var size);
+        if (size <= 0) return null;
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (!GetTokenInformation(token, 1, buffer, size, out _)) return null;
+            var info = Marshal.PtrToStructure<SidAndAttributes>(buffer);
+            return info.Sid == 0 ? null : new SecurityIdentifier(info.Sid);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] struct StartupInfo
     {
         public int cb;
@@ -242,6 +334,7 @@ sealed class SessionService
         public short showWindow, reserved2;
         public nint reserved3, stdIn, stdOut, stdErr;
     }
+    [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public nint Sid; public uint Attributes; }
     [StructLayout(LayoutKind.Sequential)] struct ProcessHandles { public nint Process, Thread; }
     [DllImport("user32.dll", SetLastError = true)] static extern nint OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll", SetLastError = true)] static extern bool SetThreadDesktop(nint desktop);
@@ -251,6 +344,7 @@ sealed class SessionService
     [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();
     [DllImport("wtsapi32.dll", SetLastError = true)] static extern bool WTSQueryUserToken(uint session, out nint token);
     [DllImport("advapi32.dll", SetLastError = true)] static extern bool DuplicateTokenEx(nint existing, uint access, nint attributes, int level, int type, out nint primary);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(nint token, int infoClass, nint info, int length, out int returnLength);
     [DllImport("userenv.dll", SetLastError = true)] static extern bool CreateEnvironmentBlock(out nint environment, nint token, bool inherit);
     [DllImport("userenv.dll", SetLastError = true)] static extern bool DestroyEnvironmentBlock(nint environment);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool CreateProcessAsUser(nint token, string? application, string command, nint processAttributes, nint threadAttributes, bool inherit, uint flags, nint environment, string? directory, ref StartupInfo startup, out ProcessHandles process);

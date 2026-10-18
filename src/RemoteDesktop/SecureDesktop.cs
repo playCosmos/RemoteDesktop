@@ -2,6 +2,9 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Cryptography;
+using System.Security.Principal;
 
 namespace RemoteDesktop;
 
@@ -17,10 +20,12 @@ public readonly record struct SecureObservation(SecureView View, byte[]? Jpeg);
 public static class SecureDesktop
 {
     public static readonly TimeSpan FreshFor = TimeSpan.FromSeconds(2);
+    public const int InputKeyLength = 32;
     public static bool OwnsDesktop { get; set; }
     static int lastView;
     static TcpClient? forwarder;
     static readonly object forwardGate = new();
+    static readonly object fileAccessGate = new();
     static long nextProbeTicks;
     static int deniedProbe;
 
@@ -82,43 +87,158 @@ public static class SecureDesktop
         return true;
     }
 
+    public static void SetViewerAccess(SecurityIdentifier? viewer)
+    {
+        lock (fileAccessGate)
+        {
+            var directory = Path.GetDirectoryName(FramePath())!;
+            Directory.CreateDirectory(directory);
+            new DirectoryInfo(directory).SetAccessControl(BuildDirectorySecurity(viewer));
+            SetFileAccess(FramePath(), viewer);
+            SetFileAccess(FramePath() + ".tmp", viewer);
+            SetFileAccess(PortPath(), viewer);
+        }
+    }
+
     public static void Publish(byte[] jpeg, int width, int height)
     {
-        var path = FramePath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temp = path + ".tmp";
-        File.WriteAllBytes(temp, Pack(DateTime.UtcNow, width, height, jpeg));
-        File.Move(temp, path, true);
+        lock (fileAccessGate)
+        {
+            var path = FramePath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temp = path + ".tmp";
+            File.WriteAllBytes(temp, Pack(DateTime.UtcNow, width, height, jpeg));
+            File.Move(temp, path, true);
+        }
     }
 
     public static void ClearFrame()
     {
-        try { File.Delete(FramePath()); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        lock (fileAccessGate)
+        {
+            try { File.Delete(FramePath()); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            try { File.Delete(FramePath() + ".tmp"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
 
-    public static void WritePort(int port)
+    public static void WritePort(int port, ReadOnlySpan<byte> key)
     {
+        if (port is < 1 or > 65535 || key.Length != InputKeyLength) throw new ArgumentException("Invalid secure input endpoint");
         var path = PortPath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        lock (fileAccessGate)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, port.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + Convert.ToBase64String(key));
+        }
     }
 
     public static void ClearPort()
     {
-        try { File.Delete(PortPath()); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        lock (fileAccessGate)
+        {
+            try { File.Delete(PortPath()); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
     }
 
-    public static int ReadPort()
+    public static bool TryParseEndpoint(string? text, out int port, out byte[] key)
     {
+        port = 0;
+        key = [];
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var lines = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length != 2 || !int.TryParse(lines[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port) || port is < 1 or > 65535)
+        {
+            port = 0;
+            return false;
+        }
         try
         {
-            var text = File.ReadAllText(PortPath()).Trim();
-            return int.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, out var port) && port is > 0 and <= 65535 ? port : 0;
+            key = Convert.FromBase64String(lines[1]);
+            if (key.Length == InputKeyLength) return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException) { return 0; }
+        catch (FormatException) { }
+        port = 0;
+        key = [];
+        return false;
     }
+
+    public static byte[] InputProof(ReadOnlySpan<byte> key, ReadOnlySpan<byte> challenge)
+    {
+        if (key.Length != InputKeyLength || challenge.Length != InputKeyLength) throw new ArgumentException("Invalid secure input challenge");
+        return HMACSHA256.HashData(key, challenge);
+    }
+
+    public static bool VerifyInputProof(ReadOnlySpan<byte> key, ReadOnlySpan<byte> challenge, ReadOnlySpan<byte> proof)
+        => key.Length == InputKeyLength && challenge.Length == InputKeyLength && proof.Length == InputKeyLength
+            && CryptographicOperations.FixedTimeEquals(InputProof(key, challenge), proof);
+
+    public static async Task<bool> AuthenticateInputServerAsync(Stream stream, ReadOnlyMemory<byte> key, CancellationToken token)
+    {
+        if (key.Length != InputKeyLength) return false;
+        var expectedKey = key.ToArray();
+        var challenge = RandomNumberGenerator.GetBytes(InputKeyLength);
+        await stream.WriteAsync(challenge, token);
+        var proof = new byte[InputKeyLength];
+        await stream.ReadExactlyAsync(proof, token);
+        return VerifyInputProof(expectedKey, challenge, proof);
+    }
+
+    public static void AuthenticateInputClient(Stream stream, ReadOnlySpan<byte> key)
+    {
+        if (key.Length != InputKeyLength) throw new ArgumentException("Invalid secure input key");
+        var challenge = new byte[InputKeyLength];
+        stream.ReadExactly(challenge);
+        stream.Write(InputProof(key, challenge));
+    }
+
+    static int ReadEndpoint(out byte[] key)
+    {
+        key = [];
+        try
+        {
+            return TryParseEndpoint(File.ReadAllText(PortPath()), out var port, out key) ? port : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            return 0;
+        }
+    }
+
+    public static int ReadPort() => ReadEndpoint(out _);
+
+    public static DirectorySecurity BuildDirectorySecurity(SecurityIdentifier? viewer)
+    {
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(true, false);
+        AddRule(security, system, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit);
+        AddRule(security, new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit);
+        if (viewer != null) AddRule(security, viewer, FileSystemRights.ReadAndExecute, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit);
+        return security;
+    }
+
+    public static FileSecurity BuildFileSecurity(SecurityIdentifier? viewer)
+    {
+        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(true, false);
+        AddRule(security, system, FileSystemRights.FullControl, InheritanceFlags.None);
+        AddRule(security, new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl, InheritanceFlags.None);
+        if (viewer != null) AddRule(security, viewer, FileSystemRights.ReadAndExecute, InheritanceFlags.None);
+        return security;
+    }
+
+    static void SetFileAccess(string path, SecurityIdentifier? viewer)
+    {
+        if (!File.Exists(path)) return;
+        new FileInfo(path).SetAccessControl(BuildFileSecurity(viewer));
+    }
+
+    static void AddRule(FileSystemSecurity security, SecurityIdentifier identity, FileSystemRights rights, InheritanceFlags inheritance)
+        => security.AddAccessRule(new FileSystemAccessRule(identity, rights, inheritance, PropagationFlags.None, AccessControlType.Allow));
 
     public static SecureObservation Observe(DateTime now)
     {
@@ -218,16 +338,34 @@ public static class SecureDesktop
 
     static bool EnsureForwarder()
     {
-        if (forwarder is { Connected: true }) return true;
+        if (forwarder is { Connected: true } connected && !PeerClosed(connected)) return true;
         forwarder?.Dispose();
         forwarder = null;
-        var port = ReadPort();
+        var port = ReadEndpoint(out var key);
         if (port == 0) return false;
-        var client = new TcpClient();
-        var task = client.ConnectAsync(IPAddress.Loopback, port);
-        if (!task.Wait(200) || !client.Connected) { client.Dispose(); return false; }
-        forwarder = client;
-        return true;
+        TcpClient? client = new();
+        try
+        {
+            var task = client.ConnectAsync(IPAddress.Loopback, port);
+            if (!task.Wait(200) || !client.Connected) return false;
+            var stream = client.GetStream();
+            stream.ReadTimeout = 1000;
+            AuthenticateInputClient(stream, key);
+            forwarder = client;
+            client = null;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or InvalidOperationException or AggregateException)
+        {
+            return false;
+        }
+        finally { client?.Dispose(); }
+    }
+
+    static bool PeerClosed(TcpClient client)
+    {
+        try { return client.Client.Poll(0, SelectMode.SelectRead) && client.Available == 0; }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { return true; }
     }
 
     static bool TryReadFresh(DateTime now, out byte[]? jpeg)

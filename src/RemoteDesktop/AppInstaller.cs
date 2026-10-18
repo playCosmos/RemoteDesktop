@@ -15,7 +15,11 @@ public static class AppInstaller
         if (!AppInstall.CanInstall(source)) throw new InvalidOperationException(UiText.InstallNeedsPublished());
         Directory.CreateDirectory(destinationDirectory);
         var destination = AppInstall.Executable(destinationDirectory);
-        File.Copy(source, destination, true);
+        for (var attempt = 0; ; attempt++)
+        {
+            try { File.Copy(source, destination, true); break; }
+            catch (IOException ex) when (attempt < 20 && ((ex.HResult & 0xFFFF) == 32 || (ex.HResult & 0xFFFF) == 33)) { Thread.Sleep(250); }
+        }
         return destination;
     }
 
@@ -31,13 +35,27 @@ public static class AppInstaller
     public static void InstallMachineHere()
     {
         var source = Environment.ProcessPath ?? throw new InvalidOperationException(UiText.InstallNeedsPublished());
-        var destination = CopyExecutable(source, AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));
-        CreateShortcut(AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)), destination);
-        ClearUserAutostart();
-        InstallService(destination);
-        SecureAttention.TryEnsurePolicy();
-        HostFirewall.TryApplySavedPort(destination);
-        StartService();
+        var machineDirectory = AppInstall.MachineDirectory(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
+        var restartService = File.Exists(AppInstall.Executable(machineDirectory)) && StopServiceForUpdate();
+        try
+        {
+            var destination = CopyExecutable(source, machineDirectory);
+            CreateShortcut(AppInstall.ShortcutPath(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)), destination);
+            ClearUserAutostart();
+            InstallService(destination);
+            SecureAttention.TryEnsurePolicy();
+            HostFirewall.TryApplySavedPort(destination);
+            StartService();
+        }
+        catch
+        {
+            if (restartService)
+            {
+                try { StartService(); }
+                catch (Exception) { }
+            }
+            throw;
+        }
     }
 
     public static void UninstallMachineHere()
@@ -125,6 +143,43 @@ public static class AppInstaller
     const uint ErrorNormal = 1;
     const uint StopControl = 1;
     const uint Stopped = 1;
+
+    static bool StopServiceForUpdate()
+    {
+        var manager = OpenSCManager(null, null, ManagerAccess);
+        if (manager == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            var service = OpenService(manager, AppInstall.ServiceName, ServiceAccess);
+            if (service == 0)
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error == 1060) return false;
+                throw new Win32Exception(error);
+            }
+            try
+            {
+                var status = new ServiceStatus();
+                if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (status.CurrentState == Stopped) return false;
+                if (!ControlService(service, StopControl, ref status))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    if (error != 1062) throw new Win32Exception(error);
+                }
+                var until = DateTime.UtcNow.AddSeconds(12);
+                while (DateTime.UtcNow < until)
+                {
+                    if (!QueryServiceStatus(service, ref status)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    if (status.CurrentState == Stopped) return true;
+                    Thread.Sleep(200);
+                }
+                throw new TimeoutException("기존 Windows 서비스를 중지하지 못했습니다.");
+            }
+            finally { CloseServiceHandle(service); }
+        }
+        finally { CloseServiceHandle(manager); }
+    }
 
     static void InstallService(string executable)
     {

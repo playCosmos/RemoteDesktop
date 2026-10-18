@@ -1,4 +1,4 @@
-# Personal Remote Desktop 0.9.142
+# Personal Remote Desktop 0.9.143
 
 개인용 Windows 서버·클라이언트 통합 앱과 Android 클라이언트입니다. 서버에 저장한 비밀번호로 수락 없이 접속합니다.
 
@@ -6,8 +6,8 @@
 
 ## 실행 파일
 
-- Windows 통합 실행 파일: `artifacts/0.9.142/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
-- Android: `artifacts/0.9.142/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
+- Windows 통합 실행 파일: `artifacts/0.9.143/windows-portable/RemoteDesktop.exe` — 설치 없이 바로 실행하는 단일 EXE. 서버·클라이언트 기능을 모두 포함합니다.
+- Android: `artifacts/0.9.143/android/RemoteDesktop-debug.apk` — 접속 중에는 화면을 끝까지 쓰고, 조작은 오른쪽 아래 메뉴의 반투명 하단 바에서 합니다. 다른 앱으로 나갔다가 돌아와도 접속 화면으로 떨어지지 않고 세션을 이어서 붙습니다.
 
 Windows는 별도 설치 과정 없이 실행합니다. 같은 실행 파일에서 **접속 받기**와 원격 클라이언트를 모두 사용할 수 있습니다. 저장된 서버 비밀번호가 있으면 앱을 열 때 접속 대기를 시작합니다. 창을 닫으면 트레이에 남고 접속 대기는 계속됩니다. 트레이의 **종료**를 눌러야 앱이 끝납니다. 접속 대기를 시작하는 동안 같은 버튼을 다시 누르면 포트가 열리기 전에 취소됩니다.
 
@@ -23,7 +23,7 @@ Windows 클라이언트는 서버 지문 입력란을 비워 첫 연결하면 OP
 ./build.ps1 -FrameworkDependent
 ```
 
-프레임워크 종속 산출물은 `artifacts/0.9.142/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
+프레임워크 종속 산출물은 `artifacts/0.9.143/windows-framework-dependent/RemoteDesktop.exe`에 생성되며 대상 PC에 런타임 설치가 필요합니다. 기본 자체 포함 압축본은 설치 없이 실행되지만 첫 실행 시 내부 런타임을 임시 폴더에 풀기 때문에 시작이 조금 느리고 실행 중 디스크 공간을 추가로 사용합니다.
 
 ## 접속
 
@@ -33,7 +33,7 @@ Windows 클라이언트는 서버 지문 입력란을 비워 첫 연결하면 OP
 
 Windows 서버 TLS 키는 Schannel이 사용할 수 있도록 현재 사용자 프로필의 임시 키 저장소에 불러옵니다. 앱을 닫으면 임시 키가 정리되며 관리자 권한이나 Windows 서비스 등록은 필요하지 않습니다.
 
-포트 사용 중, 잘못된 포트, 네트워크 권한 문제로 접속 대기가 실패하면 상단 상태 표시줄에 원인을 표시합니다. 이전 버전에서 Windows 서비스가 등록된 PC라면 새 앱 실행 전에 관리자 PowerShell에서 기존 서비스를 한 번 제거해야 합니다. `sc.exe stop PersonalRemoteDesktop` 후 `sc.exe delete PersonalRemoteDesktop`을 실행하세요. 이전 버전에서 로그인 자동 실행을 켰다면 현재 사용자 PowerShell에서 `Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Personal Remote Desktop' -ErrorAction SilentlyContinue`도 실행하세요. 서버 설정은 `%LOCALAPPDATA%\PersonalRemoteDesktop`에 그대로 두면 됩니다.
+포트 사용 중, 잘못된 포트, 네트워크 권한 문제로 접속 대기가 실패하면 상단 상태 표시줄에 원인을 표시합니다. 전체 사용자 설치를 새 버전으로 바꾸려면 기존 앱을 트레이 메뉴에서 **종료**한 뒤 새 실행 파일을 열고 다시 설치하세요. 설치 도중 기존 서비스가 중지되고 새 실행 파일로 교체된 다음 다시 시작됩니다. 서비스를 중지하지 못하면 기존 파일은 교체하지 않습니다. 아주 오래된 버전의 로그인 자동 실행 값이 남아 있다면 현재 사용자 PowerShell에서 `Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'Personal Remote Desktop' -ErrorAction SilentlyContinue`를 실행할 수 있습니다. 서버 설정은 `%LOCALAPPDATA%\PersonalRemoteDesktop`에 그대로 두면 됩니다.
 
 클라이언트에 서버 주소와 포트를 각각 입력하고 비밀번호를 입력합니다. Windows에서는 서버 SHA-256 지문을 비우면 비밀번호로 서버 키를 처음 확인하고 지문을 저장합니다. 지문을 직접 입력한 경우에는 해당 지문을 고정해 검증합니다. Android는 지문 입력이 필요합니다. 기본 포트는 45831입니다. 비밀번호 입력란에서 Enter를 누르면 접속 버튼과 같은 동작을 합니다. 마지막 주소·포트·지문·선택 모니터를 기억하며 클라이언트 비밀번호는 디스크에 저장하지 않습니다. Android는 다른 앱으로 나갔다가 다시 붙기 위해 그 실행 동안만 비밀번호를 메모리에 두고, 접속을 종료하거나 프로세스가 끝나면 지웁니다.
 
@@ -113,7 +113,7 @@ Android의 파일 관리 앱마다 클립보드 지원 방식이 달라 Windows 
 - Windows 화면 클릭 후 키 입력을 서버로 직접 전달합니다. 한/영 키 또는 한/영 버튼을 사용할 수 있으며 서버에 한국어 IME가 설치되어 있어야 합니다.
 - 원격 화면에 포커스가 있으면 Alt+Tab, Alt+F4, Win 조합, Ctrl+Esc, Ctrl+Shift+Esc, Print Screen을 원격 PC에 우선 전달합니다. Ctrl+Alt+Del은 Windows가 가로채므로 키보드로 전달하지 않습니다. 조작 메뉴의 Ctrl+Alt+Del로 보내고, 모든 사용자 설치가 아니면 안내만 표시됩니다.
 - Android는 기본 키보드로 한글을 조합하고 확정된 문자열을 전송 버튼 없이 전달합니다. 조합 중 문자열은 화면 위 상태 표시에 남아 있고, 확정되면 곧 사라집니다.
-- Windows 원격 세션은 기본적으로 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. 모든 사용자 설치의 Windows 서비스가 켜져 있으면 UAC 보안 화면도 상대 PC에 보이고, 그 화면으로 조작이 전달됩니다. Android도 보안 화면이 보이거나, 설치가 없어 그 화면이 보이지 않으면 화면 아래에 안내를 남겨 둡니다. 조작 바가 열려 있는 동안에는 그 안내를 숨깁니다. Ctrl+Alt+Del은 그 서비스가 켜져 있을 때 조작 메뉴에서 보낼 수 있습니다. [Microsoft SendSAS 문서](https://learn.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas)
+- Windows 원격 세션은 기본적으로 로그인한 사용자의 일반 데스크톱을 대상으로 합니다. 모든 사용자 설치의 Windows 서비스가 켜져 있으면 UAC 보안 화면도 상대 PC에 보이고, 그 화면으로 조작이 전달됩니다. 중계 프레임과 입력 채널은 현재 로그인한 사용자에게만 열리고, 로그오프나 사용자 전환 시 폐기합니다. Android도 보안 화면이 보이거나, 설치가 없어 그 화면이 보이지 않으면 화면 아래에 안내를 남겨 둡니다. 조작 바가 열려 있는 동안에는 그 안내를 숨깁니다. Ctrl+Alt+Del은 그 서비스가 켜져 있을 때 조작 메뉴에서 보낼 수 있습니다. [Microsoft SendSAS 문서](https://learn.microsoft.com/en-us/windows/win32/api/sas/nf-sas-sendsas)
 
 ## 세션 툴바
 
@@ -148,7 +148,7 @@ Android 화면에서 두 손가락으로 핀치 확대·축소할 수 있습니�
 
 Windows는 .NET SDK 10, Android는 SDK Platform 35 / Build Tools 35.0.0 / JDK가 필요합니다. 통합 빌드에서 `-AndroidSdk`로 Android SDK 경로를 지정할 수 있고, 하위 스크립트는 `android/build.ps1 -Sdk ... -Jdk ...`로도 실행할 수 있습니다.
 
-통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. 양방향 파일·텍스트 전송, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, 모니터 캡처, H.264 실패 시 JPEG 전환, 끊김 줄이기 설정을 검증합니다.
+통합 검사는 실제 HTTPS와 파일 IO를 사용합니다. OS 클립보드는 테스트 대역으로 대체하므로 사용자의 클립보드를 읽거나 덮어쓰지 않습니다. 양방향 파일·텍스트 전송, 한글·줄바꿈·긴 텍스트, 해시 오류, 미완료 배치, 취소, 출처 중복 방지, 새 클립보드 보존, 한글·중복 파일명, 세션 만료, 모니터 캡처, H.264 실패 시 JPEG 전환, UAC 중계 ACL·인증, 끊김 줄이기 설정을 검증합니다.
 
 Windows 빌드와 Android APK 생성·서명 검증을 수행합니다. 실제 탐색기의 붙여넣기와 Android 앱 간 URI 공유·붙여넣기, 실제 IME 입력, 1GiB·장시간 전송은 별도 실기 검증이 필요합니다. 현재 환경에는 연결된 Android 기기가 없습니다. 빌드 도구의 NuGet 취약성 정보 조회 네트워크 경고와 JDK 호환 경고가 발생할 수 있습니다.
 

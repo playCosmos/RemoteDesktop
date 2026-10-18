@@ -130,21 +130,23 @@ jobs:
         timeout-minutes: 1
         run: ./tests/WindowsSignToolTimeoutSmoke.ps1
 
-      - name: Test Windows Authenticode signing with a temporary certificate
+      - name: Prepare temporary Windows signing certificate
         shell: pwsh
-        timeout-minutes: 10
+        timeout-minutes: 3
         run: |
           $ErrorActionPreference = 'Stop'
           $pfxPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.pfx'
           $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
-          $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
+          $thumbprintPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.thumbprint'
+          $subject = 'CN=PRD CI Code Signing Test'
+          if (Get-ChildItem Cert:\CurrentUser\My | Where-Object Subject -eq $subject) { throw 'The temporary code-signing subject already exists on this runner.' }
           $password = [guid]::NewGuid().ToString('N') + '!A9'
           $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
           $certificate = $null
-          $thumbprint = $null
           try {
-            $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=PRD CI Code Signing Test' -CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(3)
+            $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject $subject -CertStoreLocation 'Cert:\CurrentUser\My' -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(3)
             $thumbprint = $certificate.Thumbprint
+            Set-Content -LiteralPath $thumbprintPath -Value $thumbprint -NoNewline
             Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
             Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
             Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
@@ -152,32 +154,55 @@ jobs:
             $certificate = $null
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force
 
-            $env:WINDOWS_SIGNING_PFX = $pfxPath
-            $env:WINDOWS_SIGNING_PFX_PASSWORD = $password
-            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $null
-            ./build.ps1 -WindowsSign -WindowsNoTimestamp -WindowsSigningPfx $pfxPath -OutputRoot $outputRoot
-
-            $signedExe = Join-Path $outputRoot 'windows-portable/RemoteDesktop.exe'
-            if (!(Test-Path -LiteralPath $signedExe -PathType Leaf)) { throw 'The signed portable executable was not produced.' }
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_SIGNING_PFX=$pfxPath"
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value "WINDOWS_SIGNING_PFX_PASSWORD=$password"
+            Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_TIMESTAMP_URL='
+            Write-Output 'Temporary code-signing certificate prepared.'
           }
           finally {
-            $env:WINDOWS_SIGNING_PFX = $null
-            $env:WINDOWS_SIGNING_PFX_PASSWORD = $null
-            $env:WINDOWS_SIGNING_TIMESTAMP_URL = $null
-            if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force }
-            if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force }
             if ($certificate) { $certificate.Dispose() }
             if ($securePassword) { $securePassword.Dispose() }
-            if (Test-Path -LiteralPath $pfxPath) { Remove-Item -LiteralPath $pfxPath -Force }
-            if (Test-Path -LiteralPath $certificatePath) { Remove-Item -LiteralPath $certificatePath -Force }
-            if (Test-Path -LiteralPath $outputRoot) {
-              $runnerRoot = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
-              if (!$runnerRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $runnerRoot += [System.IO.Path]::DirectorySeparatorChar }
-              $resolvedOutput = [System.IO.Path]::GetFullPath($outputRoot)
-              if (!$resolvedOutput.StartsWith($runnerRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'Signing test output escaped RUNNER_TEMP.' }
-              Remove-Item -LiteralPath $resolvedOutput -Recurse -Force
-            }
           }
+
+      - name: Sign and verify a Windows executable with the temporary certificate
+        shell: pwsh
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfxPath = $env:WINDOWS_SIGNING_PFX
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
+          if ([string]::IsNullOrWhiteSpace($pfxPath) -or !(Test-Path -LiteralPath $pfxPath -PathType Leaf)) { throw 'The temporary signing PFX was not prepared.' }
+          ./build.ps1 -WindowsSign -WindowsNoTimestamp -WindowsSigningPfx $pfxPath -WindowsSignToolTimeoutSeconds 60 -OutputRoot $outputRoot
+          $signedExe = Join-Path $outputRoot 'windows-portable/RemoteDesktop.exe'
+          if (!(Test-Path -LiteralPath $signedExe -PathType Leaf)) { throw 'The signed portable executable was not produced.' }
+          Write-Output 'Temporary Authenticode signing and verification passed.'
+
+      - name: Clean up temporary Windows signing material
+        if: always()
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.pfx'
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.cer'
+          $thumbprintPath = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-test.thumbprint'
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'prd-windows-signing-output'
+          $thumbprint = if (Test-Path -LiteralPath $thumbprintPath) { (Get-Content -LiteralPath $thumbprintPath -Raw).Trim() } else { $null }
+          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\My\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -DeleteKey -Force }
+          if ($thumbprint -and (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint")) { Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$thumbprint" -Force }
+          if ($certificatePath -and (Test-Path -LiteralPath $certificatePath)) { Remove-Item -LiteralPath $certificatePath -Force }
+          if ($pfxPath -and (Test-Path -LiteralPath $pfxPath)) { Remove-Item -LiteralPath $pfxPath -Force }
+          if (Test-Path -LiteralPath $thumbprintPath) { Remove-Item -LiteralPath $thumbprintPath -Force }
+          if (Test-Path -LiteralPath $outputRoot) {
+            $runnerRoot = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+            if (!$runnerRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $runnerRoot += [System.IO.Path]::DirectorySeparatorChar }
+            $resolvedOutput = [System.IO.Path]::GetFullPath($outputRoot)
+            if ($resolvedOutput.StartsWith($runnerRoot, [System.StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath $resolvedOutput -Recurse -Force }
+            else { Write-Warning 'Signing test output escaped RUNNER_TEMP; retaining it for inspection.' }
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_PFX='
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_PFX_PASSWORD='
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'WINDOWS_SIGNING_TIMESTAMP_URL='
 
       - name: Upload Windows and Android build artifacts
         uses: actions/upload-artifact@v7

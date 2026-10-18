@@ -13,6 +13,9 @@ internal sealed class InputInjector
     public string? ApplyCore(InputEvent e)
     {
         if (e.Kind == SecureAttention.Kind) return Attention();
+        char[]? textCodeUnits = null;
+        if (e.Kind == "text" && !UnicodeInputText.TryGetCodeUnits(e.Text, out textCodeUnits))
+            throw new ArgumentException("Invalid text");
         if (!SecureDesktop.OwnsDesktop && SecureDesktop.Enabled)
         {
             var view = SecureDesktop.CachedObservation(DateTime.UtcNow).View;
@@ -47,8 +50,7 @@ internal sealed class InputInjector
                     { if (e.Down) keys.Add(e.Code); else keys.Remove(e.Code); }
                     break;
                 case "text":
-                    if (e.Text is null || e.Text.Length > 4096) throw new ArgumentException("Invalid text");
-                    foreach (var c in e.Text) { Key(0, c, 4); Key(0, c, 6); }
+                    foreach (var codeUnit in textCodeUnits!) { Key(0, codeUnit, 4); Key(0, codeUnit, 6); }
                     break;
                 case "release": ReleaseCore(); break;
                 default: throw new ArgumentException("Unknown input");

@@ -118,6 +118,19 @@ Check(UiText.SecureDesktopNotice("live") == "보안 화면 · 클릭과 키는 �
 Check(UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("live")) && UiText.ShowSecureDesktop(false, UiText.SecureDesktopNotice("hidden")) && !UiText.ShowSecureDesktop(true, UiText.SecureDesktopNotice("live")) && !UiText.ShowSecureDesktop(false, null) && !UiText.ShowSecureDesktop(false, ""), "the secure desktop notice stays on the picture until the controls open");
 Check(SecureDesktop.Decide(false, true) == SecureView.Off && SecureDesktop.Decide(true, false) == SecureView.Hidden && SecureDesktop.Decide(true, true) == SecureView.Live, "the secure desktop is shown only when a fresh frame exists");
 Check(SecureDesktop.ShouldEnable(true, true, true) && !SecureDesktop.ShouldEnable(false, true, true) && !SecureDesktop.ShouldEnable(true, false, true) && !SecureDesktop.ShouldEnable(true, true, false), "secure desktop gating requires the setting, a running service, and its endpoint");
+var unicodeInputType = typeof(Desktop).Assembly.GetType("RemoteDesktop.UnicodeInputText", throwOnError: true)!;
+var unicodeCodeUnitsMethod = unicodeInputType.GetMethod("TryGetCodeUnits", BindingFlags.Static | BindingFlags.NonPublic)!;
+object?[] validUnicodeArgs = ["A😀Z", null];
+var validUnicodeText = (bool)unicodeCodeUnitsMethod.Invoke(null, validUnicodeArgs)!;
+var unicodeCodeUnits = (char[])validUnicodeArgs[1]!;
+object?[] unmatchedHighArgs = ["x\uD800", null];
+object?[] unmatchedLowArgs = ["\uDC00", null];
+object?[] maxUnicodeArgs = [new string('x', 4096), null];
+object?[] excessiveUnicodeArgs = [new string('x', 4097), null];
+var maxUnicodeAccepted = (bool)unicodeCodeUnitsMethod.Invoke(null, maxUnicodeArgs)!;
+Check(validUnicodeText && unicodeCodeUnits.SequenceEqual(new[] { 'A', '\uD83D', '\uDE00', 'Z' })
+    && !(bool)unicodeCodeUnitsMethod.Invoke(null, unmatchedHighArgs)! && !(bool)unicodeCodeUnitsMethod.Invoke(null, unmatchedLowArgs)!
+    && maxUnicodeAccepted && ((char[])maxUnicodeArgs[1]!).Length == 4096 && !(bool)unicodeCodeUnitsMethod.Invoke(null, excessiveUnicodeArgs)!, "text input preserves supplementary surrogate order, rejects unmatched surrogates, and keeps the 4096-code-unit limit");
 SecureDesktop.Configure(false);
 var injectorType = typeof(Desktop).Assembly.GetType("RemoteDesktop.InputInjector", throwOnError: true)!;
 var applyInput = injectorType.GetMethod("ApplyCore", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;

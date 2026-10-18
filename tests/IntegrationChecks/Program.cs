@@ -19,6 +19,8 @@ if (args.Length == 2 && args[0] == "--secure-pipe-client")
     _ = pipeClient.ReadByte();
     Environment.Exit(0);
 }
+if (args.Length == 1 && args[0] == "--hang-process-test")
+    new ManualResetEventSlim().Wait();
 
 System.Windows.Forms.Application.SetHighDpiMode(System.Windows.Forms.HighDpiMode.PerMonitorV2);
 var passed = 0;
@@ -363,6 +365,12 @@ var firewallNl = ((char)10).ToString();
 var firewallShown = "Rule Name:                            Personal Remote Desktop" + firewallNl + "Enabled:                              Yes" + firewallNl + "Direction:                            In" + firewallNl + "Profiles:                             Domain,Private" + firewallNl + "Protocol:                             TCP" + firewallNl + "LocalPort:                            " + firewallPlan.Port + firewallNl + "Program:                              " + firewallPlan.Program + firewallNl + "Action:                               Allow" + firewallNl;
 Check(HostFirewall.Decide(firewallPlan, HostFirewall.ParseShow(firewallShown)) == HostFirewall.Choice.Keep && HostFirewall.Decide(firewallPlan, HostFirewall.ParseShow(firewallShown.Replace("Domain,Private", "Public"))) == HostFirewall.Choice.Replace && HostFirewall.ParseShow("No rules match the specified criteria.") == HostFirewall.Absent && HostFirewall.ParseShow("규칙") == null, "a firewall listing is kept only when the shown rule already matches");
 Check(UiText.FirewallOpened(45831) == "방화벽에서 포트 45831 수신을 허용했습니다." && UiText.FirewallDeclined() == "방화벽 허용을 취소했습니다. 접속 대기는 계속됩니다." && UiText.FirewallLeft() == "방화벽은 그대로입니다. 같은 네트워크에서 접속이 안 되면 이 포트를 허용해 주세요." && UiText.FirewallRemoveFailed() == "앱의 방화벽 규칙을 확인하거나 제거하지 못했습니다." && !UiText.IsProblem(UiText.FirewallOpened(45831)) && !UiText.IsProblem(UiText.FirewallDeclined()) && !UiText.IsProblem(UiText.FirewallLeft()) && UiText.IsProblem(UiText.FirewallRemoveFailed()), "firewall removal failures are explained as errors");
+using (var hangingProcess = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--hang-process-test") { UseShellExecute = false, CreateNoWindow = true }) ?? throw new InvalidOperationException("Could not start the firewall timeout child process."))
+{
+    var waitStarted = Stopwatch.StartNew();
+    var exitedInTime = HostFirewall.WaitForProcess(hangingProcess, TimeSpan.FromMilliseconds(250), terminateOnTimeout: true);
+    Check(!exitedInTime && hangingProcess.WaitForExit(1000) && waitStarted.Elapsed < TimeSpan.FromSeconds(4), "a firewall helper that exceeds its deadline is terminated without waiting indefinitely");
+}
 Check(VideoCodec.Negotiate("h264", true) == "h264" && VideoCodec.Negotiate("h264", false) == "jpeg" && VideoCodec.Negotiate(null, true) == "jpeg" && VideoCodec.Negotiate("jpeg", true) == "jpeg", "h264 is used only when the client asks and the encoder is ready");
 Check(VideoCodec.Bitrate(55, 1920, 1080) == 4_000_000 && VideoCodec.Bitrate(30, 1920, 1080) == 1_500_000 && VideoCodec.Bitrate(80, 1920, 1080) == 8_000_000 && VideoCodec.Bitrate(55, 960, 540) == 1_000_000 && VideoCodec.Bitrate(90, 16, 16) == 400_000, "video bitrate follows the picture size and quality");
 var held = VideoCodec.Pace(75, 75, 10, 15, 0, 0, false);

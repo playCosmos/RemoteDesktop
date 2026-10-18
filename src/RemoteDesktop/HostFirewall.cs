@@ -15,6 +15,8 @@ public static class HostFirewall
     public const int Tcp = 6;
     public const int Inbound = 1;
     public const int Allow = 1;
+    private static readonly TimeSpan NetshTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ElevatedFirewallTimeout = TimeSpan.FromMinutes(2);
 
     public enum Choice
     {
@@ -104,7 +106,7 @@ public static class HostFirewall
             if (IsElevated()) return Apply(plan) ? UiText.FirewallOpened(port) : UiText.FirewallLeft();
             using var elevated = StartElevated(plan);
             if (elevated == null) return UiText.FirewallLeft();
-            elevated.WaitForExit();
+            if (!WaitForProcess(elevated, ElevatedFirewallTimeout, terminateOnTimeout: true)) return UiText.FirewallLeft();
             return elevated.ExitCode == 0 ? UiText.FirewallOpened(port) : UiText.FirewallLeft();
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -188,8 +190,30 @@ public static class HostFirewall
     {
         using var process = Process.Start(Netsh(arguments));
         if (process == null) return false;
-        process.WaitForExit();
+        if (!WaitForProcess(process, NetshTimeout, terminateOnTimeout: true)) return false;
         return process.ExitCode == 0;
+    }
+
+    public static bool WaitForProcess(Process process, TimeSpan timeout, bool terminateOnTimeout)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        var milliseconds = (int)Math.Clamp(Math.Ceiling(timeout.TotalMilliseconds), 1, int.MaxValue);
+        if (process.WaitForExit(milliseconds)) return true;
+        if (process.HasExited) return true;
+        Trace.TraceWarning("A firewall helper process exceeded its {0} ms deadline.", milliseconds);
+        if (terminateOnTimeout)
+        {
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException) { }
+            catch (Win32Exception error) { Trace.TraceWarning("Timed-out firewall process could not be terminated: {0}", error.NativeErrorCode); }
+            try { _ = process.WaitForExit(2000); }
+            catch (InvalidOperationException) { }
+        }
+        return false;
     }
 
     static string? ReadShow()
@@ -201,10 +225,16 @@ public static class HostFirewall
             start.RedirectStandardError = true;
             using var process = Process.Start(start);
             if (process == null) return null;
-            var output = process.StandardOutput.ReadToEnd();
-            process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            return output;
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            if (!WaitForProcess(process, NetshTimeout, terminateOnTimeout: true))
+            {
+                try { Task.WhenAll(output, error).Wait(TimeSpan.FromSeconds(2)); }
+                catch (Exception) { }
+                return null;
+            }
+            Task.WhenAll(output, error).GetAwaiter().GetResult();
+            return output.GetAwaiter().GetResult();
         }
         catch (Exception)
         {

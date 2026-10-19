@@ -123,6 +123,9 @@ public sealed class Desktop
     public CapturedFrame CaptureDetailed(string? display = null, long quality = 55, double viewX = 0, double viewY = 0, double viewWidth = 1, double viewHeight = 1, int fps = 15, bool localCursor = false)
         => capture.CaptureDetailed(display, quality, viewX, viewY, viewWidth, viewHeight, fps, localCursor);
 
-    public string? Apply(InputEvent e) => DesktopThread.Invoke(() => input.ApplyCore(e));
-    public void Release() => DesktopThread.Invoke(input.ReleaseCore);
+    public string? Apply(InputEvent e, CancellationToken cancellationToken = default)
+        => e.Kind == "release"
+            ? DesktopThread.InvokePriority(() => input.ApplyCore(e), cancellationToken)
+            : DesktopThread.Invoke(() => input.ApplyCore(e), cancellationToken);
+    public void Release() => DesktopThread.InvokeCritical(input.ReleaseCore);
 }

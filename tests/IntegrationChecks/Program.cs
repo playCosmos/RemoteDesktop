@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -30,6 +31,16 @@ if (args.Length == 1 && args[0] == "--hang-process-test")
 System.Windows.Forms.Application.SetHighDpiMode(System.Windows.Forms.HighDpiMode.PerMonitorV2);
 var passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
+async Task<bool> WaitForQueueCount(Func<int> count, int expected, TimeSpan timeout)
+{
+    var until = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < until)
+    {
+        if (count() == expected) return true;
+        await Task.Delay(10);
+    }
+    return count() == expected;
+}
 StringContent Json(string json) => new(json, System.Text.Encoding.UTF8, "application/json");
 
 var loginThrottle = new LoginThrottle();
@@ -61,6 +72,55 @@ try { await RemoteResponseBounds.ReadBoundedAsync(new MemoryStream([1, 2, 3, 4, 
 catch (IOException) { Check(true, "remote response stops at its streaming cap"); }
 Check(FrameLimits.IsSupported(7680, 4320) && !FrameLimits.IsSupported(8192, 8192), "frame pixel bounds support 8K displays and reject excessive decoded area");
 Check(H264SpsLimitsCheck.Run() == 3, "H.264 SPS bounds are checked before decoder input");
+var queueBlockEntered = new ManualResetEventSlim();
+var queueBlockRelease = new ManualResetEventSlim();
+var queueWorkerBlock = Task.Factory.StartNew(() => DesktopThread.Invoke(() =>
+{
+    queueBlockEntered.Set();
+    if (!queueBlockRelease.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("desktop queue test did not release its worker");
+}), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+Check(queueBlockEntered.Wait(TimeSpan.FromSeconds(2)), "desktop dispatcher can enter a blocking input callback");
+var queueOrder = new ConcurrentQueue<string>();
+using (var staleToken = new CancellationTokenSource())
+{
+    var staleCall = Task.Factory.StartNew(
+        () => DesktopThread.Invoke(() => queueOrder.Enqueue("stale"), staleToken.Token),
+        CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    Check(await WaitForQueueCount(() => DesktopThread.PendingCount, 1, TimeSpan.FromSeconds(2)), "desktop dispatcher records a pending cancellable input");
+    staleToken.Cancel();
+    var staleCallerCanceled = false;
+    try { await staleCall.WaitAsync(TimeSpan.FromSeconds(2)); }
+    catch (OperationCanceledException) { staleCallerCanceled = true; }
+    Check(staleCallerCanceled, "session cancellation releases the waiting input caller promptly");
+
+    var normalCalls = Enumerable.Range(0, DesktopThread.QueueCapacity - 1)
+        .Select(_ => Task.Factory.StartNew(
+            () => DesktopThread.Invoke(() => queueOrder.Enqueue("normal")),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default))
+        .ToArray();
+    Check(await WaitForQueueCount(() => DesktopThread.PendingCount, DesktopThread.QueueCapacity, TimeSpan.FromSeconds(3)), "desktop dispatcher holds no more than its configured bounded backlog");
+    var overflowRejected = false;
+    var overflowCall = Task.Factory.StartNew(
+        () => DesktopThread.Invoke(() => queueOrder.Enqueue("overflow")),
+        CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    try { await overflowCall.WaitAsync(TimeSpan.FromSeconds(2)); }
+    catch (DesktopInputQueueFullException) { overflowRejected = true; }
+    Check(overflowRejected, "desktop dispatcher rejects additional input after its bounded queue fills");
+
+    var releaseCall = Task.Factory.StartNew(
+        () => DesktopThread.InvokePriority(() => queueOrder.Enqueue("release")),
+        CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+    Check(await WaitForQueueCount(() => DesktopThread.PendingPriorityCount, 1, TimeSpan.FromSeconds(2)), "input release enters the priority queue");
+    queueBlockRelease.Set();
+    await queueWorkerBlock.WaitAsync(TimeSpan.FromSeconds(2));
+    await Task.WhenAll(normalCalls).WaitAsync(TimeSpan.FromSeconds(5));
+    await releaseCall.WaitAsync(TimeSpan.FromSeconds(2));
+    Check(queueOrder.TryPeek(out var firstQueued) && firstQueued == "release" && !queueOrder.Contains("stale"), "release runs before pending input and canceled session work is discarded");
+}
+queueBlockRelease.Set();
+await queueWorkerBlock;
+queueBlockEntered.Dispose();
+queueBlockRelease.Dispose();
 using var currentIdentity = WindowsIdentity.GetCurrent();
 var securityViewerSid = currentIdentity.User!;
 var processSddl = SecureDesktop.BuildUiProcessSddl(securityViewerSid);

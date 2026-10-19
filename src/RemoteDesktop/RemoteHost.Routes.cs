@@ -242,7 +242,9 @@ public sealed partial class RemoteHost
             var input = await ReadSmall<InputEvent>(c) ?? throw new ArgumentException();
             authenticated.RequestSource.Token.ThrowIfCancellationRequested();
             var applyStarted = Stopwatch.GetTimestamp();
-            var notice = desktop.Apply(input);
+            string? notice;
+            try { notice = desktop.Apply(input, authenticated.RequestSource.Token); }
+            catch (DesktopInputQueueFullException) { return Results.StatusCode(StatusCodes.Status503ServiceUnavailable); }
             var applyTicks = Stopwatch.GetTimestamp() - applyStarted;
             Interlocked.Add(ref inputApplyTicks, applyTicks);
             var requests = Interlocked.Increment(ref inputRequestCount);
